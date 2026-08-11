@@ -9,6 +9,8 @@ local control = {
     maxFlowStep = 100,
     adjustmentInterval = 2,
     commandSamples = 2,
+    spoolDisengageRpm = 1500,
+    spoolEngageRpm = 1775,
 }
 
 local function evaluate(memory, name, rpm, flowSetting, flowLimit, extra)
@@ -19,6 +21,7 @@ local function evaluate(memory, name, rpm, flowSetting, flowLimit, extra)
         flowRate = flowSetting,
         flowRateMax = flowSetting,
         flowRateLimit = flowLimit,
+        inductorEngaged = true,
     }
     for key, value in pairs(extra or {}) do turbine[key] = value end
     return governor.evaluate(memory, turbine, control, {})
@@ -35,19 +38,17 @@ do
     local first = evaluate(memory, "automatic", 1700, 1000, 2000)
     local verifying = governor.apply(memory, {
         name = "automatic", governor = first,
-    }, control, { now = 9 }, function(_, flow)
-        calls = calls + 1
-        return true, flow
-    end)
+    }, control, { now = 9 }, {
+        setFlowLimit = function(_, flow) calls = calls + 1 return true, flow end,
+    })
     equal(calls, 0, "unconfirmed write count")
     equal(verifying.actuatorState, "VERIFYING", "unconfirmed actuator state")
     local plan = evaluate(memory, "automatic", 1700, 1000, 2000)
     local applied = governor.apply(memory, {
         name = "automatic", governor = plan,
-    }, control, { now = 10 }, function(_, flow)
-        calls = calls + 1
-        return true, flow
-    end)
+    }, control, { now = 10 }, {
+        setFlowLimit = function(_, flow) calls = calls + 1 return true, flow end,
+    })
     equal(calls, 1, "automatic write count")
     equal(applied.actuatorState, "APPLIED", "automatic actuator state")
     equal(applied.appliedFlow, 1100, "automatic applied flow")
@@ -57,14 +58,14 @@ do
     local memory = governor.new()
     local first = evaluate(memory, "rate-limited", 1700, 1000, 2000)
     governor.apply(memory, { name = "rate-limited", governor = first }, control,
-        { now = 9 }, function(_, flow) return true, flow end)
+        { now = 9 }, { setFlowLimit = function(_, flow) return true, flow end })
     local second = evaluate(memory, "rate-limited", 1700, 1000, 2000)
     governor.apply(memory, { name = "rate-limited", governor = second }, control,
-        { now = 10 }, function(_, flow) return true, flow end)
+        { now = 10 }, { setFlowLimit = function(_, flow) return true, flow end })
     local third = evaluate(memory, "rate-limited", 1700, 1100, 2000)
     local writes = 0
     local result = governor.apply(memory, { name = "rate-limited", governor = third }, control,
-        { now = 11 }, function(_, flow) writes = writes + 1 return true, flow end)
+        { now = 11 }, { setFlowLimit = function(_, flow) writes = writes + 1 return true, flow end })
     equal(writes, 0, "rate-limited write count")
     equal(result.actuatorState, "WAITING", "rate-limited state")
 end
@@ -74,7 +75,7 @@ do
     evaluate(memory, "fault", 1700, 1000, 2000)
     local plan = evaluate(memory, "fault", 1700, 1000, 2000)
     local result = governor.apply(memory, { name = "fault", governor = plan }, control,
-        { now = 10 }, function() return false, nil, "rejected" end)
+        { now = 10 }, { setFlowLimit = function() return false, nil, "rejected" end })
     equal(result.actuatorState, "FAULT", "failed actuator state")
     equal(result.actuatorError, "rejected", "failed actuator reason")
 end
@@ -85,7 +86,9 @@ do
     local plan = evaluate(memory, "maintenance", 1700, 1000, 2000)
     local writes = 0
     local result = governor.apply(memory, { name = "maintenance", governor = plan }, control,
-        { now = 10, maintenance = true }, function() writes = writes + 1 return true end)
+        { now = 10, maintenance = true }, {
+            setFlowLimit = function() writes = writes + 1 return true end,
+        })
     equal(writes, 0, "maintenance write count")
     equal(result.actuatorState, "PAUSED", "maintenance actuator state")
 end
@@ -115,6 +118,49 @@ end
 
 do
     local memory = governor.new()
+    local first = evaluate(memory, "spooling", 288, 2000, 2000,
+        { inductorEngaged = true })
+    equal(first.state, "SPOOLING", "startup state")
+    equal(first.action, "DISENGAGE INDUCTOR", "startup action")
+    equal(first.recommendedInductor, false, "startup inductor plan")
+    evaluate(memory, "spooling", 289, 2000, 2000, { inductorEngaged = true })
+    local calls = 0
+    local plan = evaluate(memory, "spooling", 290, 2000, 2000,
+        { inductorEngaged = true })
+    local applied = governor.apply(memory, { name = "spooling", governor = plan }, control,
+        { now = 10 }, {
+            setInductor = function(_, engaged)
+                calls = calls + 1
+                return true, engaged
+            end,
+        })
+    equal(calls, 1, "startup inductor write")
+    equal(applied.appliedInductor, false, "startup applied inductor")
+end
+
+do
+    local memory = governor.new()
+    local plan = evaluate(memory, "spun-up", 1775, 2000, 2000,
+        { inductorEngaged = false })
+    equal(plan.state, "ENGAGING", "engagement state")
+    equal(plan.action, "ENGAGE INDUCTOR", "engagement action")
+    equal(plan.recommendedInductor, true, "engagement plan")
+end
+
+do
+    local memory = governor.new()
+    local engaged = evaluate(memory, "hysteresis", 1600, 2000, 2000,
+        { inductorEngaged = true })
+    equal(engaged.state, "BELOW TARGET", "engaged hysteresis state")
+    equal(engaged.recommendedInductor, true, "engaged hysteresis plan")
+    local disengaged = evaluate(memory, "hysteresis", 1600, 2000, 2000,
+        { inductorEngaged = false })
+    equal(disengaged.state, "SPOOLING", "disengaged hysteresis state")
+    equal(disengaged.recommendedInductor, false, "disengaged hysteresis plan")
+end
+
+do
+    local memory = governor.new()
     local first = evaluate(memory, "overspeed", 2001, 1000, 2000)
     local second = evaluate(memory, "overspeed", 2002, 1000, 2000)
     local third = evaluate(memory, "overspeed", 2003, 1000, 2000)
@@ -122,6 +168,7 @@ do
     equal(second.state, "VERIFYING OVERSPEED", "overspeed sample two")
     equal(third.state, "OVERSPEED", "overspeed confirmation")
     equal(third.recommendedFlow, 0, "overspeed flow cut")
+    equal(third.recommendedInductor, true, "overspeed inductor plan")
 end
 
 do
