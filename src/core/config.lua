@@ -47,8 +47,10 @@ function config.load()
         math.floor(tonumber(loaded.control.commandSamples) or 2))
     loaded.control.lowBandRpm = tonumber(loaded.control.lowBandRpm) or 900
     loaded.control.highBandRpm = tonumber(loaded.control.highBandRpm) or 1800
-    loaded.control.calibrationSpoolRpm = tonumber(loaded.control.calibrationSpoolRpm) or
-        loaded.control.highBandRpm
+    loaded.control.calibrationLowEscapeRpm = math.max(
+        loaded.control.lowBandRpm + loaded.control.rpmDeadband,
+        tonumber(loaded.control.calibrationLowEscapeRpm) or
+            (loaded.control.lowBandRpm + 100))
     loaded.control.coldStartRpm = math.max(0,
         tonumber(loaded.control.coldStartRpm) or 100)
     loaded.control.calibrationSettleDelta = math.max(0.1,
@@ -66,8 +68,10 @@ function config.load()
         math.floor(tonumber(loaded.control.calibrationFailureSamples) or 10))
     loaded.control.calibrationSpoolFailureSamples = math.max(1,
         math.floor(tonumber(loaded.control.calibrationSpoolFailureSamples) or 2))
-    loaded.control.calibrationTimeout = math.max(60,
-        tonumber(loaded.control.calibrationTimeout) or 600)
+    loaded.control.calibrationBandEscapeSamples = math.max(2,
+        math.floor(tonumber(loaded.control.calibrationBandEscapeSamples) or 3))
+    loaded.control.calibrationStallTimeout = math.max(30,
+        tonumber(loaded.control.calibrationStallTimeout) or 180)
     loaded.control.overspeedMargin = math.max(loaded.control.rpmDeadband,
         tonumber(loaded.control.overspeedMargin) or 200)
     loaded.control.turbineProfiles = loaded.control.turbineProfiles or {}
