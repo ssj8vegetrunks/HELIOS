@@ -1,7 +1,7 @@
 -- HELIOS single-file installer
--- Milestone 7.1: guarded automatic turbine governor.
+-- Milestone 7.2: automatic turbine spool-up and regulation.
 
-local VERSION = "1.4.0-alpha.2"
+local VERSION = "1.4.0-alpha.3"
 local INSTALL_DIR = "/helios"
 local STAGE_DIR = "/.helios-install"
 
@@ -118,6 +118,11 @@ function config.load()
     loaded.control.adjustmentInterval = tonumber(loaded.control.adjustmentInterval) or 2
     loaded.control.commandSamples = math.max(1,
         math.floor(tonumber(loaded.control.commandSamples) or 2))
+    loaded.control.spoolDisengageRpm = math.max(0,
+        tonumber(loaded.control.spoolDisengageRpm) or 1500)
+    loaded.control.spoolEngageRpm = math.max(loaded.control.spoolDisengageRpm + 1,
+        tonumber(loaded.control.spoolEngageRpm) or
+            (loaded.control.targetRpm - loaded.control.rpmDeadband))
     loaded.power = loaded.power or {}
     local validUnits = { FE = true, RF = true, J = true, EU = true }
     if not validUnits[loaded.power.unit] then loaded.power.unit = "FE" end
@@ -876,7 +881,10 @@ function mainframe.run(config)
         turbineGovernor.applyAll(governorMemory, turbines, config.control, {
             maintenance = maintenance,
             now = os.epoch("utc") / 1000,
-        }, turbineAdapter.setFlowLimit)
+        }, {
+            setFlowLimit = turbineAdapter.setFlowLimit,
+            setInductor = turbineAdapter.setInductor,
+        })
         updateAlarm()
         local conflictsChanged = refreshIdConflicts()
         if conflictsChanged or #idConflicts > 0 then advertiseIntegrity() end
@@ -2345,6 +2353,34 @@ function adapter.setFlowLimit(turbine, requested)
     return true, verified
 end
 
+function adapter.setInductor(turbine, engaged)
+    if type(turbine) ~= "table" or type(turbine.name) ~= "string" then
+        return false, nil, "Invalid turbine identity"
+    end
+    if not peripheral.isPresent(turbine.name) then
+        return false, nil, "Peripheral unavailable"
+    end
+
+    local methods = availableMethods(turbine.name)
+    if not methods.setInductorEngaged or not methods.getInductorEngaged then
+        return false, nil, "Verified inductor control is unavailable"
+    end
+
+    engaged = engaged == true
+    local ok, reason = pcall(peripheral.call, turbine.name, "setInductorEngaged", engaged)
+    if not ok then return false, nil, tostring(reason) end
+
+    local readOk, actual = pcall(peripheral.call, turbine.name, "getInductorEngaged")
+    if not readOk or type(actual) ~= "boolean" then
+        return false, nil, "Inductor verification failed"
+    end
+    if actual ~= engaged then
+        return false, actual, ("Requested inductor %s; turbine reports %s"):format(
+            engaged and "engaged" or "disengaged", actual and "engaged" or "disengaged")
+    end
+    return true, actual
+end
+
 function adapter.readAll(devices)
     local turbines = {}
     for _, device in ipairs(devices or {}) do
@@ -2431,6 +2467,9 @@ function governor.evaluate(memory, turbine, control, context)
     local overspeedRpm = math.max(target + deadband, tonumber(control.overspeedRpm) or 2000)
     local overspeedSamples = math.max(1, math.floor(tonumber(control.overspeedSamples) or 3))
     local maxStep = math.max(1, tonumber(control.maxFlowStep) or 100)
+    local spoolDisengageRpm = math.max(0, tonumber(control.spoolDisengageRpm) or 1500)
+    local spoolEngageRpm = math.max(spoolDisengageRpm + 1,
+        tonumber(control.spoolEngageRpm) or (target - deadband))
     local name = tostring(turbine.name or "unknown")
     local previous = memory.turbines[name] or { overspeedCount = 0 }
 
@@ -2451,6 +2490,8 @@ function governor.evaluate(memory, turbine, control, context)
         result = hold("NO FLOW SETTING", "Configured flow-limit telemetry is unavailable", false)
     elseif turbine.flowRateLimit == nil then
         result = hold("NO HARD LIMIT", "Turbine hard flow limit is unavailable", false)
+    elseif type(turbine.inductorEngaged) ~= "boolean" then
+        result = hold("NO INDUCTOR STATE", "Inductor-state telemetry is unavailable", false)
     else
         local rpm = tonumber(turbine.rotorSpeed)
         local currentFlow = tonumber(turbine.flowRateMax)
@@ -2461,18 +2502,38 @@ function governor.evaluate(memory, turbine, control, context)
         local state = "STABLE"
         local action = "HOLD"
         local reason = "Rotor is inside the target deadband"
+        local recommendedInductor = turbine.inductorEngaged
 
         if rpm >= overspeedRpm then
+            recommendedInductor = true
             if overspeedCount >= overspeedSamples then
                 state = "OVERSPEED"
                 action = "CUT FLOW"
-                reason = "Confirmed overspeed interlock recommendation"
+                reason = "Confirmed overspeed: engage inductor and cut steam"
                 recommendedFlow = 0
             else
                 state = "VERIFYING OVERSPEED"
-                action = "HOLD"
+                action = turbine.inductorEngaged and "HOLD" or "ENGAGE INDUCTOR"
                 reason = ("Overspeed sample %d/%d"):format(overspeedCount, overspeedSamples)
             end
+        elseif turbine.inductorEngaged == false and rpm < spoolEngageRpm then
+            state = "SPOOLING"
+            recommendedInductor = false
+            recommendedFlow = tonumber(turbine.flowRateLimit)
+            action = currentFlow < recommendedFlow and "MAXIMIZE FLOW" or "WAIT FOR SPEED"
+            reason = ("Inductor disengaged until %.0f RPM"):format(spoolEngageRpm)
+        elseif turbine.inductorEngaged == true and rpm < spoolDisengageRpm then
+            state = "SPOOLING"
+            recommendedInductor = false
+            recommendedFlow = tonumber(turbine.flowRateLimit)
+            action = "DISENGAGE INDUCTOR"
+            reason = ("Rotor below %.0f RPM respool threshold"):format(spoolDisengageRpm)
+        elseif turbine.inductorEngaged == false then
+            state = "ENGAGING"
+            recommendedInductor = true
+            recommendedFlow = tonumber(turbine.flowRateLimit)
+            action = "ENGAGE INDUCTOR"
+            reason = "Rotor reached operating-speed engagement threshold"
         elseif math.abs(rpmError) <= deadband then
             if math.abs(rpmTrend) > deadband / 5 then
                 state = "SETTLING"
@@ -2516,6 +2577,11 @@ function governor.evaluate(memory, turbine, control, context)
             actualFlow = tonumber(turbine.flowRate),
             recommendedFlow = recommendedFlow,
             flowChange = recommendedFlow - currentFlow,
+            currentInductor = turbine.inductorEngaged,
+            recommendedInductor = recommendedInductor,
+            inductorChange = recommendedInductor ~= turbine.inductorEngaged,
+            spoolDisengageRpm = spoolDisengageRpm,
+            spoolEngageRpm = spoolEngageRpm,
         }
         if action ~= "HOLD" then
             previous.actionSamples = previous.action == action and
@@ -2545,10 +2611,19 @@ function governor.evaluate(memory, turbine, control, context)
     result.actualFlow = result.actualFlow or tonumber(turbine.flowRate)
     result.recommendedFlow = result.recommendedFlow or result.currentFlow
     result.flowChange = result.flowChange or 0
+    if result.currentInductor == nil then result.currentInductor = turbine.inductorEngaged end
+    if result.recommendedInductor == nil then
+        result.recommendedInductor = turbine.inductorEngaged
+    end
+    result.inductorChange = result.recommendedInductor ~= nil and
+        result.currentInductor ~= nil and
+        result.recommendedInductor ~= result.currentInductor
+    result.spoolDisengageRpm = result.spoolDisengageRpm or spoolDisengageRpm
+    result.spoolEngageRpm = result.spoolEngageRpm or spoolEngageRpm
     return result
 end
 
-function governor.apply(memory, turbine, control, context, writer)
+function governor.apply(memory, turbine, control, context, writers)
     control = control or {}
     context = context or {}
     local plan = turbine and turbine.governor
@@ -2561,6 +2636,8 @@ function governor.apply(memory, turbine, control, context, writer)
     local commandSamples = math.max(1, math.floor(tonumber(control.commandSamples) or 2))
     local current = tonumber(plan.currentFlow)
     local proposed = tonumber(plan.recommendedFlow)
+    local needsFlow = current ~= nil and proposed ~= nil and current ~= proposed
+    local needsInductor = plan.inductorChange == true
 
     plan.mode = control.actuatorsEnabled == true and "automatic" or "observe"
     if control.actuatorsEnabled ~= true then
@@ -2569,13 +2646,15 @@ function governor.apply(memory, turbine, control, context, writer)
         plan.actuatorState = "PAUSED"
     elseif plan.trusted == false then
         plan.actuatorState = "UNTRUSTED"
-    elseif plan.action == "HOLD" or current == nil or proposed == nil or current == proposed then
+    elseif not needsFlow and not needsInductor then
         plan.actuatorState = "HOLD"
     elseif plan.action ~= "CUT FLOW" and (tonumber(plan.actionSamples) or 0) < commandSamples then
         plan.actuatorState = "VERIFYING"
-    elseif type(writer) ~= "function" then
+    elseif type(writers) ~= "table" or
+           (needsFlow and type(writers.setFlowLimit) ~= "function") or
+           (needsInductor and type(writers.setInductor) ~= "function") then
         plan.actuatorState = "FAULT"
-        plan.actuatorError = "Turbine write adapter is unavailable"
+        plan.actuatorError = "Required turbine write adapter is unavailable"
     elseif plan.action ~= "CUT FLOW" and previous.lastAttemptAt and
            now - previous.lastAttemptAt < interval then
         plan.actuatorState = previous.lastError and "FAULT" or "WAITING"
@@ -2583,30 +2662,45 @@ function governor.apply(memory, turbine, control, context, writer)
         plan.nextAdjustmentIn = interval - (now - previous.lastAttemptAt)
     else
         previous.lastAttemptAt = now
-        local ok, applied, reason = writer(turbine, proposed)
+        local ok, appliedFlow, appliedInductor, reason = true, nil, nil, nil
+        if needsInductor then
+            ok, appliedInductor, reason = writers.setInductor(
+                turbine, plan.recommendedInductor)
+        end
+        if ok and needsFlow then
+            ok, appliedFlow, reason = writers.setFlowLimit(turbine, proposed)
+        end
         if ok then
             previous.lastAppliedAt = now
-            previous.lastAppliedFlow = tonumber(applied) or proposed
+            if needsFlow then
+                previous.lastAppliedFlow = tonumber(appliedFlow) or proposed
+                plan.appliedFlow = previous.lastAppliedFlow
+            end
+            if needsInductor then
+                previous.lastAppliedInductor = appliedInductor == true
+                plan.appliedInductor = previous.lastAppliedInductor
+            end
             previous.lastError = nil
             plan.actuatorState = "APPLIED"
-            plan.appliedFlow = previous.lastAppliedFlow
         else
-            previous.lastError = tostring(reason or "Turbine rejected the flow limit")
+            previous.lastError = tostring(reason or "Turbine rejected the actuator command")
             plan.actuatorState = "FAULT"
             plan.actuatorError = previous.lastError
-            plan.reportedFlow = tonumber(applied)
+            if needsFlow then plan.reportedFlow = tonumber(appliedFlow) end
+            if needsInductor then plan.reportedInductor = appliedInductor end
         end
     end
 
     plan.lastAppliedAt = previous.lastAppliedAt
     plan.lastAppliedFlow = previous.lastAppliedFlow
+    plan.lastAppliedInductor = previous.lastAppliedInductor
     memory.turbines[name] = previous
     return plan
 end
 
-function governor.applyAll(memory, turbines, control, context, writer)
+function governor.applyAll(memory, turbines, control, context, writers)
     for _, turbine in ipairs(turbines or {}) do
-        governor.apply(memory, turbine, control, context, writer)
+        governor.apply(memory, turbine, control, context, writers)
     end
     return turbines
 end
