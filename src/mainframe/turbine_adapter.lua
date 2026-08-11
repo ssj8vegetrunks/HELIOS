@@ -22,6 +22,14 @@ local function percent(amount, maximum)
     return math.max(0, math.min(100, amount / maximum * 100))
 end
 
+local function availableMethods(name)
+    local methods = {}
+    for _, method in ipairs(peripheral.getMethods(name) or {}) do
+        methods[method] = true
+    end
+    return methods
+end
+
 function adapter.read(device)
     local name = device.name
     local turbine = { name = name, available = peripheral.isPresent(name) }
@@ -30,10 +38,7 @@ function adapter.read(device)
         return turbine
     end
 
-    local availableMethods = {}
-    for _, method in ipairs(peripheral.getMethods(name) or {}) do
-        availableMethods[method] = true
-    end
+    local availableMethods = availableMethods(name)
 
     turbine.connected = readAny(name, availableMethods, { "getConnected", "isConnected", "mbIsConnected", "mbIsAssembled", "connected" })
     turbine.active = readAny(name, availableMethods, { "getActive", "isActive", "active" })
@@ -65,6 +70,41 @@ function adapter.read(device)
         turbine.error = "No supported telemetry methods"
     end
     return turbine
+end
+
+function adapter.setFlowLimit(turbine, requested)
+    if type(turbine) ~= "table" or type(turbine.name) ~= "string" then
+        return false, nil, "Invalid turbine identity"
+    end
+    if not peripheral.isPresent(turbine.name) then
+        return false, nil, "Peripheral unavailable"
+    end
+
+    local methods = availableMethods(turbine.name)
+    if not methods.setFluidFlowRateMax or not methods.getFluidFlowRateMax then
+        return false, nil, "Verified flow-limit control is unavailable"
+    end
+
+    requested = tonumber(requested)
+    if not requested then return false, nil, "Invalid flow limit" end
+    local hardLimit = tonumber(turbine.flowRateLimit)
+    if hardLimit then requested = math.min(requested, hardLimit) end
+    requested = math.max(0, math.floor(requested + 0.5))
+
+    local ok, reason = pcall(peripheral.call, turbine.name, "setFluidFlowRateMax", requested)
+    if not ok then return false, nil, tostring(reason) end
+
+    local readOk, actual = pcall(peripheral.call, turbine.name, "getFluidFlowRateMax")
+    actual = tonumber(actual)
+    if not readOk or actual == nil then
+        return false, nil, "Flow-limit verification failed"
+    end
+    local verified = math.floor(actual + 0.5)
+    if verified ~= requested then
+        return false, verified, ("Requested %d mB/t; turbine reports %d mB/t"):format(
+            requested, verified)
+    end
+    return true, verified
 end
 
 function adapter.readAll(devices)
