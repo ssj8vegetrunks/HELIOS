@@ -221,7 +221,10 @@ function mainframe.run(config)
         turbineGovernor.applyAll(governorMemory, turbines, config.control, {
             maintenance = maintenance,
             now = os.epoch("utc") / 1000,
-        }, turbineAdapter.setFlowLimit)
+        }, {
+            setFlowLimit = turbineAdapter.setFlowLimit,
+            setInductor = turbineAdapter.setInductor,
+        })
         updateAlarm()
         local conflictsChanged = refreshIdConflicts()
         if conflictsChanged or #idConflicts > 0 then advertiseIntegrity() end
