@@ -163,7 +163,9 @@ function terminal.run(config)
             ui.status("State", item.active == true and "ACTIVE" or item.active == false and "OFFLINE" or "UNKNOWN")
             ui.status("Rotor speed", formatValue(item.rotorSpeed, " RPM"), colors.cyan)
             local plan = item.governor or {}
-            ui.status("Governor", plan.state or "WAITING", plan.trusted == false and colors.red or colors.lime)
+            ui.status("Governor", (plan.state or "WAITING") .. " / " ..
+                (plan.actuatorState or "WAITING"),
+                (plan.trusted == false or plan.actuatorState == "FAULT") and colors.red or colors.lime)
             ui.status("Power output", powerFormat.power(item.energyProduction, state.power, true), colors.cyan)
             ui.status("Energy buffer", formatValue(item.energyPercent, "%"))
             if plan.currentFlow ~= nil and plan.recommendedFlow ~= nil then
