@@ -45,11 +45,32 @@ function config.load()
     loaded.control.adjustmentInterval = tonumber(loaded.control.adjustmentInterval) or 2
     loaded.control.commandSamples = math.max(1,
         math.floor(tonumber(loaded.control.commandSamples) or 2))
-    loaded.control.spoolDisengageRpm = math.max(0,
-        tonumber(loaded.control.spoolDisengageRpm) or 1500)
-    loaded.control.spoolEngageRpm = math.max(loaded.control.spoolDisengageRpm + 1,
-        tonumber(loaded.control.spoolEngageRpm) or
-            (loaded.control.targetRpm - loaded.control.rpmDeadband))
+    loaded.control.lowBandRpm = tonumber(loaded.control.lowBandRpm) or 900
+    loaded.control.highBandRpm = tonumber(loaded.control.highBandRpm) or 1800
+    loaded.control.calibrationSpoolRpm = tonumber(loaded.control.calibrationSpoolRpm) or
+        loaded.control.highBandRpm
+    loaded.control.coldStartRpm = math.max(0,
+        tonumber(loaded.control.coldStartRpm) or 100)
+    loaded.control.calibrationSettleDelta = math.max(0.1,
+        tonumber(loaded.control.calibrationSettleDelta) or 2)
+    loaded.control.calibrationSettleSamples = math.max(3,
+        math.floor(tonumber(loaded.control.calibrationSettleSamples) or 8))
+    loaded.control.calibrationMinimumRpm = math.max(0,
+        tonumber(loaded.control.calibrationMinimumRpm) or
+            (loaded.control.lowBandRpm - loaded.control.rpmDeadband * 2))
+    loaded.control.calibrationSteamRatio = math.max(0.1, math.min(1,
+        tonumber(loaded.control.calibrationSteamRatio) or 0.98))
+    loaded.control.calibrationSteamSamples = math.max(3,
+        math.floor(tonumber(loaded.control.calibrationSteamSamples) or 5))
+    loaded.control.calibrationFailureSamples = math.max(3,
+        math.floor(tonumber(loaded.control.calibrationFailureSamples) or 10))
+    loaded.control.calibrationSpoolFailureSamples = math.max(1,
+        math.floor(tonumber(loaded.control.calibrationSpoolFailureSamples) or 2))
+    loaded.control.calibrationTimeout = math.max(60,
+        tonumber(loaded.control.calibrationTimeout) or 600)
+    loaded.control.overspeedMargin = math.max(loaded.control.rpmDeadband,
+        tonumber(loaded.control.overspeedMargin) or 200)
+    loaded.control.turbineProfiles = loaded.control.turbineProfiles or {}
     loaded.power = loaded.power or {}
     local validUnits = { FE = true, RF = true, J = true, EU = true }
     if not validUnits[loaded.power.unit] then loaded.power.unit = "FE" end
