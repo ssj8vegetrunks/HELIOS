@@ -1,7 +1,7 @@
 -- HELIOS single-file installer
 -- Milestone 2: role-aware installation and configurable hardware discovery.
 
-local VERSION = "0.2.1-alpha.1"
+local VERSION = "0.2.1-alpha.2"
 local INSTALL_DIR = "/helios"
 local STAGE_DIR = "/.helios-install"
 
@@ -372,7 +372,7 @@ function mainframe.run(config)
             end
             print("")
             print("D  Change default mode")
-            print("T  Change timeout")
+            print("<- / ->  Change timeout")
             if maintenance then
                 print("F  Finish maintenance")
             else
@@ -392,14 +392,17 @@ function mainframe.run(config)
                 if not maintenance and config.discovery.defaultMode == "event" and registryStale then
                     rescan()
                 end
-            elseif event == "key" and value == keys.t then
-                local nextTimeout = timeoutChoices[1]
-                for index, value in ipairs(timeoutChoices) do
-                    if value == config.discovery.maintenanceTimeout then
-                        nextTimeout = timeoutChoices[(index % #timeoutChoices) + 1]
+            elseif event == "key" and (value == keys.left or value == keys.right) then
+                local currentIndex = 1
+                for index, timeout in ipairs(timeoutChoices) do
+                    if timeout == config.discovery.maintenanceTimeout then
+                        currentIndex = index
                         break
                     end
                 end
+                local direction = value == keys.right and 1 or -1
+                local nextIndex = ((currentIndex - 1 + direction) % #timeoutChoices) + 1
+                local nextTimeout = timeoutChoices[nextIndex]
                 config.discovery.maintenanceTimeout = nextTimeout
                 saveConfig()
                 if maintenance then
