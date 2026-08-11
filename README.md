@@ -1,13 +1,14 @@
-# HELIOS — v1.2.0 Alpha 1 Remote Terminals and Alarms
+# HELIOS — v1.3.0 Alpha 1 Control Interface and Touch
 
 Industrial power management for **CC:Tweaked** and **Extreme Reactors**.
 
-This milestone brings the remote-terminal and alarm subsystems online while
-preserving the proven read-only telemetry foundation:
+This milestone prepares HELIOS for automatic regulation without enabling any
+actuators yet. It also brings monitor touch and network-ID conflict detection
+online:
 
 - the active HELIOS page is mirrored to every attached CC:Tweaked monitor;
-- the computer remains the only input/control surface;
-- monitor touches are ignored;
+- mainframe monitors provide touch navigation, device selection, rescan, settings access, and alarm silence;
+- remote-terminal monitors provide read-only telemetry navigation, local alarm silence, and speaker testing;
 - monitors may be attached or detached while HELIOS is running;
 - the same display layer works on both mainframes and remote-terminal roles;
 - monitor text scale defaults to `0.5` to fit the terminal layout;
@@ -19,6 +20,11 @@ preserving the proven read-only telemetry foundation:
 - alarms appear and sound on the mainframe and assigned remote terminals;
 - mainframe silence applies network-wide, while remote silence is local only;
 - alarm settings include enable/disable, thresholds, volume, and a speaker test.
+- duplicate CC:Tweaked computer IDs are detected from independent HELIOS sessions;
+- every HELIOS screen receives a red conflict banner listing all duplicated IDs;
+- conflicting directed telemetry is treated as unsafe until the IDs become unique;
+- a persistent Power Control screen exposes the planned automatic/manual and tuning layout;
+- `AUTOMATIC` is fixed on, while manual mode, tuning controls, and every actuator remain locked.
 
 The existing telemetry foundation includes:
 
@@ -172,15 +178,17 @@ using the editable Joule ratio before applying the selected global display unit.
 See [`docs/UNIVERSAL-ENERGY-STORAGE.md`](docs/UNIVERSAL-ENERGY-STORAGE.md) for the concise
 architecture and first implementation target.
 
-## Monitor output
+## Monitor output and touch
 
 Attach one or more CC:Tweaked monitors directly or through the mainframe's
 wired peripheral network. HELIOS automatically mirrors the currently active
-screen to all of them. No monitor assignment is required in this first version.
+screen to all of them. Touch the labelled buttons on a mainframe monitor to
+navigate operating pages, select devices, rescan, open settings/control, or
+silence the current alarm.
 
-The monitor is intentionally display-only. Keyboard and mouse input remain on
-the computer, and `monitor_touch` events have no authority. This establishes a
-shared renderer for local and remote-terminal output.
+A monitor driven by a remote terminal remains read-only. Its touch buttons may
+change the locally displayed device, test its speaker, or silence its local
+speaker, but cannot change mainframe settings or call power hardware.
 
 The display uses text scale `0.5`. A monitor must be physically large enough to
 show the computer-sized layout; content outside a smaller monitor is safely
@@ -210,8 +218,29 @@ terminal can press `S` to silence only its local speaker. Warnings remain visibl
 new conditions can sound, and silence resets after the condition clears.
 Press `X` on either computer's alarm interface to test its locally attached speaker.
 
+## Power control interface
+
+Press `C` or touch `[CONTROL]` on the mainframe dashboard. The screen contains
+the future control mode, turbine RPM target, storage demand band, rod/flow step
+limits, and adjustment interval. For this alpha, `AUTOMATIC` is selected but
+all tuning fields and actuator calls are deliberately locked. This is an
+interface and authority test only; HELIOS still cannot move rods, change flow,
+toggle a reactor, or engage a turbine.
+
+See [`docs/CONTROL.md`](docs/CONTROL.md) for the concise control boundary and
+planned governor order.
+
+## Network ID conflicts
+
+Each running HELIOS computer advertises a unique session identity in addition
+to its CC:Tweaked computer ID. If two sessions claim the same computer ID, the
+mainframe broadcasts the complete conflict list and every HELIOS terminal and
+monitor displays a red warning banner. The warning clears automatically after
+the duplicate disappears. Replace or reset the duplicated computer before
+trusting directed telemetry.
+
 ## Scope boundary
 
-Discovery, monitor output, remote terminals, and all telemetry are read-only.
-Reactor/turbine control logic, graphs, advanced safety thresholds, and additional
-specialized storage adapters come later.
+Discovery, remote telemetry, and power hardware remain read-only. The control
+interface is present, but reactor/turbine governor logic and actuator calls are
+disabled. Graphs and additional specialized storage adapters come later.
