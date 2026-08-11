@@ -1,0 +1,55 @@
+local config = {}
+
+function config.load()
+    if not fs.exists("/helios/config.lua") then
+        error("HELIOS configuration is missing. Run the installer again.", 0)
+    end
+    local loaded = dofile("/helios/config.lua")
+    if type(loaded) ~= "table" then
+        error("HELIOS configuration is invalid.", 0)
+    end
+    if loaded.role ~= "mainframe" and loaded.role ~= "terminal" then
+        error("HELIOS configuration contains an invalid role.", 0)
+    end
+    loaded.discovery = loaded.discovery or {}
+    if loaded.discovery.defaultMode ~= "manual" then
+        loaded.discovery.defaultMode = "event"
+    end
+    local timeout = tonumber(loaded.discovery.maintenanceTimeout)
+    if not timeout or timeout < 60 then timeout = 1800 end
+    loaded.discovery.maintenanceTimeout = math.floor(timeout)
+    loaded.alarms = loaded.alarms or {}
+    if loaded.alarms.enabled == nil then loaded.alarms.enabled = true end
+    loaded.alarms.lowFuel = tonumber(loaded.alarms.lowFuel) or 20
+    loaded.alarms.criticalFuel = tonumber(loaded.alarms.criticalFuel) or 5
+    loaded.alarms.volume = tonumber(loaded.alarms.volume) or 1.5
+    loaded.alarms.confirmSamples = math.max(1, math.floor(tonumber(loaded.alarms.confirmSamples) or 3))
+    loaded.alarms.warningRepeat = math.max(5, math.floor(tonumber(loaded.alarms.warningRepeat) or 30))
+    loaded.alarms.criticalRepeat = math.max(2, math.floor(tonumber(loaded.alarms.criticalRepeat) or 5))
+    loaded.ui = loaded.ui or {}
+    loaded.ui.showPeripheralNames = loaded.ui.showPeripheralNames == true
+    loaded.ui.monitorTextScale = tonumber(loaded.ui.monitorTextScale) or 0.5
+    loaded.power = loaded.power or {}
+    local validUnits = { FE = true, RF = true, J = true, EU = true }
+    if not validUnits[loaded.power.unit] then loaded.power.unit = "FE" end
+    if loaded.power.numberFormat ~= "full" then loaded.power.numberFormat = "compact" end
+    local decimals = math.floor(tonumber(loaded.power.decimals) or 1)
+    loaded.power.decimals = math.max(1, math.min(2, decimals))
+    loaded.power.ratios = loaded.power.ratios or {}
+    loaded.power.ratios.FE = tonumber(loaded.power.ratios.FE) or 1
+    loaded.power.ratios.RF = tonumber(loaded.power.ratios.RF) or 1
+    loaded.power.ratios.J = tonumber(loaded.power.ratios.J) or 2.5
+    loaded.power.ratios.EU = tonumber(loaded.power.ratios.EU) or 0.25
+    loaded.deviceAliases = loaded.deviceAliases or {}
+    return loaded
+end
+
+function config.save(loaded)
+    local handle, reason = fs.open("/helios/config.lua", "w")
+    if not handle then return false, reason end
+    handle.write("return " .. textutils.serialize(loaded))
+    handle.close()
+    return true
+end
+
+return config
