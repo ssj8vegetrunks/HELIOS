@@ -1,19 +1,22 @@
 # HELIOS Control Boundary
 
-## v1.4.0-alpha.1
+## v1.4.0-alpha.2
 
-The Power Control screen now runs an observing turbine governor.
+The Power Control screen now runs a guarded automatic turbine governor.
 
 - Mode is fixed to `AUTOMATIC`.
 - Manual mode and tuning fields are visible but locked.
-- `actuatorsEnabled` is fixed to `false`.
-- No reactor or turbine write method is called.
+- Turbine actuators are enabled only on the mainframe.
+- The only hardware write is Extreme Reactors' `setFluidFlowRateMax`.
+- Every write is read back and verified immediately.
 - Each turbine is evaluated independently once per telemetry sample.
 - The target is 1800 RPM with a 25 RPM deadband.
-- Proposed flow-limit changes are capped at 100 mB/t per evaluation.
+- Normal direction changes require two matching samples.
+- Flow-limit changes are capped at 100 mB/t every two seconds.
 - Three consecutive samples at or above 2000 RPM confirm overspeed and propose
   a zero flow limit.
-- Missing, inactive, conflicting, or unsupported telemetry produces `HOLD`.
+- Missing, inactive, conflicting, maintenance, or unsupported telemetry produces `HOLD`.
+- Rejected, unsupported, or unverifiable writes produce a global control-fault warning.
 - Governor state and recommendations are sent to assigned remote terminals.
 - Mainframe monitors may navigate the interface by touch.
 - Remote terminals remain read-only.
@@ -33,10 +36,9 @@ interface until the automatic governors and safety interlocks are implemented.
 
 ## Next implementation order
 
-1. Validate observing turbine decisions against real turbine behavior
-2. Add the write adapter and guarded turbine-actuator test
-3. Reactor steam-demand governor
-4. Storage-based plant demand coordinator
-5. Action log and controlled actuator enablement
+1. Validate guarded automatic turbine control against real turbine behavior
+2. Reactor steam-demand governor
+3. Storage-based plant demand coordinator
+4. Action history and user-defined tuning controls
 
 The mainframe remains the only component allowed to issue hardware commands.
