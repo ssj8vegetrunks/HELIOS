@@ -29,6 +29,15 @@ function config.load()
     loaded.ui = loaded.ui or {}
     loaded.ui.showPeripheralNames = loaded.ui.showPeripheralNames == true
     loaded.ui.monitorTextScale = tonumber(loaded.ui.monitorTextScale) or 0.5
+    loaded.control = loaded.control or {}
+    loaded.control.mode = "automatic"
+    loaded.control.actuatorsEnabled = false
+    loaded.control.targetRpm = tonumber(loaded.control.targetRpm) or 1800
+    loaded.control.storageLow = tonumber(loaded.control.storageLow) or 25
+    loaded.control.storageHigh = tonumber(loaded.control.storageHigh) or 85
+    loaded.control.maxRodStep = tonumber(loaded.control.maxRodStep) or 5
+    loaded.control.maxFlowStep = tonumber(loaded.control.maxFlowStep) or 100
+    loaded.control.adjustmentInterval = tonumber(loaded.control.adjustmentInterval) or 2
     loaded.power = loaded.power or {}
     local validUnits = { FE = true, RF = true, J = true, EU = true }
     if not validUnits[loaded.power.unit] then loaded.power.unit = "FE" end

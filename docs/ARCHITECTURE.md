@@ -38,6 +38,18 @@ HELIOS Architecture v0.1
    - Pair with mainframe
    - Subscribe to telemetry
    - Render locally
+   - Local touch may navigate/silence; it never grants plant-control authority
+
+6.1 Network identity safety
+   - Every HELIOS process has a per-boot session identity
+   - Duplicate CC computer IDs are reported system-wide
+   - Conflict warnings list every duplicated ID and clear automatically
+   - Directed telemetry from a conflicting ID is not trusted
+
+6.2 Touch authority
+   - Mainframe monitors may operate the mainframe UI
+   - Remote monitors may operate only their local read-only UI
+   - UI input never calls hardware directly
 
 7. Basic data flow
 
@@ -60,6 +72,7 @@ HELIOS Architecture v0.1
    - Lost telemetry is marked stale, never assumed to be zero
    - Missing hardware capabilities should disable only the affected feature
    - Fail safely where possible
+   - Control actuators stay disabled until governors and interlocks pass testing
 
 9. Proposed folders
    - core/       Mainframe services and state
