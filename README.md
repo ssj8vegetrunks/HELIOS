@@ -1,10 +1,10 @@
-# HELIOS — v1.4.0 Alpha 1 Observing Turbine Governor
+# HELIOS — v1.4.0 Alpha 2 Automatic Turbine Governor
 
 Industrial power management for **CC:Tweaked** and **Extreme Reactors**.
 
-This milestone starts automatic regulation in observe-only mode. HELIOS now
-calculates safe turbine flow-limit recommendations without issuing hardware
-commands. The existing touch interface and network-ID protection remain online:
+This milestone enables guarded automatic turbine regulation. HELIOS now
+calculates and applies bounded turbine flow-limit changes from the mainframe.
+The existing touch interface and network-ID protection remain online:
 
 - the active HELIOS page is mirrored to every attached CC:Tweaked monitor;
 - mainframe monitors provide touch navigation, device selection, rescan, settings access, and alarm silence;
@@ -24,12 +24,14 @@ commands. The existing touch interface and network-ID protection remain online:
 - every HELIOS screen receives a red conflict banner listing all duplicated IDs;
 - conflicting directed telemetry is treated as unsafe until the IDs become unique;
 - a persistent Power Control screen exposes the planned automatic/manual and tuning layout;
-- `AUTOMATIC` is fixed on, while manual mode, tuning controls, and every actuator remain locked.
+- `AUTOMATIC` is fixed on, while manual mode and tuning controls remain locked.
 - every turbine has an independent governor targeting 1800 RPM with a 25 RPM deadband;
-- governor states and proposed flow-limit changes appear on mainframe and remote turbine screens;
+- governor states, proposed changes, and actuator results appear on mainframe and remote turbine screens;
 - the governor holds on missing, conflicting, inactive, or unsupported telemetry;
-- three consecutive readings confirm overspeed before recommending an immediate flow cut;
+- normal changes require two matching readings, are limited to 100 mB/t every two seconds, and are verified by read-back;
+- three consecutive readings confirm overspeed before an immediate zero-flow command;
 - confirmed turbine overspeed becomes a system-wide critical alarm;
+- rejected or unverifiable actuator commands become system-wide control-fault warnings;
 - settings and telemetry navigation use stable touch targets that fit the mirrored terminal canvas;
 - upgrades remove obsolete HELIOS rollback copies before staging and retain only the immediately replaced version.
 
@@ -153,10 +155,11 @@ Press `G` on the mainframe dashboard to open live turbine telemetry. `T` is
 intentionally unused because ATM10 binds it to the inventory trash overlay.
 Use the left and right arrow keys to move between connected turbines.
 
-The turbine adapter is read-only. HELIOS distinguishes actual steam consumed,
+The turbine adapter distinguishes actual steam consumed,
 the configured intake limit, and the turbine's hard intake limit. Unsupported
-values display `N/A`, allowing ATM10 to show whichever measurements its Extreme
-Reactors build provides.
+values display `N/A`. In automatic mode, the mainframe uses Extreme Reactors'
+official `setFluidFlowRateMax` method and verifies the resulting setting after
+every command. Remote terminals remain read-only.
 
 ## Names and power display
 
