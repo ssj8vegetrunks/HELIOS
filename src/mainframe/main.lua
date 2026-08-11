@@ -463,6 +463,7 @@ function mainframe.run(config)
 
     local function namingSettings()
         local selected = 1
+        local buttons = {}
         while true do
             ui.header("DEVICE NAMES", "Persistent local aliases")
             if #devices == 0 then
@@ -476,22 +477,24 @@ function mainframe.run(config)
                 ui.status("Peripheral", device.name, colors.gray)
             end
             print("")
-            print("<- / ->  Select device")
-            print("E  Edit name")
-            print("C  Clear name")
-            print("B  Back")
+            buttons.previous = ui.button("< PREVIOUS", colors.cyan)
+            buttons.next = ui.button("NEXT >", colors.cyan)
+            buttons.edit = ui.button("EDIT NAME (keyboard)", colors.cyan)
+            buttons.clear = ui.button("CLEAR NAME", colors.orange)
+            buttons.back = ui.button("BACK", colors.cyan)
 
             local event, value, message, protocol = os.pullEvent()
-            if event == "key" and value == keys.b then
+            local touchX, touchY = ui.eventPoint(event, value, message, protocol)
+            if (event == "key" and value == keys.b) or ui.hit(buttons.back, touchX, touchY) then
                 return
-            elseif event == "key" and value == keys.left and #devices > 0 then
+            elseif ((event == "key" and value == keys.left) or ui.hit(buttons.previous, touchX, touchY)) and #devices > 0 then
                 selected = ((selected - 2) % #devices) + 1
-            elseif event == "key" and value == keys.right and #devices > 0 then
+            elseif ((event == "key" and value == keys.right) or ui.hit(buttons.next, touchX, touchY)) and #devices > 0 then
                 selected = (selected % #devices) + 1
-            elseif event == "key" and value == keys.c and #devices > 0 then
+            elseif ((event == "key" and value == keys.c) or ui.hit(buttons.clear, touchX, touchY)) and #devices > 0 then
                 config.deviceAliases[devices[selected].name] = nil
                 saveConfig()
-            elseif event == "key" and value == keys.e and #devices > 0 then
+            elseif ((event == "key" and value == keys.e) or ui.hit(buttons.edit, touchX, touchY)) and #devices > 0 then
                 ui.prepare()
                 print("Peripheral: " .. devices[selected].name)
                 print("Enter a custom name (blank cancels):")
@@ -523,6 +526,7 @@ function mainframe.run(config)
 
     local function powerSettings()
         local units = { "FE", "RF", "J", "EU" }
+        local buttons = {}
         while true do
             ui.header("POWER DISPLAY", "Global energy formatting")
             ui.status("Display unit", config.power.unit, colors.cyan)
@@ -531,27 +535,28 @@ function mainframe.run(config)
             ui.status("Compact precision", config.power.decimals .. " decimal" .. (config.power.decimals == 1 and "" or "s"))
             ui.status("Example", powerFormat.power(2347819624112, config.power, true), colors.lime)
             print("")
-            print("U  Change unit")
-            print("N  Compact / full")
-            print("P  Change precision")
-            print("R  Set conversion ratio")
-            print("B  Back")
+            buttons.unit = ui.button("CHANGE UNIT", colors.cyan)
+            buttons.format = ui.button("COMPACT / FULL", colors.cyan)
+            buttons.precision = ui.button("CHANGE PRECISION", colors.cyan)
+            buttons.ratio = ui.button("SET RATIO (keyboard)", colors.cyan)
+            buttons.back = ui.button("BACK", colors.cyan)
 
             local event, value, message, protocol = os.pullEvent()
-            if event == "key" and value == keys.b then
+            local touchX, touchY = ui.eventPoint(event, value, message, protocol)
+            if (event == "key" and value == keys.b) or ui.hit(buttons.back, touchX, touchY) then
                 return
-            elseif event == "key" and value == keys.u then
+            elseif (event == "key" and value == keys.u) or ui.hit(buttons.unit, touchX, touchY) then
                 local current = 1
                 for index, unit in ipairs(units) do if unit == config.power.unit then current = index end end
                 config.power.unit = units[(current % #units) + 1]
                 saveConfig()
-            elseif event == "key" and value == keys.n then
+            elseif (event == "key" and value == keys.n) or ui.hit(buttons.format, touchX, touchY) then
                 config.power.numberFormat = config.power.numberFormat == "compact" and "full" or "compact"
                 saveConfig()
-            elseif event == "key" and value == keys.p then
+            elseif (event == "key" and value == keys.p) or ui.hit(buttons.precision, touchX, touchY) then
                 config.power.decimals = config.power.decimals == 1 and 2 or 1
                 saveConfig()
-            elseif event == "key" and value == keys.r then
+            elseif (event == "key" and value == keys.r) or ui.hit(buttons.ratio, touchX, touchY) then
                 ui.prepare()
                 print(("Current: 1 FE = %g %s"):format(config.power.ratios[config.power.unit], config.power.unit))
                 print("Enter the new positive ratio (blank cancels):")
@@ -582,6 +587,7 @@ function mainframe.run(config)
     end
 
     local function alarmSettings()
+        local buttons = {}
         local function editNumber(label, current, minimum, maximum)
             ui.prepare()
             print(label .. ": " .. tostring(current))
@@ -602,36 +608,37 @@ function mainframe.run(config)
             ui.status("Confirmation", config.alarms.confirmSamples .. " readings")
             ui.status("Volume", config.alarms.volume)
             print("")
-            print("E  Enable / disable")
-            print("L  Set low-fuel threshold")
-            print("C  Set critical threshold")
-            print("V  Change volume")
-            print("X  Test speaker alarm")
-            print("B  Back")
+            buttons.enabled = ui.button("ENABLE / DISABLE", colors.cyan)
+            buttons.low = ui.button("LOW FUEL (keyboard)", colors.orange)
+            buttons.critical = ui.button("CRITICAL FUEL (keyboard)", colors.red)
+            buttons.volume = ui.button("CHANGE VOLUME", colors.cyan)
+            buttons.test = ui.button("TEST SPEAKER", colors.cyan)
+            buttons.back = ui.button("BACK", colors.cyan)
 
             local event, value, message, protocol = os.pullEvent()
-            if event == "key" and value == keys.b then
+            local touchX, touchY = ui.eventPoint(event, value, message, protocol)
+            if (event == "key" and value == keys.b) or ui.hit(buttons.back, touchX, touchY) then
                 return
-            elseif event == "key" and value == keys.e then
+            elseif (event == "key" and value == keys.e) or ui.hit(buttons.enabled, touchX, touchY) then
                 config.alarms.enabled = not config.alarms.enabled
                 saveConfig()
-            elseif event == "key" and value == keys.l then
+            elseif (event == "key" and value == keys.l) or ui.hit(buttons.low, touchX, touchY) then
                 config.alarms.lowFuel = editNumber("Low-fuel warning", config.alarms.lowFuel, 1, 99)
                 if config.alarms.criticalFuel > config.alarms.lowFuel then
                     config.alarms.criticalFuel = config.alarms.lowFuel
                 end
                 saveConfig()
                 restoreTimersAfterTextInput()
-            elseif event == "key" and value == keys.c then
+            elseif (event == "key" and value == keys.c) or ui.hit(buttons.critical, touchX, touchY) then
                 config.alarms.criticalFuel = editNumber("Critical-fuel warning",
                     config.alarms.criticalFuel, 0, config.alarms.lowFuel)
                 saveConfig()
                 restoreTimersAfterTextInput()
-            elseif event == "key" and value == keys.v then
+            elseif (event == "key" and value == keys.v) or ui.hit(buttons.volume, touchX, touchY) then
                 config.alarms.volume = config.alarms.volume + 0.5
                 if config.alarms.volume > 3 then config.alarms.volume = 0.5 end
                 saveConfig()
-            elseif event == "key" and value == keys.x then
+            elseif (event == "key" and value == keys.x) or ui.hit(buttons.test, touchX, touchY) then
                 playSound("minecraft:block.note_block.bell", 0.8, true)
             elseif event == "rednet_message" then
                 handleNetwork(value, message, protocol)
@@ -653,6 +660,24 @@ function mainframe.run(config)
     end
 
     local function settings()
+        local buttons = {}
+        local function changeTimeout(direction)
+            local currentIndex = 1
+            for index, timeout in ipairs(timeoutChoices) do
+                if timeout == config.discovery.maintenanceTimeout then
+                    currentIndex = index
+                    break
+                end
+            end
+            local nextIndex = ((currentIndex - 1 + direction) % #timeoutChoices) + 1
+            config.discovery.maintenanceTimeout = timeoutChoices[nextIndex]
+            saveConfig()
+            if maintenance then
+                if maintenanceTimer then os.cancelTimer(maintenanceTimer) end
+                startMaintenance()
+            end
+        end
+
         local function renderSettings()
             ui.header("SETTINGS", "System preferences")
             ui.status("Default mode", config.discovery.defaultMode == "event" and "AUTOMATIC" or "MANUAL", colors.cyan)
@@ -664,60 +689,57 @@ function mainframe.run(config)
                 ui.status("Registry", "OUTDATED", colors.orange)
             end
             print("")
-            print("D  Change default mode")
-            print("<- / ->  Change timeout")
+            buttons.defaultMode = ui.inlineButton("DEFAULT MODE", colors.cyan)
+            write(" ")
+            buttons.names = ui.inlineButton("SHOW/HIDE NAMES", colors.cyan)
+            print("")
+            buttons.timeoutPrevious = ui.inlineButton("< TIMEOUT", colors.cyan)
+            write(" ")
+            buttons.timeoutNext = ui.inlineButton("TIMEOUT >", colors.cyan)
+            print("")
             if maintenance then
-                print("F  Finish maintenance")
+                buttons.maintenance = ui.button("FINISH MAINTENANCE", colors.orange)
             else
-                print("M  Begin manual maintenance")
+                buttons.maintenance = ui.button("BEGIN MAINTENANCE", colors.orange)
             end
-            print("H  Show/hide peripheral names")
-            print("N  Name devices")
-            print("P  Power display")
-            print("A  Alarm settings")
-            print("B  Back")
+            buttons.naming = ui.inlineButton("NAME DEVICES", colors.cyan)
+            write(" ")
+            buttons.power = ui.inlineButton("POWER DISPLAY", colors.cyan)
+            print("")
+            buttons.alarms = ui.inlineButton("ALARM SETTINGS", colors.cyan)
+            write(" ")
+            buttons.back = ui.inlineButton("BACK", colors.cyan)
+            print("")
         end
 
         while true do
             renderSettings()
             local event, value, message, protocol = os.pullEvent()
-            if event == "key" and value == keys.b then
+            local touchX, touchY = ui.eventPoint(event, value, message, protocol)
+            if (event == "key" and value == keys.b) or ui.hit(buttons.back, touchX, touchY) then
                 return
-            elseif event == "key" and value == keys.d then
+            elseif (event == "key" and value == keys.d) or ui.hit(buttons.defaultMode, touchX, touchY) then
                 config.discovery.defaultMode = config.discovery.defaultMode == "event" and "manual" or "event"
                 saveConfig()
                 if not maintenance and config.discovery.defaultMode == "event" and registryStale then
                     rescan(true)
                 end
-            elseif event == "key" and (value == keys.left or value == keys.right) then
-                local currentIndex = 1
-                for index, timeout in ipairs(timeoutChoices) do
-                    if timeout == config.discovery.maintenanceTimeout then
-                        currentIndex = index
-                        break
-                    end
-                end
-                local direction = value == keys.right and 1 or -1
-                local nextIndex = ((currentIndex - 1 + direction) % #timeoutChoices) + 1
-                local nextTimeout = timeoutChoices[nextIndex]
-                config.discovery.maintenanceTimeout = nextTimeout
-                saveConfig()
-                if maintenance then
-                    if maintenanceTimer then os.cancelTimer(maintenanceTimer) end
-                    startMaintenance()
-                end
-            elseif event == "key" and value == keys.m and not maintenance then
+            elseif (event == "key" and value == keys.left) or ui.hit(buttons.timeoutPrevious, touchX, touchY) then
+                changeTimeout(-1)
+            elseif (event == "key" and value == keys.right) or ui.hit(buttons.timeoutNext, touchX, touchY) then
+                changeTimeout(1)
+            elseif ((event == "key" and value == keys.m) or ui.hit(buttons.maintenance, touchX, touchY)) and not maintenance then
                 startMaintenance()
-            elseif event == "key" and value == keys.f and maintenance then
+            elseif ((event == "key" and value == keys.f) or ui.hit(buttons.maintenance, touchX, touchY)) and maintenance then
                 stopMaintenance()
-            elseif event == "key" and value == keys.h then
+            elseif (event == "key" and value == keys.h) or ui.hit(buttons.names, touchX, touchY) then
                 config.ui.showPeripheralNames = not config.ui.showPeripheralNames
                 saveConfig()
-            elseif event == "key" and value == keys.n then
+            elseif (event == "key" and value == keys.n) or ui.hit(buttons.naming, touchX, touchY) then
                 namingSettings()
-            elseif event == "key" and value == keys.p then
+            elseif (event == "key" and value == keys.p) or ui.hit(buttons.power, touchX, touchY) then
                 powerSettings()
-            elseif event == "key" and value == keys.a then
+            elseif (event == "key" and value == keys.a) or ui.hit(buttons.alarms, touchX, touchY) then
                 alarmSettings()
             elseif event == "rednet_message" then
                 handleNetwork(value, message, protocol)
@@ -758,7 +780,8 @@ function mainframe.run(config)
             if #reactors == 0 then
                 ui.status("Status", "NO REACTORS FOUND", colors.orange)
                 print("")
-                print("B  Back")
+                previousButton, nextButton, viewSilenceButton = nil, nil, nil
+                backButton = ui.button("BACK", colors.cyan)
                 return
             end
             if selected > #reactors then selected = #reactors end
@@ -794,9 +817,12 @@ function mainframe.run(config)
             else
                 viewSilenceButton = nil
             end
-            previousButton = ui.button("< PREVIOUS", colors.cyan)
-            nextButton = ui.button("NEXT >", colors.cyan)
-            backButton = ui.button("BACK", colors.cyan)
+            previousButton = ui.inlineButton("< PREVIOUS", colors.cyan)
+            write(" ")
+            nextButton = ui.inlineButton("NEXT >", colors.cyan)
+            write(" ")
+            backButton = ui.inlineButton("BACK", colors.cyan)
+            print("")
         end
 
         while true do
@@ -853,7 +879,8 @@ function mainframe.run(config)
             if #turbines == 0 then
                 ui.status("Status", "NO TURBINES FOUND", colors.orange)
                 print("")
-                print("B  Back")
+                previousButton, nextButton = nil, nil
+                backButton = ui.button("BACK", colors.cyan)
                 return
             end
             if selected > #turbines then selected = #turbines end
@@ -875,25 +902,29 @@ function mainframe.run(config)
                 if turbine.ventMode ~= nil then ui.status("Vent mode", tostring(turbine.ventMode)) end
             end
             print("")
-            previousButton = ui.button("< PREVIOUS", colors.cyan)
-            nextButton = ui.button("NEXT >", colors.cyan)
-            backButton = ui.button("BACK", colors.cyan)
+            previousButton = ui.inlineButton("< PREVIOUS", colors.cyan)
+            write(" ")
+            nextButton = ui.inlineButton("NEXT >", colors.cyan)
+            write(" ")
+            backButton = ui.inlineButton("BACK", colors.cyan)
+            print("")
         end
 
         while true do
             draw()
             local event, value, message, protocol = os.pullEvent()
+            local touchX, touchY = ui.eventPoint(event, value, message, protocol)
             if event == "key" and value == keys.b then
                 return
             elseif event == "key" and value == keys.left and #turbines > 0 then
                 selected = ((selected - 2) % #turbines) + 1
             elseif event == "key" and value == keys.right and #turbines > 0 then
                 selected = (selected % #turbines) + 1
-            elseif (event == "mouse_click" or event == "monitor_touch") and ui.hit(previousButton, message, protocol) and #turbines > 0 then
+            elseif ui.hit(previousButton, touchX, touchY) and #turbines > 0 then
                 selected = ((selected - 2) % #turbines) + 1
-            elseif (event == "mouse_click" or event == "monitor_touch") and ui.hit(nextButton, message, protocol) and #turbines > 0 then
+            elseif ui.hit(nextButton, touchX, touchY) and #turbines > 0 then
                 selected = (selected % #turbines) + 1
-            elseif (event == "mouse_click" or event == "monitor_touch") and ui.hit(backButton, message, protocol) then
+            elseif ui.hit(backButton, touchX, touchY) then
                 return
             elseif event == "rednet_message" then
                 handleNetwork(value, message, protocol)
@@ -935,7 +966,8 @@ function mainframe.run(config)
                 ui.status("Status", "NO SUPPORTED STORAGE FOUND", colors.orange)
                 print("")
                 print("Generic support requires stored + capacity methods.")
-                print("B  Back")
+                previousButton, nextButton = nil, nil
+                backButton = ui.button("BACK", colors.cyan)
                 return
             end
             if selected > #storages then selected = #storages end
@@ -965,25 +997,29 @@ function mainframe.run(config)
                 end
             end
             print("")
-            previousButton = ui.button("< PREVIOUS", colors.cyan)
-            nextButton = ui.button("NEXT >", colors.cyan)
-            backButton = ui.button("BACK", colors.cyan)
+            previousButton = ui.inlineButton("< PREVIOUS", colors.cyan)
+            write(" ")
+            nextButton = ui.inlineButton("NEXT >", colors.cyan)
+            write(" ")
+            backButton = ui.inlineButton("BACK", colors.cyan)
+            print("")
         end
 
         while true do
             draw()
             local event, value, message, protocol = os.pullEvent()
+            local touchX, touchY = ui.eventPoint(event, value, message, protocol)
             if event == "key" and value == keys.b then
                 return
             elseif event == "key" and value == keys.left and #storages > 0 then
                 selected = ((selected - 2) % #storages) + 1
             elseif event == "key" and value == keys.right and #storages > 0 then
                 selected = (selected % #storages) + 1
-            elseif (event == "mouse_click" or event == "monitor_touch") and ui.hit(previousButton, message, protocol) and #storages > 0 then
+            elseif ui.hit(previousButton, touchX, touchY) and #storages > 0 then
                 selected = ((selected - 2) % #storages) + 1
-            elseif (event == "mouse_click" or event == "monitor_touch") and ui.hit(nextButton, message, protocol) and #storages > 0 then
+            elseif ui.hit(nextButton, touchX, touchY) and #storages > 0 then
                 selected = (selected % #storages) + 1
-            elseif (event == "mouse_click" or event == "monitor_touch") and ui.hit(backButton, message, protocol) then
+            elseif ui.hit(backButton, touchX, touchY) then
                 return
             elseif event == "rednet_message" then
                 handleNetwork(value, message, protocol)
