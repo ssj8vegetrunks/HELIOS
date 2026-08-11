@@ -34,6 +34,13 @@ function ui.hit(button, x, y)
     return button and y == button.y and x >= button.x1 and x <= button.x2
 end
 
+function ui.eventPoint(event, first, second, third)
+    if event == "monitor_touch" or event == "mouse_click" then
+        return second, third
+    end
+    return nil, nil
+end
+
 function ui.prepare()
     term.setBackgroundColor(colors.black)
     term.setTextColor(colors.white)
