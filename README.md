@@ -1,4 +1,4 @@
-# HELIOS — v1.4.0 Alpha 2 Automatic Turbine Governor
+# HELIOS — v1.4.0 Alpha 3 Automatic Turbine Governor
 
 Industrial power management for **CC:Tweaked** and **Extreme Reactors**.
 
@@ -29,6 +29,8 @@ The existing touch interface and network-ID protection remain online:
 - governor states, proposed changes, and actuator results appear on mainframe and remote turbine screens;
 - the governor holds on missing, conflicting, inactive, or unsupported telemetry;
 - normal changes require two matching readings, are limited to 100 mB/t every two seconds, and are verified by read-back;
+- turbines below 1500 RPM spool with the inductor disengaged and maximum permitted steam flow;
+- turbines engage their inductor at 1775 RPM, with hysteresis preventing clutch chatter;
 - three consecutive readings confirm overspeed before an immediate zero-flow command;
 - confirmed turbine overspeed becomes a system-wide critical alarm;
 - rejected or unverifiable actuator commands become system-wide control-fault warnings;
@@ -231,21 +233,23 @@ terminal can press `S` to silence only its local speaker. Warnings remain visibl
 new conditions can sound, and silence resets after the condition clears.
 Press `X` on either computer's alarm interface to test its locally attached speaker.
 
-## Observing turbine governor
+## Automatic turbine governor
 
 Press `C` or touch `[CONTROL]` on the mainframe dashboard. The screen shows each
 turbine's live governor state, target RPM, current flow-limit setting, proposed
 setting, and action. Use Previous/Next to inspect turbines independently.
 
-The first governor targets 1800 RPM with a 25 RPM deadband and limits each
-recommended change to 100 mB/t per evaluation. Three consecutive readings at
-or above 2000 RPM trigger the observing overspeed interlock, which recommends a
-zero flow limit and raises a global alarm. Missing or untrusted telemetry always
-produces HOLD.
+The governor targets 1800 RPM with a 25 RPM deadband and limits each normal
+flow change to 100 mB/t every two seconds. Below 1500 RPM it disengages the
+inductor and requests maximum permitted steam flow. At 1775 RPM it re-engages
+the inductor and transitions to normal regulation. Three consecutive readings
+at or above 2000 RPM trigger the overspeed interlock, which engages the inductor,
+cuts the flow limit to zero, and raises a global alarm. Missing or untrusted
+telemetry always produces HOLD.
 
-`AUTOMATIC` remains selected, but every tuning control and actuator call is
-locked. HELIOS calculates what it would do; it still cannot move rods, change
-flow, toggle a reactor, or engage a turbine.
+`AUTOMATIC` remains selected and tuning controls remain locked. HELIOS may only
+change a turbine's configured flow limit and inductor state. It still cannot
+move rods, toggle a reactor, start or stop a turbine, or change venting.
 
 See [`docs/CONTROL.md`](docs/CONTROL.md) for the concise control boundary and
 planned governor order.
@@ -261,7 +265,6 @@ trusting directed telemetry.
 
 ## Scope boundary
 
-Discovery, remote telemetry, and power hardware remain read-only. The turbine
-governor calculates and distributes recommendations, but actuator calls remain
-disabled. Reactor regulation, storage coordination, graphs, and additional
-specialized storage adapters come later.
+Remote terminals remain read-only. The mainframe may control only turbine flow
+limits and inductors through the guarded governor. Reactor regulation, storage
+coordination, graphs, and additional specialized storage adapters come later.
