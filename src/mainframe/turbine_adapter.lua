@@ -107,6 +107,34 @@ function adapter.setFlowLimit(turbine, requested)
     return true, verified
 end
 
+function adapter.setInductor(turbine, engaged)
+    if type(turbine) ~= "table" or type(turbine.name) ~= "string" then
+        return false, nil, "Invalid turbine identity"
+    end
+    if not peripheral.isPresent(turbine.name) then
+        return false, nil, "Peripheral unavailable"
+    end
+
+    local methods = availableMethods(turbine.name)
+    if not methods.setInductorEngaged or not methods.getInductorEngaged then
+        return false, nil, "Verified inductor control is unavailable"
+    end
+
+    engaged = engaged == true
+    local ok, reason = pcall(peripheral.call, turbine.name, "setInductorEngaged", engaged)
+    if not ok then return false, nil, tostring(reason) end
+
+    local readOk, actual = pcall(peripheral.call, turbine.name, "getInductorEngaged")
+    if not readOk or type(actual) ~= "boolean" then
+        return false, nil, "Inductor verification failed"
+    end
+    if actual ~= engaged then
+        return false, actual, ("Requested inductor %s; turbine reports %s"):format(
+            engaged and "engaged" or "disengaged", actual and "engaged" or "disengaged")
+    end
+    return true, actual
+end
+
 function adapter.readAll(devices)
     local turbines = {}
     for _, device in ipairs(devices or {}) do
