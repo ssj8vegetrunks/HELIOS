@@ -142,14 +142,27 @@ function terminal.run(config)
             ui.status("Mode", string.upper(item.mode or "unknown"))
             if item.error then ui.status("Telemetry", item.error, colors.red) return end
             ui.status("State", item.active == true and "ACTIVE" or item.active == false and "OFFLINE" or "UNKNOWN")
-            ui.status("Fuel", formatValue(item.fuelPercent, "%"))
-            ui.status("Fuel use", formatValue(item.fuelUse, " mB/t"))
-            ui.status("Fuel temp", formatValue(item.fuelTemperature, " C"))
-            ui.status("Casing temp", formatValue(item.casingTemperature, " C"))
+            ui.status("Fuel / use", ("%s / %s"):format(
+                formatValue(item.fuelPercent, "%"),
+                formatValue(item.fuelUse, " mB/t")))
+            ui.status("Temps fuel/case", ("%s / %s"):format(
+                formatValue(item.fuelTemperature, " C"),
+                formatValue(item.casingTemperature, " C")))
             if item.mode == "steam" then
-                ui.status("Steam output", formatValue(item.steamProduction, " mB/t"), colors.cyan)
-                ui.status("Coolant", formatValue(item.coolantPercent, "%"))
-                ui.status("Hot fluid", formatValue(item.hotFluidPercent, "%"))
+                local plan = item.governor or {}
+                ui.status("Steam out/target", ("%s / %s"):format(
+                    formatValue(item.steamProduction, ""),
+                    formatValue(plan.targetSteam, " mB/t")), colors.cyan)
+                ui.status("Coolant / hot", ("%s / %s"):format(
+                    formatValue(item.coolantPercent, "%"),
+                    formatValue(item.hotFluidPercent, "%")))
+                ui.status("Rod insertion", formatValue(item.controlRodLevel, "%"))
+                ui.status("Governor", (plan.state or "WAITING") .. " / " ..
+                    (plan.actuatorState or "WAITING"),
+                    (plan.trusted == false or plan.actuatorState == "FAULT") and
+                        colors.red or
+                    ((plan.state == "STEAM DEFICIT" or
+                      plan.state == "STEAM SURPLUS") and colors.orange or colors.lime))
             else
                 ui.status("Power output", powerFormat.power(item.energyProduction, state.power, true), colors.cyan)
                 ui.status("Energy buffer", formatValue(item.energyPercent, "%"))

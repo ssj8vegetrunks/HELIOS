@@ -1,6 +1,6 @@
 # HELIOS Control Boundary
 
-## v1.4.0-alpha.5
+## v1.4.0-alpha.6
 
 The Power Control screen now runs a guarded automatic turbine governor.
 
@@ -33,13 +33,27 @@ The Power Control screen now runs a guarded automatic turbine governor.
 - Mainframe monitors may navigate the interface by touch.
 - Remote terminals remain read-only.
 
+The mainframe also runs a guarded steam-demand governor for one active,
+actively cooled reactor:
+
+- Trusted demand is the sum of configured intake limits for all active turbines.
+- Production below demand withdraws rods; production above demand inserts rods.
+- Rod changes require three matching samples, are capped at 5%, and are spaced five seconds apart.
+- Every `setAllControlRodLevels` command is verified by reading every rod level back.
+- An 85% hot-fluid buffer forces rod insertion to reduce backed-up production.
+- Zero active turbine demand gradually inserts all rods to 100%.
+- Missing or untrusted turbine demand, maintenance, ID conflict, unsupported telemetry, and inactive reactors hold.
+- More than one active steam reactor holds until explicit reactor-to-turbine routing is implemented.
+- Reactor actuator rejection or read-back mismatch raises a global control fault.
+- A reactor that cannot meet demand at 0% insertion, or cannot reduce output at 100%, raises a global steam-capacity warning.
+
 ## Prepared settings
 
 - Turbine targets: learned 900- or 1800-RPM band
 - Turbine deadband: 25 RPM
 - Overspeed threshold: 2000 RPM for 3 readings
 - Storage demand band: 25% to 85%
-- Maximum reactor rod step: 5%
+- Maximum reactor rod step: 5% every 5 seconds after 3 matching readings
 - Maximum turbine flow step: 100 mB/t
 - Adjustment interval: 2 seconds
 - First calibration target: 900 RPM
@@ -56,8 +70,8 @@ interface until the automatic governors and safety interlocks are implemented.
 
 ## Next implementation order
 
-1. Validate automatic turbine spool-up and steady-state behavior
-2. Reactor steam-demand governor
+1. Validate reactor steam matching and fuel use on the live plant
+2. Explicit reactor-to-turbine routing for multiple steam loops
 3. Storage-based plant demand coordinator
 4. Action history and user-defined tuning controls
 

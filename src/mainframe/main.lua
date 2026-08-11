@@ -7,6 +7,7 @@ function mainframe.run(config)
     local configStore = dofile("/helios/core/config.lua")
     local registry = dofile("/helios/mainframe/device_registry.lua")
     local reactorAdapter = dofile("/helios/mainframe/reactor_adapter.lua")
+    local reactorGovernor = dofile("/helios/mainframe/reactor_governor.lua")
     local turbineAdapter = dofile("/helios/mainframe/turbine_adapter.lua")
     local turbineGovernor = dofile("/helios/mainframe/turbine_governor.lua")
     local storageAdapter = dofile("/helios/mainframe/storage_adapter.lua")
@@ -35,6 +36,7 @@ function mainframe.run(config)
     local idConflicts = {}
     local dashboardButtons = {}
     local governorMemory = turbineGovernor.new()
+    local reactorGovernorMemory = reactorGovernor.new()
 
     local timeoutChoices = { 300, 900, 1800, 3600 }
 
@@ -143,6 +145,17 @@ function mainframe.run(config)
         for _, reactor in ipairs(reactors) do
             if reactor.error and not maintenance then
                 add(3, reactor.name .. ":telemetry", alarmName(reactor.name) .. " TELEMETRY LOST")
+            elseif reactor.governor and reactor.governor.actuatorState == "FAULT" then
+                add(2, reactor.name .. ":control", alarmName(reactor.name) .. " CONTROL FAULT")
+            elseif reactor.governor and reactor.governor.state == "STEAM DEFICIT" then
+                add(2, reactor.name .. ":steam-deficit",
+                    alarmName(reactor.name) .. " CANNOT MEET STEAM DEMAND")
+            elseif reactor.governor and reactor.governor.state == "STEAM SURPLUS" then
+                add(2, reactor.name .. ":steam-surplus",
+                    alarmName(reactor.name) .. " STEAM OUTPUT CANNOT REDUCE")
+            elseif reactor.governor and reactor.governor.state == "RODS NOT UNIFORM" then
+                add(2, reactor.name .. ":rod-levels",
+                    alarmName(reactor.name) .. " CONTROL RODS NOT UNIFORM")
             elseif reactor.fuelPercent then
                 if reactor.fuelPercent <= config.alarms.criticalFuel then
                     add(3, reactor.name .. ":fuel-critical", alarmName(reactor.name) .. " FUEL CRITICAL")
@@ -232,6 +245,19 @@ function mainframe.run(config)
         }, {
             setFlowLimit = turbineAdapter.setFlowLimit,
             setInductor = turbineAdapter.setInductor,
+        })
+        reactorGovernor.evaluateAll(reactorGovernorMemory, reactors, turbines,
+            config.control, {
+                maintenance = maintenance,
+                mainframeId = os.getComputerID(),
+                idConflicts = idConflicts,
+                now = os.epoch("utc") / 1000,
+            })
+        reactorGovernor.applyAll(reactorGovernorMemory, reactors, config.control, {
+            maintenance = maintenance,
+            now = os.epoch("utc") / 1000,
+        }, {
+            setAllControlRodLevels = reactorAdapter.setAllControlRodLevels,
         })
         updateAlarm()
         local conflictsChanged = refreshIdConflicts()
@@ -361,6 +387,54 @@ function mainframe.run(config)
         return math.max(0, math.ceil((maintenanceEndsAt - os.epoch("utc")) / 1000))
     end
 
+    local function controlStatus()
+        if maintenance then return "MAINTENANCE / ACTUATORS PAUSED", colors.orange end
+        if #idConflicts > 0 then return "CONTROL LOCKED / ID CONFLICT", colors.red end
+
+        for _, turbine in ipairs(turbines) do
+            local plan = turbine.governor or {}
+            if plan.actuatorState == "FAULT" or plan.state == "CALIBRATION FAILED" then
+                return "CONTROL FAULT / ATTENTION REQUIRED", colors.red
+            end
+            if tostring(plan.state or ""):find("CALIBRATION", 1, true) then
+                return "AUTOMATIC / CALIBRATING TURBINES", colors.orange
+            end
+        end
+        for _, reactor in ipairs(reactors) do
+            local plan = reactor.governor or {}
+            if plan.actuatorState == "FAULT" then
+                return "CONTROL FAULT / ATTENTION REQUIRED", colors.red
+            elseif plan.state == "STEAM DEFICIT" or plan.state == "STEAM SURPLUS" then
+                return "AUTOMATIC / STEAM CAPACITY LIMIT", colors.orange
+            elseif reactor.active == true and reactor.mode == "steam" and
+                   plan.trusted == false then
+                return "AUTOMATIC / REACTOR CONTROL HELD", colors.orange
+            end
+        end
+
+        local target, count, matching, allStable = nil, 0, true, true
+        for _, turbine in ipairs(turbines) do
+            local plan = turbine.governor or {}
+            if turbine.active == true and plan.calibrated then
+                local wanted = tonumber(plan.targetRpm)
+                if target and wanted and math.abs(target - wanted) > 1 then matching = false end
+                target = target or wanted
+                count = count + 1
+                if plan.state ~= "STABLE" or plan.actuatorState ~= "HOLD" then
+                    allStable = false
+                end
+            end
+        end
+        if count > 0 and matching and target and allStable then
+            return ("AUTOMATIC / HOLDING %.0f RPM"):format(target), colors.lime
+        elseif count > 0 then
+            return "AUTOMATIC / GOVERNORS ACTIVE", colors.lime
+        elseif #turbines > 0 or #reactors > 0 then
+            return "AUTOMATIC / WAITING FOR PLANT", colors.orange
+        end
+        return "AUTOMATIC / NO CONTROLLED PLANT", colors.gray
+    end
+
     local function render()
         ui.setIdConflicts(idConflicts)
         ui.header("MAINFRAME", "Central control authority")
@@ -374,7 +448,8 @@ function mainframe.run(config)
             (function() local count = 0 for _ in pairs(terminals) do count = count + 1 end return count end)()),
             onlineTerminalCount() > 0 and colors.lime or colors.gray)
         ui.status("Discovery", modeName(), maintenance and colors.orange or colors.cyan)
-        ui.status("Control", "GOVERNOR OBSERVING / ACTUATORS DISABLED", colors.orange)
+        local controlText, controlColour = controlStatus()
+        ui.status("Control", controlText, controlColour)
         if registryStale then
             term.setTextColor(colors.orange)
             print("Registry may be outdated")
@@ -844,7 +919,7 @@ function mainframe.run(config)
         end
 
         local function draw()
-            ui.header("REACTORS", "Read-only live telemetry")
+            ui.header("REACTORS", "Live telemetry and steam governor")
             if #reactors == 0 then
                 ui.status("Status", "NO REACTORS FOUND", colors.orange)
                 print("")
@@ -861,14 +936,27 @@ function mainframe.run(config)
             else
                 ui.status("State", reactor.active == true and "ACTIVE" or reactor.active == false and "OFFLINE" or "UNKNOWN",
                     reactor.active == true and colors.lime or colors.orange)
-                ui.status("Fuel", formatValue(reactor.fuelPercent, "%"))
-                ui.status("Fuel use", formatValue(reactor.fuelUse, " mB/t"))
-                ui.status("Fuel temp", formatValue(reactor.fuelTemperature, " C"))
-                ui.status("Casing temp", formatValue(reactor.casingTemperature, " C"))
+                ui.status("Fuel / use", ("%s / %s"):format(
+                    formatValue(reactor.fuelPercent, "%"),
+                    formatValue(reactor.fuelUse, " mB/t")))
+                ui.status("Temps fuel/case", ("%s / %s"):format(
+                    formatValue(reactor.fuelTemperature, " C"),
+                    formatValue(reactor.casingTemperature, " C")))
                 if reactor.mode == "steam" then
-                    ui.status("Steam output", formatValue(reactor.steamProduction, " mB/t"), colors.cyan)
-                    ui.status("Coolant", formatValue(reactor.coolantPercent, "%"))
-                    ui.status("Hot fluid", formatValue(reactor.hotFluidPercent, "%"))
+                    local plan = reactor.governor or {}
+                    ui.status("Steam out/target", ("%s / %s"):format(
+                        formatValue(reactor.steamProduction, ""),
+                        formatValue(plan.targetSteam, " mB/t")), colors.cyan)
+                    ui.status("Coolant / hot", ("%s / %s"):format(
+                        formatValue(reactor.coolantPercent, "%"),
+                        formatValue(reactor.hotFluidPercent, "%")))
+                    ui.status("Rod insertion", formatValue(reactor.controlRodLevel, "%"))
+                    ui.status("Governor", (plan.state or "WAITING") .. " / " ..
+                        (plan.actuatorState or "WAITING"),
+                        (plan.trusted == false or plan.actuatorState == "FAULT") and
+                            colors.red or
+                        ((plan.state == "STEAM DEFICIT" or
+                          plan.state == "STEAM SURPLUS") and colors.orange or colors.lime))
                 else
                     ui.status("Power output", powerFormat.power(reactor.energyProduction, config.power, true), colors.cyan)
                     ui.status("Energy buffer", formatValue(reactor.energyPercent, "%"))

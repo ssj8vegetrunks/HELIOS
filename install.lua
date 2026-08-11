@@ -1,7 +1,7 @@
 -- HELIOS single-file installer
--- Milestone 7.3: staged 900/1800-RPM turbine calibration.
+-- Milestone 8.1: verified reactor steam-demand control.
 
-local VERSION = "1.4.0-alpha.5"
+local VERSION = "1.4.0-alpha.6"
 local INSTALL_DIR = "/helios"
 local STAGE_DIR = "/.helios-install"
 
@@ -113,7 +113,18 @@ function config.load()
         math.floor(tonumber(loaded.control.overspeedSamples) or 3))
     loaded.control.storageLow = tonumber(loaded.control.storageLow) or 25
     loaded.control.storageHigh = tonumber(loaded.control.storageHigh) or 85
-    loaded.control.maxRodStep = tonumber(loaded.control.maxRodStep) or 5
+    loaded.control.maxRodStep = math.max(1, math.min(10,
+        tonumber(loaded.control.maxRodStep) or 5))
+    loaded.control.reactorAdjustmentInterval = math.max(2,
+        tonumber(loaded.control.reactorAdjustmentInterval) or 5)
+    loaded.control.reactorCommandSamples = math.max(2,
+        math.floor(tonumber(loaded.control.reactorCommandSamples) or 3))
+    loaded.control.reactorSteamDeadband = math.max(0.01, math.min(0.25,
+        tonumber(loaded.control.reactorSteamDeadband) or 0.03))
+    loaded.control.reactorSteamDeadbandMin = math.max(1,
+        tonumber(loaded.control.reactorSteamDeadbandMin) or 25)
+    loaded.control.reactorHotFluidHigh = math.max(50, math.min(99,
+        tonumber(loaded.control.reactorHotFluidHigh) or 85))
     loaded.control.maxFlowStep = tonumber(loaded.control.maxFlowStep) or 100
     loaded.control.adjustmentInterval = tonumber(loaded.control.adjustmentInterval) or 2
     loaded.control.commandSamples = math.max(1,
@@ -692,6 +703,7 @@ function mainframe.run(config)
     local configStore = dofile("/helios/core/config.lua")
     local registry = dofile("/helios/mainframe/device_registry.lua")
     local reactorAdapter = dofile("/helios/mainframe/reactor_adapter.lua")
+    local reactorGovernor = dofile("/helios/mainframe/reactor_governor.lua")
     local turbineAdapter = dofile("/helios/mainframe/turbine_adapter.lua")
     local turbineGovernor = dofile("/helios/mainframe/turbine_governor.lua")
     local storageAdapter = dofile("/helios/mainframe/storage_adapter.lua")
@@ -720,6 +732,7 @@ function mainframe.run(config)
     local idConflicts = {}
     local dashboardButtons = {}
     local governorMemory = turbineGovernor.new()
+    local reactorGovernorMemory = reactorGovernor.new()
 
     local timeoutChoices = { 300, 900, 1800, 3600 }
 
@@ -828,6 +841,17 @@ function mainframe.run(config)
         for _, reactor in ipairs(reactors) do
             if reactor.error and not maintenance then
                 add(3, reactor.name .. ":telemetry", alarmName(reactor.name) .. " TELEMETRY LOST")
+            elseif reactor.governor and reactor.governor.actuatorState == "FAULT" then
+                add(2, reactor.name .. ":control", alarmName(reactor.name) .. " CONTROL FAULT")
+            elseif reactor.governor and reactor.governor.state == "STEAM DEFICIT" then
+                add(2, reactor.name .. ":steam-deficit",
+                    alarmName(reactor.name) .. " CANNOT MEET STEAM DEMAND")
+            elseif reactor.governor and reactor.governor.state == "STEAM SURPLUS" then
+                add(2, reactor.name .. ":steam-surplus",
+                    alarmName(reactor.name) .. " STEAM OUTPUT CANNOT REDUCE")
+            elseif reactor.governor and reactor.governor.state == "RODS NOT UNIFORM" then
+                add(2, reactor.name .. ":rod-levels",
+                    alarmName(reactor.name) .. " CONTROL RODS NOT UNIFORM")
             elseif reactor.fuelPercent then
                 if reactor.fuelPercent <= config.alarms.criticalFuel then
                     add(3, reactor.name .. ":fuel-critical", alarmName(reactor.name) .. " FUEL CRITICAL")
@@ -917,6 +941,19 @@ function mainframe.run(config)
         }, {
             setFlowLimit = turbineAdapter.setFlowLimit,
             setInductor = turbineAdapter.setInductor,
+        })
+        reactorGovernor.evaluateAll(reactorGovernorMemory, reactors, turbines,
+            config.control, {
+                maintenance = maintenance,
+                mainframeId = os.getComputerID(),
+                idConflicts = idConflicts,
+                now = os.epoch("utc") / 1000,
+            })
+        reactorGovernor.applyAll(reactorGovernorMemory, reactors, config.control, {
+            maintenance = maintenance,
+            now = os.epoch("utc") / 1000,
+        }, {
+            setAllControlRodLevels = reactorAdapter.setAllControlRodLevels,
         })
         updateAlarm()
         local conflictsChanged = refreshIdConflicts()
@@ -1046,6 +1083,54 @@ function mainframe.run(config)
         return math.max(0, math.ceil((maintenanceEndsAt - os.epoch("utc")) / 1000))
     end
 
+    local function controlStatus()
+        if maintenance then return "MAINTENANCE / ACTUATORS PAUSED", colors.orange end
+        if #idConflicts > 0 then return "CONTROL LOCKED / ID CONFLICT", colors.red end
+
+        for _, turbine in ipairs(turbines) do
+            local plan = turbine.governor or {}
+            if plan.actuatorState == "FAULT" or plan.state == "CALIBRATION FAILED" then
+                return "CONTROL FAULT / ATTENTION REQUIRED", colors.red
+            end
+            if tostring(plan.state or ""):find("CALIBRATION", 1, true) then
+                return "AUTOMATIC / CALIBRATING TURBINES", colors.orange
+            end
+        end
+        for _, reactor in ipairs(reactors) do
+            local plan = reactor.governor or {}
+            if plan.actuatorState == "FAULT" then
+                return "CONTROL FAULT / ATTENTION REQUIRED", colors.red
+            elseif plan.state == "STEAM DEFICIT" or plan.state == "STEAM SURPLUS" then
+                return "AUTOMATIC / STEAM CAPACITY LIMIT", colors.orange
+            elseif reactor.active == true and reactor.mode == "steam" and
+                   plan.trusted == false then
+                return "AUTOMATIC / REACTOR CONTROL HELD", colors.orange
+            end
+        end
+
+        local target, count, matching, allStable = nil, 0, true, true
+        for _, turbine in ipairs(turbines) do
+            local plan = turbine.governor or {}
+            if turbine.active == true and plan.calibrated then
+                local wanted = tonumber(plan.targetRpm)
+                if target and wanted and math.abs(target - wanted) > 1 then matching = false end
+                target = target or wanted
+                count = count + 1
+                if plan.state ~= "STABLE" or plan.actuatorState ~= "HOLD" then
+                    allStable = false
+                end
+            end
+        end
+        if count > 0 and matching and target and allStable then
+            return ("AUTOMATIC / HOLDING %.0f RPM"):format(target), colors.lime
+        elseif count > 0 then
+            return "AUTOMATIC / GOVERNORS ACTIVE", colors.lime
+        elseif #turbines > 0 or #reactors > 0 then
+            return "AUTOMATIC / WAITING FOR PLANT", colors.orange
+        end
+        return "AUTOMATIC / NO CONTROLLED PLANT", colors.gray
+    end
+
     local function render()
         ui.setIdConflicts(idConflicts)
         ui.header("MAINFRAME", "Central control authority")
@@ -1059,7 +1144,8 @@ function mainframe.run(config)
             (function() local count = 0 for _ in pairs(terminals) do count = count + 1 end return count end)()),
             onlineTerminalCount() > 0 and colors.lime or colors.gray)
         ui.status("Discovery", modeName(), maintenance and colors.orange or colors.cyan)
-        ui.status("Control", "GOVERNOR OBSERVING / ACTUATORS DISABLED", colors.orange)
+        local controlText, controlColour = controlStatus()
+        ui.status("Control", controlText, controlColour)
         if registryStale then
             term.setTextColor(colors.orange)
             print("Registry may be outdated")
@@ -1529,7 +1615,7 @@ function mainframe.run(config)
         end
 
         local function draw()
-            ui.header("REACTORS", "Read-only live telemetry")
+            ui.header("REACTORS", "Live telemetry and steam governor")
             if #reactors == 0 then
                 ui.status("Status", "NO REACTORS FOUND", colors.orange)
                 print("")
@@ -1546,14 +1632,27 @@ function mainframe.run(config)
             else
                 ui.status("State", reactor.active == true and "ACTIVE" or reactor.active == false and "OFFLINE" or "UNKNOWN",
                     reactor.active == true and colors.lime or colors.orange)
-                ui.status("Fuel", formatValue(reactor.fuelPercent, "%"))
-                ui.status("Fuel use", formatValue(reactor.fuelUse, " mB/t"))
-                ui.status("Fuel temp", formatValue(reactor.fuelTemperature, " C"))
-                ui.status("Casing temp", formatValue(reactor.casingTemperature, " C"))
+                ui.status("Fuel / use", ("%s / %s"):format(
+                    formatValue(reactor.fuelPercent, "%"),
+                    formatValue(reactor.fuelUse, " mB/t")))
+                ui.status("Temps fuel/case", ("%s / %s"):format(
+                    formatValue(reactor.fuelTemperature, " C"),
+                    formatValue(reactor.casingTemperature, " C")))
                 if reactor.mode == "steam" then
-                    ui.status("Steam output", formatValue(reactor.steamProduction, " mB/t"), colors.cyan)
-                    ui.status("Coolant", formatValue(reactor.coolantPercent, "%"))
-                    ui.status("Hot fluid", formatValue(reactor.hotFluidPercent, "%"))
+                    local plan = reactor.governor or {}
+                    ui.status("Steam out/target", ("%s / %s"):format(
+                        formatValue(reactor.steamProduction, ""),
+                        formatValue(plan.targetSteam, " mB/t")), colors.cyan)
+                    ui.status("Coolant / hot", ("%s / %s"):format(
+                        formatValue(reactor.coolantPercent, "%"),
+                        formatValue(reactor.hotFluidPercent, "%")))
+                    ui.status("Rod insertion", formatValue(reactor.controlRodLevel, "%"))
+                    ui.status("Governor", (plan.state or "WAITING") .. " / " ..
+                        (plan.actuatorState or "WAITING"),
+                        (plan.trusted == false or plan.actuatorState == "FAULT") and
+                            colors.red or
+                        ((plan.state == "STEAM DEFICIT" or
+                          plan.state == "STEAM SURPLUS") and colors.orange or colors.lime))
                 else
                     ui.status("Power output", powerFormat.power(reactor.energyProduction, config.power, true), colors.cyan)
                     ui.status("Energy buffer", formatValue(reactor.energyPercent, "%"))
@@ -1898,6 +1997,46 @@ local function percent(amount, maximum)
     return math.max(0, math.min(100, amount / maximum * 100))
 end
 
+local function availableMethods(name)
+    local methods = {}
+    for _, method in ipairs(peripheral.getMethods(name) or {}) do
+        methods[method] = true
+    end
+    return methods
+end
+
+local function rodLevels(name, methods, count)
+    local levels
+    if methods.getControlRodsLevels then
+        local ok, values = pcall(peripheral.call, name, "getControlRodsLevels")
+        if ok and type(values) == "table" then levels = values end
+    end
+    if not levels and methods.getControlRodLevel and count and count > 0 then
+        levels = {}
+        for index = 0, count - 1 do
+            local ok, value = pcall(peripheral.call, name, "getControlRodLevel", index)
+            if not ok or tonumber(value) == nil then return nil end
+            levels[index] = tonumber(value)
+        end
+    end
+    return levels
+end
+
+local function rodSummary(levels)
+    if type(levels) ~= "table" then return nil, nil, nil end
+    local total, count, minimum, maximum = 0, 0
+    for _, value in pairs(levels) do
+        value = number(value)
+        if value then
+            total, count = total + value, count + 1
+            minimum = minimum and math.min(minimum, value) or value
+            maximum = maximum and math.max(maximum, value) or value
+        end
+    end
+    if count == 0 then return nil, nil, nil end
+    return total / count, minimum, maximum
+end
+
 function adapter.read(device)
     local name = device.name
     local reactor = { name = name, available = peripheral.isPresent(name) }
@@ -1906,10 +2045,7 @@ function adapter.read(device)
         return reactor
     end
 
-    local availableMethods = {}
-    for _, method in ipairs(peripheral.getMethods(name) or {}) do
-        availableMethods[method] = true
-    end
+    local availableMethods = availableMethods(name)
 
     reactor.connected = readAny(name, availableMethods, { "getConnected", "isConnected", "mbIsConnected", "mbIsAssembled", "connected" })
     reactor.active = readAny(name, availableMethods, { "getActive", "isActive", "active" })
@@ -1929,6 +2065,9 @@ function adapter.read(device)
     reactor.hotFluidMax = number(readAny(name, availableMethods, { "getHotFluidAmountMax", "getHotFluidCapacity", "hotFluidAmountMax" }))
     reactor.steamProduction = number(readAny(name, availableMethods, { "getHotFluidProducedLastTick", "getSteamProducedLastTick", "hotFluidProducedLastTick" }))
     reactor.controlRods = number(readAny(name, availableMethods, { "getNumberOfControlRods", "getControlRodCount" }))
+    reactor.controlRodLevels = rodLevels(name, availableMethods, reactor.controlRods)
+    reactor.controlRodLevel, reactor.controlRodMinimum, reactor.controlRodMaximum =
+        rodSummary(reactor.controlRodLevels)
 
     reactor.fuelPercent = percent(reactor.fuel, reactor.fuelMax)
     reactor.energyPercent = percent(reactor.energy, reactor.energyMax)
@@ -1956,6 +2095,44 @@ function adapter.read(device)
         reactor.error = "No supported telemetry methods"
     end
     return reactor
+end
+
+function adapter.setAllControlRodLevels(reactor, requested)
+    if type(reactor) ~= "table" or type(reactor.name) ~= "string" then
+        return false, nil, "Invalid reactor identity"
+    end
+    if not peripheral.isPresent(reactor.name) then
+        return false, nil, "Peripheral unavailable"
+    end
+
+    local methods = availableMethods(reactor.name)
+    if not methods.setAllControlRodLevels or
+       (not methods.getControlRodsLevels and not methods.getControlRodLevel) then
+        return false, nil, "Verified control-rod control is unavailable"
+    end
+
+    requested = tonumber(requested)
+    if not requested then return false, nil, "Invalid control-rod level" end
+    requested = math.max(0, math.min(100, math.floor(requested + 0.5)))
+
+    local ok, reason = pcall(peripheral.call, reactor.name,
+        "setAllControlRodLevels", requested)
+    if not ok then return false, nil, tostring(reason) end
+
+    local count = tonumber(reactor.controlRods)
+    if not count and methods.getNumberOfControlRods then
+        local countOk, value = pcall(peripheral.call, reactor.name,
+            "getNumberOfControlRods")
+        if countOk then count = tonumber(value) end
+    end
+    local levels = rodLevels(reactor.name, methods, count)
+    local average, minimum, maximum = rodSummary(levels)
+    if average == nil then return false, nil, "Control-rod verification failed" end
+    if minimum ~= requested or maximum ~= requested then
+        return false, average, ("Requested %d%%; reactor reports %.0f-%.0f%%"):format(
+            requested, minimum, maximum)
+    end
+    return true, average
 end
 
 function adapter.readAll(devices)
@@ -1994,6 +2171,7 @@ function adapter.printReport(reactors, config, formatter)
                 print("  Steam: " .. value(reactor.steamProduction, " mB/t"))
                 print("  Coolant: " .. value(reactor.coolantPercent, "%"))
                 print("  Hot fluid: " .. value(reactor.hotFluidPercent, "%"))
+                print("  Rod insertion: " .. value(reactor.controlRodLevel, "%"))
             else
                 print("  Power: " .. formatter.power(reactor.energyProduction, config.power, true))
                 print("  Buffer: " .. value(reactor.energyPercent, "%"))
@@ -2004,6 +2182,283 @@ function adapter.printReport(reactors, config, formatter)
 end
 
 return adapter
+]=],
+
+    ["mainframe/reactor_governor.lua"] = [=[
+local governor = {}
+
+local function clamp(value, minimum, maximum)
+    return math.max(minimum, math.min(maximum, value))
+end
+
+local function round(value)
+    return math.floor(value + 0.5)
+end
+
+local function hasConflict(context)
+    local wanted = tonumber(context and context.mainframeId)
+    for _, id in ipairs((context and context.idConflicts) or {}) do
+        if tonumber(id) == wanted then return true end
+    end
+    return false
+end
+
+local function hold(state, reason, trusted)
+    return {
+        mode = "automatic",
+        state = state,
+        action = "HOLD",
+        reason = reason,
+        trusted = trusted ~= false,
+        actuatorState = "HOLD",
+    }
+end
+
+function governor.new()
+    return { reactors = {} }
+end
+
+function governor.steamDemand(turbines)
+    if #(turbines or {}) == 0 then
+        return nil, 0, "No turbine telemetry is available"
+    end
+    local total, active = 0, 0
+    for _, turbine in ipairs(turbines or {}) do
+        if turbine.active == true then
+            if turbine.error then
+                return nil, active, "Active turbine telemetry is unavailable"
+            end
+            if turbine.governor and turbine.governor.trusted == false then
+                return nil, active, "Active turbine telemetry is untrusted"
+            end
+            local requested = tonumber(turbine.flowRateMax)
+            if requested == nil then
+                return nil, active, "Active turbine intake setting is unavailable"
+            end
+            total, active = total + math.max(0, requested), active + 1
+        end
+    end
+    return total, active
+end
+
+function governor.evaluate(memory, reactor, control, context, targetSteam, activeTurbines)
+    memory.reactors = memory.reactors or {}
+    control, context = control or {}, context or {}
+    local name = tostring(reactor and reactor.name or "unknown")
+    local previous = memory.reactors[name] or {}
+    local result
+
+    if type(reactor) ~= "table" then
+        result = hold("NO REACTOR", "Reactor telemetry is unavailable", false)
+    elseif hasConflict(context) then
+        result = hold("ID CONFLICT", "Mainframe identity is not unique", false)
+    elseif reactor.error then
+        result = hold("NO TRUSTED DATA", tostring(reactor.error), false)
+    elseif reactor.active ~= true then
+        result = hold("INACTIVE", "Reactor is not active", false)
+    elseif reactor.mode ~= "steam" then
+        result = hold("NOT STEAM MODE", "Only actively cooled reactors are managed", false)
+    elseif tonumber(reactor.steamProduction) == nil then
+        result = hold("NO STEAM DATA", "Steam-production telemetry is unavailable", false)
+    elseif tonumber(reactor.controlRodLevel) == nil then
+        result = hold("NO ROD DATA", "Control-rod telemetry is unavailable", false)
+    elseif tonumber(reactor.controlRodMinimum) and tonumber(reactor.controlRodMaximum) and
+           tonumber(reactor.controlRodMinimum) ~= tonumber(reactor.controlRodMaximum) then
+        result = hold("RODS NOT UNIFORM",
+            "Automatic all-rod control requires equal starting levels", false)
+    elseif tonumber(targetSteam) == nil then
+        result = hold("NO TRUSTED DEMAND", tostring(context.demandError or
+            "Turbine steam demand is unavailable"), false)
+    else
+        local production = math.max(0, tonumber(reactor.steamProduction))
+        local target = math.max(0, tonumber(targetSteam))
+        local current = clamp(tonumber(reactor.controlRodLevel), 0, 100)
+        local maxStep = math.max(1, math.min(10,
+            tonumber(control.maxRodStep) or 5))
+        local deadband = math.max(tonumber(control.reactorSteamDeadbandMin) or 25,
+            target * (tonumber(control.reactorSteamDeadband) or 0.03))
+        local highBuffer = tonumber(control.reactorHotFluidHigh) or 85
+        local hotFluid = tonumber(reactor.hotFluidPercent)
+        local proposed, state, action, reason = current, "STABLE", "HOLD",
+            "Steam production matches trusted turbine demand"
+
+        if hotFluid and hotFluid >= highBuffer then
+            if current >= 100 then
+                state, action = "STEAM SURPLUS", "HOLD"
+                reason = ("Hot-fluid buffer is %.1f%% with rods fully inserted"):format(
+                    hotFluid)
+            else
+                proposed = current + maxStep
+                state, action = "BUFFER HIGH", "INSERT RODS"
+                reason = ("Hot-fluid buffer is %.1f%%; reduce steam production"):format(
+                    hotFluid)
+            end
+        elseif target <= 0 then
+            if current < 100 then
+                proposed = current + maxStep
+                state, action = "NO DEMAND", "INSERT RODS"
+                reason = "No active turbine is requesting steam"
+            else
+                state, reason = "IDLE", "No active turbine demand; rods fully inserted"
+            end
+        else
+            local errorAmount = target - production
+            if math.abs(errorAmount) > deadband then
+                local scale = clamp(math.abs(errorAmount) / math.max(target, 1),
+                    1 / maxStep, 1)
+                local step = math.max(1, round(maxStep * scale))
+                if errorAmount > 0 then
+                    if current <= 0 then
+                        state, action = "STEAM DEFICIT", "HOLD"
+                        reason = "Reactor cannot meet turbine demand with rods fully withdrawn"
+                    else
+                        proposed = current - step
+                        state, action = "STEAM LOW", "WITHDRAW RODS"
+                        reason = "Steam production is below trusted turbine demand"
+                    end
+                else
+                    if current >= 100 then
+                        state, action = "STEAM SURPLUS", "HOLD"
+                        reason = "Reactor exceeds demand with rods fully inserted"
+                    else
+                        proposed = current + step
+                        state, action = "STEAM HIGH", "INSERT RODS"
+                        reason = "Steam production exceeds trusted turbine demand"
+                    end
+                end
+            end
+        end
+
+        proposed = round(clamp(proposed, 0, 100))
+        local changing = proposed ~= round(current)
+        if changing then
+            previous.actionSamples = previous.action == action and
+                ((previous.actionSamples or 0) + 1) or 1
+            previous.action = action
+        else
+            previous.actionSamples, previous.action = 0, nil
+        end
+
+        result = {
+            mode = "automatic",
+            state = state,
+            action = action,
+            reason = reason,
+            trusted = true,
+            activeTurbines = activeTurbines or 0,
+            targetSteam = target,
+            steamProduction = production,
+            steamError = target - production,
+            steamDeadband = deadband,
+            currentRodLevel = current,
+            recommendedRodLevel = proposed,
+            rodChange = proposed - current,
+            actionSamples = previous.actionSamples,
+            hotFluidPercent = hotFluid,
+        }
+    end
+
+    if result.trusted == false or result.action == "HOLD" then
+        previous.actionSamples, previous.action = 0, nil
+    end
+    memory.reactors[name] = previous
+    return result
+end
+
+function governor.evaluateAll(memory, reactors, turbines, control, context)
+    local demand, activeTurbines, demandError = governor.steamDemand(turbines)
+    local activeReactors = 0
+    for _, reactor in ipairs(reactors or {}) do
+        if reactor.active == true and reactor.mode == "steam" and not reactor.error then
+            activeReactors = activeReactors + 1
+        end
+    end
+    if activeReactors > 1 then
+        demand = nil
+        demandError = "Multiple active steam reactors require routing assignments"
+    end
+    local target = demand
+    local present = {}
+    for _, reactor in ipairs(reactors or {}) do
+        present[tostring(reactor.name)] = true
+        local reactorContext = {}
+        for key, value in pairs(context or {}) do reactorContext[key] = value end
+        reactorContext.demandError = demandError
+        reactor.governor = governor.evaluate(memory, reactor, control, reactorContext,
+            target, activeTurbines)
+    end
+    for name in pairs(memory.reactors or {}) do
+        if not present[name] then memory.reactors[name] = nil end
+    end
+    return reactors
+end
+
+function governor.apply(memory, reactor, control, context, writers)
+    control, context = control or {}, context or {}
+    local plan = reactor and reactor.governor
+    if not plan then return nil end
+    local name = tostring(reactor.name or "unknown")
+    local previous = memory.reactors[name] or {}
+    local now = tonumber(context.now) or 0
+    local interval = math.max(2, tonumber(control.reactorAdjustmentInterval) or 5)
+    local samples = math.max(2, math.floor(tonumber(control.reactorCommandSamples) or 3))
+    local current, proposed = tonumber(plan.currentRodLevel),
+        tonumber(plan.recommendedRodLevel)
+    local needsWrite = current ~= nil and proposed ~= nil and
+        round(current) ~= round(proposed)
+
+    if control.actuatorsEnabled ~= true then
+        plan.actuatorState = "DISABLED"
+        previous.actionSamples, previous.action = 0, nil
+    elseif context.maintenance then
+        plan.actuatorState = "PAUSED"
+        previous.actionSamples, previous.action = 0, nil
+    elseif plan.trusted == false then
+        plan.actuatorState = "UNTRUSTED"
+        previous.actionSamples, previous.action = 0, nil
+    elseif not needsWrite then
+        plan.actuatorState = "HOLD"
+    elseif (tonumber(plan.actionSamples) or 0) < samples then
+        plan.actuatorState = "VERIFYING"
+    elseif type(writers) ~= "table" or
+           type(writers.setAllControlRodLevels) ~= "function" then
+        plan.actuatorState = "FAULT"
+        plan.actuatorError = "Required reactor write adapter is unavailable"
+    elseif previous.lastAttemptAt and now - previous.lastAttemptAt < interval then
+        plan.actuatorState = previous.lastError and "FAULT" or "WAITING"
+        plan.actuatorError = previous.lastError
+        plan.nextAdjustmentIn = interval - (now - previous.lastAttemptAt)
+    else
+        previous.lastAttemptAt = now
+        local ok, applied, reason = writers.setAllControlRodLevels(reactor, proposed)
+        if ok then
+            previous.lastAppliedAt = now
+            previous.lastAppliedRodLevel = tonumber(applied) or proposed
+            previous.lastError = nil
+            plan.appliedRodLevel = previous.lastAppliedRodLevel
+            plan.actuatorState = "APPLIED"
+        else
+            previous.lastError = tostring(reason or "Reactor rejected the rod command")
+            plan.reportedRodLevel = tonumber(applied)
+            plan.actuatorError = previous.lastError
+            plan.actuatorState = "FAULT"
+        end
+    end
+
+    plan.lastAppliedAt = previous.lastAppliedAt
+    plan.lastAppliedRodLevel = previous.lastAppliedRodLevel
+    memory.reactors[name] = previous
+    return plan
+end
+
+function governor.applyAll(memory, reactors, control, context, writers)
+    for _, reactor in ipairs(reactors or {}) do
+        governor.apply(memory, reactor, control, context, writers)
+    end
+    return reactors
+end
+
+return governor
 ]=],
 
     ["mainframe/storage_adapter.lua"] = [=[
@@ -3302,14 +3757,27 @@ function terminal.run(config)
             ui.status("Mode", string.upper(item.mode or "unknown"))
             if item.error then ui.status("Telemetry", item.error, colors.red) return end
             ui.status("State", item.active == true and "ACTIVE" or item.active == false and "OFFLINE" or "UNKNOWN")
-            ui.status("Fuel", formatValue(item.fuelPercent, "%"))
-            ui.status("Fuel use", formatValue(item.fuelUse, " mB/t"))
-            ui.status("Fuel temp", formatValue(item.fuelTemperature, " C"))
-            ui.status("Casing temp", formatValue(item.casingTemperature, " C"))
+            ui.status("Fuel / use", ("%s / %s"):format(
+                formatValue(item.fuelPercent, "%"),
+                formatValue(item.fuelUse, " mB/t")))
+            ui.status("Temps fuel/case", ("%s / %s"):format(
+                formatValue(item.fuelTemperature, " C"),
+                formatValue(item.casingTemperature, " C")))
             if item.mode == "steam" then
-                ui.status("Steam output", formatValue(item.steamProduction, " mB/t"), colors.cyan)
-                ui.status("Coolant", formatValue(item.coolantPercent, "%"))
-                ui.status("Hot fluid", formatValue(item.hotFluidPercent, "%"))
+                local plan = item.governor or {}
+                ui.status("Steam out/target", ("%s / %s"):format(
+                    formatValue(item.steamProduction, ""),
+                    formatValue(plan.targetSteam, " mB/t")), colors.cyan)
+                ui.status("Coolant / hot", ("%s / %s"):format(
+                    formatValue(item.coolantPercent, "%"),
+                    formatValue(item.hotFluidPercent, "%")))
+                ui.status("Rod insertion", formatValue(item.controlRodLevel, "%"))
+                ui.status("Governor", (plan.state or "WAITING") .. " / " ..
+                    (plan.actuatorState or "WAITING"),
+                    (plan.trusted == false or plan.actuatorState == "FAULT") and
+                        colors.red or
+                    ((plan.state == "STEAM DEFICIT" or
+                      plan.state == "STEAM SURPLUS") and colors.orange or colors.lime))
             else
                 ui.status("Power output", powerFormat.power(item.energyProduction, state.power, true), colors.cyan)
                 ui.status("Energy buffer", formatValue(item.energyPercent, "%"))

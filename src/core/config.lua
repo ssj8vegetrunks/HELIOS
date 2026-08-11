@@ -40,7 +40,18 @@ function config.load()
         math.floor(tonumber(loaded.control.overspeedSamples) or 3))
     loaded.control.storageLow = tonumber(loaded.control.storageLow) or 25
     loaded.control.storageHigh = tonumber(loaded.control.storageHigh) or 85
-    loaded.control.maxRodStep = tonumber(loaded.control.maxRodStep) or 5
+    loaded.control.maxRodStep = math.max(1, math.min(10,
+        tonumber(loaded.control.maxRodStep) or 5))
+    loaded.control.reactorAdjustmentInterval = math.max(2,
+        tonumber(loaded.control.reactorAdjustmentInterval) or 5)
+    loaded.control.reactorCommandSamples = math.max(2,
+        math.floor(tonumber(loaded.control.reactorCommandSamples) or 3))
+    loaded.control.reactorSteamDeadband = math.max(0.01, math.min(0.25,
+        tonumber(loaded.control.reactorSteamDeadband) or 0.03))
+    loaded.control.reactorSteamDeadbandMin = math.max(1,
+        tonumber(loaded.control.reactorSteamDeadbandMin) or 25)
+    loaded.control.reactorHotFluidHigh = math.max(50, math.min(99,
+        tonumber(loaded.control.reactorHotFluidHigh) or 85))
     loaded.control.maxFlowStep = tonumber(loaded.control.maxFlowStep) or 100
     loaded.control.adjustmentInterval = tonumber(loaded.control.adjustmentInterval) or 2
     loaded.control.commandSamples = math.max(1,

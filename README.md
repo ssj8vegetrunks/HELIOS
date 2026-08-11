@@ -1,9 +1,10 @@
-# HELIOS — v1.4.0 Alpha 5 Staged Turbine Calibration
+# HELIOS — v1.4.0 Alpha 6 Reactor Steam Governor
 
 Industrial power management for **CC:Tweaked** and **Extreme Reactors**.
 
-This milestone enables guarded automatic turbine regulation. HELIOS now
-calculates and applies bounded turbine flow-limit changes from the mainframe.
+This milestone adds guarded reactor steam regulation to the automatic turbine
+governor. HELIOS now matches one active steam reactor to the trusted intake
+requested by its active turbines, reducing fuel waste without starving them.
 The existing touch interface and network-ID protection remain online:
 
 - the active HELIOS page is mirrored to every attached CC:Tweaked monitor;
@@ -42,6 +43,11 @@ The existing touch interface and network-ID protection remain online:
 - three consecutive readings confirm overspeed before an immediate zero-flow command;
 - confirmed turbine overspeed becomes a system-wide critical alarm;
 - rejected or unverifiable actuator commands become system-wide control-fault warnings;
+- the dashboard reports live automatic, calibration, maintenance, and fault state instead of the obsolete observe-only banner;
+- one active steam reactor follows the summed configured intake of all active turbines;
+- reactor output changes use verified all-rod insertion commands, capped at 5% every five seconds after three matching readings;
+- high hot-fluid buffer pressure and zero turbine demand insert rods to reduce fuel use;
+- missing turbine demand, duplicate IDs, maintenance, unsupported rod telemetry, and ambiguous multiple-reactor routing hold reactor output unchanged;
 - settings and telemetry navigation use stable touch targets that fit the mirrored terminal canvas;
 - upgrades remove obsolete HELIOS rollback copies before staging and retain only the immediately replaced version.
 
@@ -113,6 +119,7 @@ The installed layout is:
   mainframe/
     device_registry.lua
     reactor_adapter.lua
+    reactor_governor.lua
     turbine_adapter.lua
     turbine_governor.lua
     storage_adapter.lua
@@ -145,7 +152,7 @@ Use the left and right arrow keys to change the maintenance timeout. The old
 overlay. While maintenance is active, the on-screen countdown refreshes once
 per second without rescanning attached hardware.
 
-## Reactor monitoring
+## Reactor monitoring and steam control
 
 Press `V` on the mainframe dashboard to open live reactor telemetry. Use the
 left and right arrow keys to move between connected reactors. HELIOS reads
@@ -155,6 +162,18 @@ Fuel alarms require three consecutive low readings. The default advisory
 threshold is 20% and the critical threshold is 5%. Clicking
 `[ SILENCE ALARM ]` silences only the current condition. A different or more
 severe alarm can still sound, and silence resets after the condition clears.
+
+For one active steam reactor, HELIOS totals the configured intake requested by
+all active turbines and adjusts every control rod together until reactor steam
+production matches that demand. More rod insertion means less output. Changes
+are deliberately slow, require repeated confirmation, and are read back across
+every rod. Zero active turbine demand gradually inserts the rods fully, while a
+hot-fluid buffer at or above 85% forces output downward.
+
+The reactor governor holds during maintenance, ID conflict, missing or
+untrusted turbine telemetry, unsupported rod control, or when more than one
+steam reactor is active. Multiple reactor loops need explicit routing before
+HELIOS will control them.
 
 The adapter is deliberately tolerant of several Extreme Reactors API naming
 variants. Unsupported measurements display `N/A` rather than stopping HELIOS.
