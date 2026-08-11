@@ -145,6 +145,7 @@ function governor.evaluate(memory, turbine, control, context)
             previous.escapeCount = 0
             previous.failureCount = 0
             previous.lowSteamCount = 0
+            previous.fallbackTuning = false
         end
 
         local function updateProgress(direction)
@@ -458,11 +459,19 @@ function governor.evaluate(memory, turbine, control, context)
                 action = "OBSERVE 1800 BAND"
                 reason = "Rotor recovered toward the 1800 RPM band"
             elseif rpm > lowBand + deadband and rpmTrend < -settleDelta then
-                recommendedFlow = flowMaximum
-                action = currentFlow < flowMaximum and "MAXIMIZE FLOW" or "WAIT FOR 900 BAND"
-                reason = "Rotor is still falling; maintain full steam toward 900 RPM"
+                if previous.fallbackTuning then
+                    recommendedFlow = currentFlow
+                    action = "WAIT FOR 900 BAND"
+                    reason = "Hold the tuned flow while rotor falls toward 900 RPM"
+                else
+                    recommendedFlow = flowMaximum
+                    action = currentFlow < flowMaximum and "MAXIMIZE FLOW" or
+                        "WAIT FOR 900 BAND"
+                    reason = "Rotor is naturally falling; maintain full steam toward 900 RPM"
+                end
                 updateProgress(-1)
             elseif rpm > lowBand + deadband then
+                previous.fallbackTuning = true
                 recommendedFlow = currentFlow - maxStep
                 action = "DECREASE FLOW"
                 reason = "Rotor settled above 900 RPM; trim steam toward low band"
