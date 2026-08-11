@@ -43,6 +43,17 @@ function network.now()
     return os.epoch("utc") / 1000
 end
 
+function network.sessionId(role)
+    local seed = table.concat({
+        tostring(role or "helios"),
+        tostring(os.getComputerID()),
+        tostring(os.epoch("utc")),
+        tostring(os.clock()),
+        tostring(math.random(1, 2147483647)),
+    }, ":")
+    return seed
+end
+
 function network.loadPeers()
     if not fs.exists(PEER_FILE) then return {} end
     local ok, peers = pcall(dofile, PEER_FILE)
