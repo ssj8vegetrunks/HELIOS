@@ -156,6 +156,10 @@ function mainframe.run(config)
                 add(3, turbine.name .. ":telemetry", alarmName(turbine.name) .. " TELEMETRY LOST")
             elseif turbine.governor and turbine.governor.state == "OVERSPEED" then
                 addConfirmed(3, turbine.name .. ":overspeed", alarmName(turbine.name) .. " OVERSPEED")
+            elseif turbine.governor and turbine.governor.state == "CALIBRATION FAILED" then
+                addConfirmed(2, turbine.name .. ":calibration",
+                    alarmName(turbine.name) .. " CALIBRATION FAILED: " ..
+                    tostring(turbine.governor.reason or "invalid operating result"))
             elseif turbine.governor and turbine.governor.actuatorState == "FAULT" then
                 add(2, turbine.name .. ":control", alarmName(turbine.name) .. " CONTROL FAULT")
             end
@@ -217,7 +221,11 @@ function mainframe.run(config)
             maintenance = maintenance,
             mainframeId = os.getComputerID(),
             idConflicts = idConflicts,
+            now = os.epoch("utc") / 1000,
         })
+        if turbineGovernor.consumeProfileChanges(governorMemory) then
+            configStore.save(config)
+        end
         turbineGovernor.applyAll(governorMemory, turbines, config.control, {
             maintenance = maintenance,
             now = os.epoch("utc") / 1000,
@@ -444,9 +452,11 @@ function mainframe.run(config)
                 ui.status("Turbine", ("%d/%d %s"):format(selected, #turbines,
                     deviceName(turbine.name)), colors.cyan)
                 ui.status("Governor", plan.state or "WAITING",
-                    (plan.trusted == false or plan.actuatorState == "FAULT") and colors.red or colors.lime)
+                    (plan.trusted == false or plan.actuatorState == "FAULT" or
+                        plan.state == "CALIBRATION FAILED") and colors.red or colors.lime)
                 ui.status("Rotor / target", ("%.1f / %d RPM"):format(
-                    tonumber(turbine.rotorSpeed) or 0, config.control.targetRpm), colors.cyan)
+                    tonumber(turbine.rotorSpeed) or 0,
+                    tonumber(plan.targetRpm) or config.control.highBandRpm), colors.cyan)
                 if plan.currentFlow ~= nil and plan.recommendedFlow ~= nil then
                     ui.status("Flow-limit plan", ("%.0f -> %.0f mB/t"):format(
                         plan.currentFlow, plan.recommendedFlow), colors.cyan)
@@ -462,8 +472,7 @@ function mainframe.run(config)
             write("[ AUTOMATIC ] ")
             term.setTextColor(colors.gray)
             print("[ MANUAL - LOCKED ]")
-            print(("Targets/limits locked: %d RPM +/- %d"):format(
-                config.control.targetRpm, config.control.rpmDeadband))
+            print("Targets learned automatically; manual tuning LOCKED")
             term.setTextColor(colors.white)
             buttons.previous = ui.inlineButton("< PREVIOUS", colors.cyan)
             write(" ")
@@ -471,6 +480,11 @@ function mainframe.run(config)
             write(" ")
             buttons.back = ui.inlineButton("BACK", colors.cyan)
             print("")
+            if #turbines > 0 then
+                buttons.retry = ui.button("RETRY CALIBRATION", colors.orange)
+            else
+                buttons.retry = nil
+            end
         end
         while true do
             draw()
@@ -481,6 +495,11 @@ function mainframe.run(config)
                 selected = ((selected - 2) % #turbines) + 1
             elseif ((event == "key" and value == keys.right) or ui.hit(buttons.next, x, y)) and #turbines > 0 then
                 selected = (selected % #turbines) + 1
+            elseif ui.hit(buttons.retry, x, y) and #turbines > 0 then
+                turbineGovernor.resetCalibration(governorMemory, config.control,
+                    turbines[selected].name)
+                configStore.save(config)
+                pollReactors()
             elseif ui.hit(buttons.back, x, y) then return
             elseif event == "rednet_message" then handleNetwork(value, message, protocol)
             elseif event == "peripheral" or event == "peripheral_detach" then
@@ -944,7 +963,8 @@ function mainframe.run(config)
                 local plan = turbine.governor or {}
                 ui.status("Governor", (plan.state or "WAITING") .. " / " ..
                     (plan.actuatorState or "WAITING"),
-                    (plan.trusted == false or plan.actuatorState == "FAULT") and colors.red or colors.lime)
+                    (plan.trusted == false or plan.actuatorState == "FAULT" or
+                        plan.state == "CALIBRATION FAILED") and colors.red or colors.lime)
                 ui.status("Power output", powerFormat.power(turbine.energyProduction, config.power, true), colors.cyan)
                 ui.status("Energy buffer", formatValue(turbine.energyPercent, "%"))
                 if plan.currentFlow ~= nil and plan.recommendedFlow ~= nil then
