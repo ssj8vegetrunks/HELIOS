@@ -1,7 +1,7 @@
 -- HELIOS single-file installer
--- Milestone 7.0: observing turbine governor and overspeed planning.
+-- Milestone 7.1: guarded automatic turbine governor.
 
-local VERSION = "1.4.0-alpha.1"
+local VERSION = "1.4.0-alpha.2"
 local INSTALL_DIR = "/helios"
 local STAGE_DIR = "/.helios-install"
 
@@ -104,7 +104,7 @@ function config.load()
     loaded.ui.monitorTextScale = tonumber(loaded.ui.monitorTextScale) or 0.5
     loaded.control = loaded.control or {}
     loaded.control.mode = "automatic"
-    loaded.control.actuatorsEnabled = false
+    loaded.control.actuatorsEnabled = loaded.role == "mainframe"
     loaded.control.targetRpm = tonumber(loaded.control.targetRpm) or 1800
     loaded.control.rpmDeadband = math.max(1, tonumber(loaded.control.rpmDeadband) or 25)
     loaded.control.overspeedRpm = math.max(loaded.control.targetRpm + loaded.control.rpmDeadband,
@@ -116,6 +116,8 @@ function config.load()
     loaded.control.maxRodStep = tonumber(loaded.control.maxRodStep) or 5
     loaded.control.maxFlowStep = tonumber(loaded.control.maxFlowStep) or 100
     loaded.control.adjustmentInterval = tonumber(loaded.control.adjustmentInterval) or 2
+    loaded.control.commandSamples = math.max(1,
+        math.floor(tonumber(loaded.control.commandSamples) or 2))
     loaded.power = loaded.power or {}
     local validUnits = { FE = true, RF = true, J = true, EU = true }
     if not validUnits[loaded.power.unit] then loaded.power.unit = "FE" end
@@ -809,6 +811,8 @@ function mainframe.run(config)
                 add(3, turbine.name .. ":telemetry", alarmName(turbine.name) .. " TELEMETRY LOST")
             elseif turbine.governor and turbine.governor.state == "OVERSPEED" then
                 addConfirmed(3, turbine.name .. ":overspeed", alarmName(turbine.name) .. " OVERSPEED")
+            elseif turbine.governor and turbine.governor.actuatorState == "FAULT" then
+                add(2, turbine.name .. ":control", alarmName(turbine.name) .. " CONTROL FAULT")
             end
         end
         for _, storage in ipairs(storages) do
@@ -869,6 +873,10 @@ function mainframe.run(config)
             mainframeId = os.getComputerID(),
             idConflicts = idConflicts,
         })
+        turbineGovernor.applyAll(governorMemory, turbines, config.control, {
+            maintenance = maintenance,
+            now = os.epoch("utc") / 1000,
+        }, turbineAdapter.setFlowLimit)
         updateAlarm()
         local conflictsChanged = refreshIdConflicts()
         if conflictsChanged or #idConflicts > 0 then advertiseIntegrity() end
@@ -1078,7 +1086,7 @@ function mainframe.run(config)
             ui.setIdConflicts(idConflicts)
             ui.header("POWER CONTROL", "Automatic turbine governor")
             ui.status("Mode", "AUTOMATIC", colors.lime)
-            ui.status("Actuators", "DISABLED - OBSERVE ONLY", colors.orange)
+            ui.status("Actuators", "ENABLED - GUARDED", colors.lime)
             if #turbines == 0 then
                 ui.status("Status", "NO TURBINES FOUND", colors.orange)
             else
@@ -1087,7 +1095,8 @@ function mainframe.run(config)
                 local plan = turbine.governor or {}
                 ui.status("Turbine", ("%d/%d %s"):format(selected, #turbines,
                     deviceName(turbine.name)), colors.cyan)
-                ui.status("Governor", plan.state or "WAITING", plan.trusted == false and colors.red or colors.lime)
+                ui.status("Governor", plan.state or "WAITING",
+                    (plan.trusted == false or plan.actuatorState == "FAULT") and colors.red or colors.lime)
                 ui.status("Rotor / target", ("%.1f / %d RPM"):format(
                     tonumber(turbine.rotorSpeed) or 0, config.control.targetRpm), colors.cyan)
                 if plan.currentFlow ~= nil and plan.recommendedFlow ~= nil then
@@ -1096,7 +1105,9 @@ function mainframe.run(config)
                 else
                     ui.status("Flow-limit plan", "HOLD - TELEMETRY REQUIRED", colors.gray)
                 end
-                ui.status("Action", plan.action or "HOLD", plan.action == "CUT FLOW" and colors.red or colors.white)
+                ui.status("Action", (plan.action or "HOLD") .. " / " ..
+                    (plan.actuatorState or "WAITING"),
+                    (plan.action == "CUT FLOW" or plan.actuatorState == "FAULT") and colors.red or colors.white)
             end
             print("")
             term.setTextColor(colors.lime)
@@ -1583,7 +1594,9 @@ function mainframe.run(config)
                     turbine.active == true and colors.lime or colors.orange)
                 ui.status("Rotor speed", formatValue(turbine.rotorSpeed, " RPM"), colors.cyan)
                 local plan = turbine.governor or {}
-                ui.status("Governor", plan.state or "WAITING", plan.trusted == false and colors.red or colors.lime)
+                ui.status("Governor", (plan.state or "WAITING") .. " / " ..
+                    (plan.actuatorState or "WAITING"),
+                    (plan.trusted == false or plan.actuatorState == "FAULT") and colors.red or colors.lime)
                 ui.status("Power output", powerFormat.power(turbine.energyProduction, config.power, true), colors.cyan)
                 ui.status("Energy buffer", formatValue(turbine.energyPercent, "%"))
                 if plan.currentFlow ~= nil and plan.recommendedFlow ~= nil then
@@ -2247,6 +2260,14 @@ local function percent(amount, maximum)
     return math.max(0, math.min(100, amount / maximum * 100))
 end
 
+local function availableMethods(name)
+    local methods = {}
+    for _, method in ipairs(peripheral.getMethods(name) or {}) do
+        methods[method] = true
+    end
+    return methods
+end
+
 function adapter.read(device)
     local name = device.name
     local turbine = { name = name, available = peripheral.isPresent(name) }
@@ -2255,10 +2276,7 @@ function adapter.read(device)
         return turbine
     end
 
-    local availableMethods = {}
-    for _, method in ipairs(peripheral.getMethods(name) or {}) do
-        availableMethods[method] = true
-    end
+    local availableMethods = availableMethods(name)
 
     turbine.connected = readAny(name, availableMethods, { "getConnected", "isConnected", "mbIsConnected", "mbIsAssembled", "connected" })
     turbine.active = readAny(name, availableMethods, { "getActive", "isActive", "active" })
@@ -2290,6 +2308,41 @@ function adapter.read(device)
         turbine.error = "No supported telemetry methods"
     end
     return turbine
+end
+
+function adapter.setFlowLimit(turbine, requested)
+    if type(turbine) ~= "table" or type(turbine.name) ~= "string" then
+        return false, nil, "Invalid turbine identity"
+    end
+    if not peripheral.isPresent(turbine.name) then
+        return false, nil, "Peripheral unavailable"
+    end
+
+    local methods = availableMethods(turbine.name)
+    if not methods.setFluidFlowRateMax or not methods.getFluidFlowRateMax then
+        return false, nil, "Verified flow-limit control is unavailable"
+    end
+
+    requested = tonumber(requested)
+    if not requested then return false, nil, "Invalid flow limit" end
+    local hardLimit = tonumber(turbine.flowRateLimit)
+    if hardLimit then requested = math.min(requested, hardLimit) end
+    requested = math.max(0, math.floor(requested + 0.5))
+
+    local ok, reason = pcall(peripheral.call, turbine.name, "setFluidFlowRateMax", requested)
+    if not ok then return false, nil, tostring(reason) end
+
+    local readOk, actual = pcall(peripheral.call, turbine.name, "getFluidFlowRateMax")
+    actual = tonumber(actual)
+    if not readOk or actual == nil then
+        return false, nil, "Flow-limit verification failed"
+    end
+    local verified = math.floor(actual + 0.5)
+    if verified ~= requested then
+        return false, verified, ("Requested %d mB/t; turbine reports %d mB/t"):format(
+            requested, verified)
+    end
+    return true, verified
 end
 
 function adapter.readAll(devices)
@@ -2356,7 +2409,7 @@ end
 
 local function hold(state, reason, trusted)
     return {
-        mode = "observe",
+        mode = "automatic",
         state = state,
         action = "HOLD",
         reason = reason,
@@ -2390,13 +2443,17 @@ function governor.evaluate(memory, turbine, control, context)
         result = hold("NO TRUSTED DATA", tostring(turbine.error), false)
     elseif turbine.active == false then
         result = hold("OFFLINE", "Turbine is not active")
+    elseif turbine.active ~= true then
+        result = hold("NO STATE DATA", "Turbine active-state telemetry is unavailable", false)
     elseif turbine.rotorSpeed == nil then
         result = hold("NO RPM DATA", "Rotor-speed telemetry is unavailable", false)
-    elseif turbine.flowRateMax == nil and turbine.flowRate == nil then
-        result = hold("NO FLOW DATA", "Flow setting telemetry is unavailable", false)
+    elseif turbine.flowRateMax == nil then
+        result = hold("NO FLOW SETTING", "Configured flow-limit telemetry is unavailable", false)
+    elseif turbine.flowRateLimit == nil then
+        result = hold("NO HARD LIMIT", "Turbine hard flow limit is unavailable", false)
     else
         local rpm = tonumber(turbine.rotorSpeed)
-        local currentFlow = tonumber(turbine.flowRateMax) or tonumber(turbine.flowRate)
+        local currentFlow = tonumber(turbine.flowRateMax)
         local rpmError = target - rpm
         local rpmTrend = previous.rpm and (rpm - previous.rpm) or 0
         local overspeedCount = rpm >= overspeedRpm and (previous.overspeedCount + 1) or 0
@@ -2443,7 +2500,7 @@ function governor.evaluate(memory, turbine, control, context)
         recommendedFlow = clamp(recommendedFlow, 0, flowMaximum or math.max(currentFlow, recommendedFlow))
         recommendedFlow = round(recommendedFlow)
         result = {
-            mode = "observe",
+            mode = "automatic",
             state = state,
             action = action,
             reason = reason,
@@ -2460,22 +2517,98 @@ function governor.evaluate(memory, turbine, control, context)
             recommendedFlow = recommendedFlow,
             flowChange = recommendedFlow - currentFlow,
         }
+        if action ~= "HOLD" then
+            previous.actionSamples = previous.action == action and
+                ((previous.actionSamples or 0) + 1) or 1
+            previous.action = action
+        else
+            previous.actionSamples = 0
+            previous.action = nil
+        end
+        result.actionSamples = previous.actionSamples
         previous.overspeedCount = overspeedCount
     end
 
     if result.state ~= "VERIFYING OVERSPEED" and result.state ~= "OVERSPEED" then
         previous.overspeedCount = 0
     end
+    if result.action == "HOLD" then
+        previous.actionSamples = 0
+        previous.action = nil
+    end
     previous.rpm = tonumber(turbine.rotorSpeed)
     memory.turbines[name] = previous
     result.targetRpm = result.targetRpm or target
     result.rpmDeadband = result.rpmDeadband or deadband
     result.overspeedRpm = result.overspeedRpm or overspeedRpm
-    result.currentFlow = result.currentFlow or tonumber(turbine.flowRateMax) or tonumber(turbine.flowRate)
+    result.currentFlow = result.currentFlow or tonumber(turbine.flowRateMax)
     result.actualFlow = result.actualFlow or tonumber(turbine.flowRate)
     result.recommendedFlow = result.recommendedFlow or result.currentFlow
     result.flowChange = result.flowChange or 0
     return result
+end
+
+function governor.apply(memory, turbine, control, context, writer)
+    control = control or {}
+    context = context or {}
+    local plan = turbine and turbine.governor
+    if not plan then return nil end
+
+    local name = tostring(turbine.name or "unknown")
+    local previous = memory.turbines[name] or {}
+    local now = tonumber(context.now) or 0
+    local interval = math.max(1, tonumber(control.adjustmentInterval) or 2)
+    local commandSamples = math.max(1, math.floor(tonumber(control.commandSamples) or 2))
+    local current = tonumber(plan.currentFlow)
+    local proposed = tonumber(plan.recommendedFlow)
+
+    plan.mode = control.actuatorsEnabled == true and "automatic" or "observe"
+    if control.actuatorsEnabled ~= true then
+        plan.actuatorState = "DISABLED"
+    elseif context.maintenance then
+        plan.actuatorState = "PAUSED"
+    elseif plan.trusted == false then
+        plan.actuatorState = "UNTRUSTED"
+    elseif plan.action == "HOLD" or current == nil or proposed == nil or current == proposed then
+        plan.actuatorState = "HOLD"
+    elseif plan.action ~= "CUT FLOW" and (tonumber(plan.actionSamples) or 0) < commandSamples then
+        plan.actuatorState = "VERIFYING"
+    elseif type(writer) ~= "function" then
+        plan.actuatorState = "FAULT"
+        plan.actuatorError = "Turbine write adapter is unavailable"
+    elseif plan.action ~= "CUT FLOW" and previous.lastAttemptAt and
+           now - previous.lastAttemptAt < interval then
+        plan.actuatorState = previous.lastError and "FAULT" or "WAITING"
+        plan.actuatorError = previous.lastError
+        plan.nextAdjustmentIn = interval - (now - previous.lastAttemptAt)
+    else
+        previous.lastAttemptAt = now
+        local ok, applied, reason = writer(turbine, proposed)
+        if ok then
+            previous.lastAppliedAt = now
+            previous.lastAppliedFlow = tonumber(applied) or proposed
+            previous.lastError = nil
+            plan.actuatorState = "APPLIED"
+            plan.appliedFlow = previous.lastAppliedFlow
+        else
+            previous.lastError = tostring(reason or "Turbine rejected the flow limit")
+            plan.actuatorState = "FAULT"
+            plan.actuatorError = previous.lastError
+            plan.reportedFlow = tonumber(applied)
+        end
+    end
+
+    plan.lastAppliedAt = previous.lastAppliedAt
+    plan.lastAppliedFlow = previous.lastAppliedFlow
+    memory.turbines[name] = previous
+    return plan
+end
+
+function governor.applyAll(memory, turbines, control, context, writer)
+    for _, turbine in ipairs(turbines or {}) do
+        governor.apply(memory, turbine, control, context, writer)
+    end
+    return turbines
 end
 
 function governor.evaluateAll(memory, turbines, control, context)
@@ -2659,7 +2792,9 @@ function terminal.run(config)
             ui.status("State", item.active == true and "ACTIVE" or item.active == false and "OFFLINE" or "UNKNOWN")
             ui.status("Rotor speed", formatValue(item.rotorSpeed, " RPM"), colors.cyan)
             local plan = item.governor or {}
-            ui.status("Governor", plan.state or "WAITING", plan.trusted == false and colors.red or colors.lime)
+            ui.status("Governor", (plan.state or "WAITING") .. " / " ..
+                (plan.actuatorState or "WAITING"),
+                (plan.trusted == false or plan.actuatorState == "FAULT") and colors.red or colors.lime)
             ui.status("Power output", powerFormat.power(item.energyProduction, state.power, true), colors.cyan)
             ui.status("Energy buffer", formatValue(item.energyPercent, "%"))
             if plan.currentFlow ~= nil and plan.recommendedFlow ~= nil then
@@ -2875,7 +3010,7 @@ local function buildConfig(role, display, existing)
         },
         control = {
             mode = "automatic",
-            actuatorsEnabled = false,
+            actuatorsEnabled = role == "mainframe",
             targetRpm = tonumber(control.targetRpm) or 1800,
             rpmDeadband = math.max(1, tonumber(control.rpmDeadband) or 25),
             overspeedRpm = math.max((tonumber(control.targetRpm) or 1800) +
@@ -2888,6 +3023,8 @@ local function buildConfig(role, display, existing)
             maxRodStep = tonumber(control.maxRodStep) or 5,
             maxFlowStep = tonumber(control.maxFlowStep) or 100,
             adjustmentInterval = tonumber(control.adjustmentInterval) or 2,
+            commandSamples = math.max(1,
+                math.floor(tonumber(control.commandSamples) or 2)),
         },
         deviceAliases = aliases,
     }
