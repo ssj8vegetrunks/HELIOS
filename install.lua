@@ -1,7 +1,7 @@
 -- HELIOS single-file installer
--- Milestone 1: role selection, persistent configuration, and role-aware boot.
+-- Milestone 2: role-aware installation and configurable hardware discovery.
 
-local VERSION = "0.1.0-alpha.1"
+local VERSION = "0.2.1-alpha.1"
 local INSTALL_DIR = "/helios"
 local STAGE_DIR = "/.helios-install"
 
@@ -76,6 +76,17 @@ if args[1] == "status" then
     return
 end
 
+if args[1] == "scan" then
+    if config.role ~= "mainframe" then
+        error("Only the HELIOS mainframe can scan attached hardware.", 0)
+    end
+    local registry = dofile("/helios/mainframe/device_registry.lua")
+    local devices = registry.scan()
+    registry.save(devices)
+    registry.printReport(devices)
+    return
+end
+
 if config.role == "mainframe" then
     dofile("/helios/mainframe/main.lua").run(config)
 elseif config.role == "terminal" then
@@ -99,7 +110,22 @@ function config.load()
     if loaded.role ~= "mainframe" and loaded.role ~= "terminal" then
         error("HELIOS configuration contains an invalid role.", 0)
     end
+    loaded.discovery = loaded.discovery or {}
+    if loaded.discovery.defaultMode ~= "manual" then
+        loaded.discovery.defaultMode = "event"
+    end
+    local timeout = tonumber(loaded.discovery.maintenanceTimeout)
+    if not timeout or timeout < 60 then timeout = 1800 end
+    loaded.discovery.maintenanceTimeout = math.floor(timeout)
     return loaded
+end
+
+function config.save(loaded)
+    local handle, reason = fs.open("/helios/config.lua", "w")
+    if not handle then return false, reason end
+    handle.write("return " .. textutils.serialize(loaded))
+    handle.close()
+    return true
 end
 
 return config
@@ -149,23 +175,280 @@ end
 return ui
 ]=],
 
+    ["mainframe/device_registry.lua"] = [=[
+local registry = {}
+local REGISTRY_FILE = "/helios/data/devices.lua"
+
+local function contains(value, fragment)
+    return string.find(string.lower(value or ""), fragment, 1, true) ~= nil
+end
+
+local function methodSet(methods)
+    local set = {}
+    for _, method in ipairs(methods) do set[method] = true end
+    return set
+end
+
+local function classify(types, methods)
+    for _, peripheralType in ipairs(types) do
+        if contains(peripheralType, "reactor") then return "reactor" end
+    end
+    for _, peripheralType in ipairs(types) do
+        if contains(peripheralType, "turbine") then return "turbine" end
+    end
+    for _, peripheralType in ipairs(types) do
+        if peripheralType == "monitor" then return "monitor" end
+        if peripheralType == "modem" then return "modem" end
+    end
+
+    local available = methodSet(methods)
+    local energyReader =
+        (available.getEnergyStored and available.getMaxEnergyStored) or
+        (available.getEnergy and available.getEnergyCapacity)
+    if energyReader then return "battery" end
+
+    for _, peripheralType in ipairs(types) do
+        if contains(peripheralType, "battery") or
+           contains(peripheralType, "energy_cell") or
+           contains(peripheralType, "energycell") then
+            return "battery"
+        end
+    end
+    return "unknown"
+end
+
+function registry.scan()
+    local devices = {}
+    local names = peripheral.getNames()
+    table.sort(names)
+
+    for _, name in ipairs(names) do
+        local types = { peripheral.getType(name) }
+        local methods = peripheral.getMethods(name) or {}
+        table.sort(types)
+        table.sort(methods)
+        devices[#devices + 1] = {
+            name = name,
+            types = types,
+            methods = methods,
+            category = classify(types, methods),
+        }
+    end
+    return devices
+end
+
+function registry.save(devices)
+    if not fs.exists("/helios/data") then fs.makeDir("/helios/data") end
+    local handle, reason = fs.open(REGISTRY_FILE, "w")
+    if not handle then return false, reason end
+    handle.write("return " .. textutils.serialize({
+        scannedAt = os.epoch("utc"),
+        devices = devices,
+    }))
+    handle.close()
+    return true
+end
+
+function registry.countByCategory(devices)
+    local counts = { reactor = 0, turbine = 0, battery = 0, monitor = 0, modem = 0, unknown = 0 }
+    for _, device in ipairs(devices) do
+        counts[device.category] = (counts[device.category] or 0) + 1
+    end
+    return counts
+end
+
+function registry.printReport(devices)
+    print("HELIOS hardware scan")
+    print("Devices found: " .. #devices)
+    print("")
+    for _, device in ipairs(devices) do
+        print(("[%s] %s"):format(string.upper(device.category), device.name))
+        print("  Types: " .. (#device.types > 0 and table.concat(device.types, ", ") or "unreported"))
+    end
+    print("")
+    print("Registry saved to " .. REGISTRY_FILE)
+end
+
+return registry
+]=],
+
     ["mainframe/main.lua"] = [=[
 local mainframe = {}
 
 function mainframe.run(config)
     local ui = dofile("/helios/core/ui.lua")
+    local configStore = dofile("/helios/core/config.lua")
+    local registry = dofile("/helios/mainframe/device_registry.lua")
+    local devices = {}
+    local registryStale = false
+    local maintenance = false
+    local maintenanceEndsAt
+    local maintenanceTimer
+
+    local timeoutChoices = { 300, 900, 1800, 3600 }
+
+    local function modeName()
+        if maintenance then return "MANUAL - MAINTENANCE" end
+        if config.discovery.defaultMode == "manual" then return "MANUAL" end
+        return "AUTOMATIC"
+    end
+
+    local function rescan()
+        devices = registry.scan()
+        registry.save(devices)
+        registryStale = false
+    end
+
+    local function saveConfig()
+        local ok, reason = configStore.save(config)
+        if not ok then error("Could not save HELIOS settings: " .. tostring(reason), 0) end
+    end
+
+    local function stopMaintenance()
+        maintenance = false
+        maintenanceEndsAt = nil
+        maintenanceTimer = nil
+        rescan()
+    end
+
+    local function startMaintenance()
+        maintenance = true
+        maintenanceEndsAt = os.epoch("utc") + (config.discovery.maintenanceTimeout * 1000)
+        maintenanceTimer = os.startTimer(config.discovery.maintenanceTimeout)
+    end
+
+    local function remainingMaintenance()
+        if not maintenanceEndsAt then return 0 end
+        return math.max(0, math.ceil((maintenanceEndsAt - os.epoch("utc")) / 1000))
+    end
+
     local function render()
         ui.header("MAINFRAME", "Central control authority")
         ui.status("System", "ONLINE", colors.lime)
         ui.status("Computer ID", config.computerId)
-        ui.status("Device registry", "Not configured", colors.orange)
-        ui.status("Network protocol", "Next milestone", colors.orange)
+        ui.status("Attached hardware", #devices, #devices > 0 and colors.lime or colors.orange)
+        ui.status("Discovery", modeName(), maintenance and colors.orange or colors.cyan)
+        if registryStale then
+            term.setTextColor(colors.orange)
+            print("Registry may be outdated")
+            term.setTextColor(colors.white)
+        elseif maintenance then
+            print(("Auto return in %d:%02d"):format(
+                math.floor(remainingMaintenance() / 60), remainingMaintenance() % 60
+            ))
+        end
+
+        local counts = registry.countByCategory(devices)
+        print(("R:%d T:%d B:%d M:%d"):format(
+            counts.reactor, counts.turbine, counts.battery, counts.monitor
+        ))
+
+        local width, height = term.getSize()
+        local availableRows = math.max(0, height - 12)
+        if #devices > availableRows then
+            availableRows = math.max(0, availableRows - 1)
+        end
+        for index = 1, math.min(#devices, availableRows) do
+            local device = devices[index]
+            local line = ("%-7s %s"):format(string.upper(device.category), device.name)
+            print(string.sub(line, 1, width))
+        end
+        if #devices > availableRows then
+            print(("+ %d more (run: helios scan)"):format(#devices - availableRows))
+        end
         print("")
         term.setTextColor(colors.gray)
-        print("Press Q to exit HELIOS.")
+        print("R rescan | S settings | Q exit")
     end
+
+    local function settings()
+        local function renderSettings()
+            ui.header("SETTINGS", "Hardware discovery")
+            ui.status("Default mode", config.discovery.defaultMode == "event" and "AUTOMATIC" or "MANUAL", colors.cyan)
+            ui.status("Maintenance timeout", math.floor(config.discovery.maintenanceTimeout / 60) .. " minutes")
+            ui.status("Current mode", modeName(), maintenance and colors.orange or colors.white)
+            if registryStale then
+                ui.status("Registry", "OUTDATED", colors.orange)
+            end
+            print("")
+            print("D  Change default mode")
+            print("T  Change timeout")
+            if maintenance then
+                print("F  Finish maintenance")
+            else
+                print("M  Begin manual maintenance")
+            end
+            print("B  Back")
+        end
+
+        while true do
+            renderSettings()
+            local event, value = os.pullEvent()
+            if event == "key" and value == keys.b then
+                return
+            elseif event == "key" and value == keys.d then
+                config.discovery.defaultMode = config.discovery.defaultMode == "event" and "manual" or "event"
+                saveConfig()
+                if not maintenance and config.discovery.defaultMode == "event" and registryStale then
+                    rescan()
+                end
+            elseif event == "key" and value == keys.t then
+                local nextTimeout = timeoutChoices[1]
+                for index, value in ipairs(timeoutChoices) do
+                    if value == config.discovery.maintenanceTimeout then
+                        nextTimeout = timeoutChoices[(index % #timeoutChoices) + 1]
+                        break
+                    end
+                end
+                config.discovery.maintenanceTimeout = nextTimeout
+                saveConfig()
+                if maintenance then
+                    if maintenanceTimer then os.cancelTimer(maintenanceTimer) end
+                    startMaintenance()
+                end
+            elseif event == "key" and value == keys.m and not maintenance then
+                startMaintenance()
+            elseif event == "key" and value == keys.f and maintenance then
+                stopMaintenance()
+            elseif event == "peripheral" or event == "peripheral_detach" then
+                if maintenance or config.discovery.defaultMode == "manual" then
+                    registryStale = true
+                else
+                    rescan()
+                end
+            elseif event == "timer" and maintenance and value == maintenanceTimer then
+                stopMaintenance()
+            end
+        end
+    end
+
+    rescan()
     render()
-    ui.waitForExit(render)
+    while true do
+        local event, value = os.pullEvent()
+        if event == "key" and value == keys.q then
+            ui.prepare()
+            return
+        elseif event == "key" and value == keys.r then
+            rescan()
+            render()
+        elseif event == "key" and value == keys.s then
+            settings()
+            render()
+        elseif event == "peripheral" or event == "peripheral_detach" then
+            if maintenance or config.discovery.defaultMode == "manual" then
+                registryStale = true
+            else
+                rescan()
+            end
+            render()
+        elseif event == "timer" and maintenance and value == maintenanceTimer then
+            stopMaintenance()
+            render()
+        elseif event == "term_resize" then
+            render()
+        end
+    end
 end
 
 return mainframe
@@ -225,11 +508,14 @@ local function buildConfig(role, display)
         "    role = %q,\n" ..
         "    display = %s,\n" ..
         "    computerId = %d,\n" ..
+        "    discovery = { defaultMode = %q, maintenanceTimeout = %d },\n" ..
         "}\n"):format(
             VERSION,
             role,
             display and string.format("%q", display) or "nil",
-            os.getComputerID()
+            os.getComputerID(),
+            "event",
+            1800
         )
 end
 
@@ -271,8 +557,10 @@ local function runInstaller()
     local previousInstall
     if fs.exists(INSTALL_DIR) then
         previousInstall = "/helios.previous"
-        if fs.exists(previousInstall) then
-            error("Cannot preserve the current install: " .. previousInstall .. " already exists.", 0)
+        local backupNumber = 2
+        while fs.exists(previousInstall) do
+            previousInstall = "/helios.previous." .. backupNumber
+            backupNumber = backupNumber + 1
         end
         fs.move(INSTALL_DIR, previousInstall)
     end
