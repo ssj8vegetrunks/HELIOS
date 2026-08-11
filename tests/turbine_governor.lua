@@ -219,6 +219,10 @@ do
         { inductorEngaged = true, flowRate = 2000 }, now + 4)
     equal(trim.action, "DECREASE FLOW", "between bands steam trim")
     equal(trim.recommendedFlow, 1900, "between bands bounded trim")
+    local falling = evaluate(memory, "between-bands", 1600, 1900,
+        { inductorEngaged = true, flowRate = 1900 }, now + 5)
+    equal(falling.action, "WAIT FOR 900 BAND", "tuned fallback fall action")
+    equal(falling.recommendedFlow, 1900, "tuned fallback does not restore full steam")
 end
 
 do
