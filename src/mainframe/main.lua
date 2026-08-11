@@ -29,8 +29,47 @@ function mainframe.run(config)
     local modemCount = network.openAll()
     local terminals = network.loadPeers()
     local missingDevices = {}
+    local sessionId = network.sessionId("mainframe")
+    local identityClaims = {}
+    local idConflicts = {}
+    local dashboardButtons = {}
 
     local timeoutChoices = { 300, 900, 1800, 3600 }
+
+    local function sameList(a, b)
+        if #a ~= #b then return false end
+        for index = 1, #a do if a[index] ~= b[index] then return false end end
+        return true
+    end
+
+    local function refreshIdConflicts()
+        local now = network.now()
+        local conflicts = {}
+        for id, claims in pairs(identityClaims) do
+            local count = 0
+            for claim, seenAt in pairs(claims) do
+                if now - seenAt <= 10 then count = count + 1 else claims[claim] = nil end
+            end
+            if tonumber(id) == os.getComputerID() then count = count + 1 end
+            if count > 1 then conflicts[#conflicts + 1] = tonumber(id) or id end
+        end
+        table.sort(conflicts, function(a, b) return tostring(a) < tostring(b) end)
+        local changed = not sameList(idConflicts, conflicts)
+        idConflicts = conflicts
+        ui.setIdConflicts(idConflicts)
+        return changed
+    end
+
+    local function advertiseIntegrity()
+        network.broadcast({
+            helios = true,
+            kind = "integrity",
+            sourceId = os.getComputerID(),
+            sessionId = sessionId,
+            idConflicts = idConflicts,
+            sentAt = network.now(),
+        })
+    end
 
     local function modeName()
         if maintenance then return "MANUAL - MAINTENANCE" end
@@ -164,6 +203,8 @@ function mainframe.run(config)
         turbines = turbineAdapter.readAll(devices)
         storages = storageAdapter.readAll(devices, config.power)
         updateAlarm()
+        local conflictsChanged = refreshIdConflicts()
+        if conflictsChanged or #idConflicts > 0 then advertiseIntegrity() end
     end
 
     local function alarmSignature()
@@ -187,6 +228,8 @@ function mainframe.run(config)
             alarm = currentAlarm,
             alarmSilenced = currentAlarm ~= nil and silencedAlarm == alarmSignature(),
             alarmVolume = config.alarms.volume,
+            idConflicts = idConflicts,
+            control = config.control,
         }
     end
 
@@ -202,9 +245,17 @@ function mainframe.run(config)
 
     local function handleNetwork(sender, message, protocol)
         if protocol ~= network.protocol or not network.valid(message, "hello") then return false end
+        local claim = tostring(message.sessionId or ("legacy:" .. tostring(sender)))
+        local idKey = tostring(sender)
+        identityClaims[idKey] = identityClaims[idKey] or {}
+        identityClaims[idKey][claim] = network.now()
+        local conflictsChanged = refreshIdConflicts()
         local assignment = ({ reactor = true, turbine = true, battery = true, all = true })[message.display]
             and message.display or "all"
-        local key = tostring(sender)
+        local key = tostring(sender) .. ":" .. claim
+        for savedKey, remote in pairs(terminals) do
+            if savedKey ~= key and tonumber(remote.id) == sender then terminals[savedKey] = nil end
+        end
         local previous = terminals[key]
         terminals[key] = {
             id = sender,
@@ -216,6 +267,7 @@ function mainframe.run(config)
             network.savePeers(terminals)
         end
         sendSnapshot(sender, assignment)
+        if conflictsChanged or #idConflicts > 0 then advertiseIntegrity() end
         return true
     end
 
@@ -279,6 +331,7 @@ function mainframe.run(config)
     end
 
     local function render()
+        ui.setIdConflicts(idConflicts)
         ui.header("MAINFRAME", "Central control authority")
         ui.status("System", "ONLINE", colors.lime)
         ui.status("Computer ID", config.computerId)
@@ -290,6 +343,7 @@ function mainframe.run(config)
             (function() local count = 0 for _ in pairs(terminals) do count = count + 1 end return count end)()),
             onlineTerminalCount() > 0 and colors.lime or colors.gray)
         ui.status("Discovery", modeName(), maintenance and colors.orange or colors.cyan)
+        ui.status("Control", "AUTOMATIC / ACTUATORS DISABLED", colors.orange)
         if registryStale then
             term.setTextColor(colors.orange)
             print("Registry may be outdated")
@@ -319,7 +373,7 @@ function mainframe.run(config)
         end
 
         local width, height = term.getSize()
-        local availableRows = math.max(0, height - 16)
+        local availableRows = math.max(0, height - 18)
         if #devices > availableRows then
             availableRows = math.max(0, availableRows - 1)
         end
@@ -332,9 +386,62 @@ function mainframe.run(config)
             print(("+ %d more (run: helios scan)"):format(#devices - availableRows))
         end
         print("")
+        dashboardButtons = {}
+        dashboardButtons.reactors = ui.inlineButton("REACTORS", colors.cyan)
+        write(" ")
+        dashboardButtons.turbines = ui.inlineButton("TURBINES", colors.cyan)
+        write(" ")
+        dashboardButtons.storage = ui.inlineButton("STORAGE", colors.cyan)
+        print("")
+        dashboardButtons.control = ui.inlineButton("CONTROL", colors.lime)
+        write(" ")
+        dashboardButtons.rescan = ui.inlineButton("RESCAN", colors.cyan)
+        write(" ")
+        dashboardButtons.settings = ui.inlineButton("SETTINGS", colors.cyan)
+        print("")
         term.setTextColor(colors.gray)
-        print("V reactors | G turbines | E storage")
-        print("R rescan | S settings | Q exit")
+        print("Keyboard: V/G/E/C/R/S | Q exit")
+        term.setTextColor(colors.white)
+    end
+
+    local function controlView()
+        local buttons = {}
+        local function draw()
+            ui.setIdConflicts(idConflicts)
+            ui.header("POWER CONTROL", "Automatic governor configuration")
+            ui.status("Mode", "AUTOMATIC", colors.lime)
+            ui.status("Actuators", "DISABLED - INTERFACE TEST", colors.orange)
+            ui.status("Target turbine RPM", config.control.targetRpm .. " RPM", colors.gray)
+            ui.status("Storage demand band", config.control.storageLow .. "% - " .. config.control.storageHigh .. "%", colors.gray)
+            ui.status("Maximum rod step", config.control.maxRodStep .. "%", colors.gray)
+            ui.status("Maximum flow step", config.control.maxFlowStep .. " mB/t", colors.gray)
+            ui.status("Adjustment interval", config.control.adjustmentInterval .. " seconds", colors.gray)
+            print("")
+            term.setTextColor(colors.lime)
+            print("[ AUTOMATIC ]")
+            term.setTextColor(colors.gray)
+            print("[ MANUAL - LOCKED ]")
+            print("[ TARGETS - LOCKED ]")
+            print("[ LIMITS - LOCKED ]")
+            term.setTextColor(colors.white)
+            buttons.back = ui.button("BACK", colors.cyan)
+        end
+        while true do
+            draw()
+            local event, value, x, y = os.pullEvent()
+            local touch = event == "monitor_touch"
+            if touch then x, y = x, y end
+            if event == "key" and value == keys.b then return
+            elseif (event == "mouse_click" or touch) and ui.hit(buttons.back, x, y) then return
+            elseif event == "rednet_message" then handleNetwork(value, x, y)
+            elseif event == "peripheral" or event == "peripheral_detach" then
+                if maintenance or config.discovery.defaultMode == "manual" then registryStale = true else rescan() end
+            elseif event == "timer" and value == reactorTimer then
+                pollReactors()
+                broadcastSnapshots()
+                reactorTimer = os.startTimer(1)
+            end
+        end
     end
 
     local function restoreTimersAfterTextInput()
@@ -637,6 +744,9 @@ function mainframe.run(config)
     local function reactorView()
         local selected = 1
         local viewSilenceButton
+        local previousButton
+        local nextButton
+        local backButton
 
         local function formatValue(value, suffix)
             if value == nil then return "N/A" end
@@ -684,7 +794,9 @@ function mainframe.run(config)
             else
                 viewSilenceButton = nil
             end
-            print("<- / -> reactor | B back")
+            previousButton = ui.button("< PREVIOUS", colors.cyan)
+            nextButton = ui.button("NEXT >", colors.cyan)
+            backButton = ui.button("BACK", colors.cyan)
         end
 
         while true do
@@ -696,9 +808,14 @@ function mainframe.run(config)
                 selected = ((selected - 2) % #reactors) + 1
             elseif event == "key" and value == keys.right and #reactors > 0 then
                 selected = (selected % #reactors) + 1
-            elseif event == "mouse_click" and viewSilenceButton and
-                   y == viewSilenceButton.y and x >= viewSilenceButton.x1 and x <= viewSilenceButton.x2 then
+            elseif (event == "mouse_click" or event == "monitor_touch") and ui.hit(viewSilenceButton, x, y) then
                 silenceCurrentAlarm()
+            elseif (event == "mouse_click" or event == "monitor_touch") and ui.hit(previousButton, x, y) and #reactors > 0 then
+                selected = ((selected - 2) % #reactors) + 1
+            elseif (event == "mouse_click" or event == "monitor_touch") and ui.hit(nextButton, x, y) and #reactors > 0 then
+                selected = (selected % #reactors) + 1
+            elseif (event == "mouse_click" or event == "monitor_touch") and ui.hit(backButton, x, y) then
+                return
             elseif event == "rednet_message" then
                 handleNetwork(value, x, y)
             elseif event == "peripheral" or event == "peripheral_detach" then
@@ -724,6 +841,7 @@ function mainframe.run(config)
 
     local function turbineView()
         local selected = 1
+        local previousButton, nextButton, backButton
 
         local function formatValue(value, suffix)
             if value == nil then return "N/A" end
@@ -757,7 +875,9 @@ function mainframe.run(config)
                 if turbine.ventMode ~= nil then ui.status("Vent mode", tostring(turbine.ventMode)) end
             end
             print("")
-            print("<- / -> turbine | B back")
+            previousButton = ui.button("< PREVIOUS", colors.cyan)
+            nextButton = ui.button("NEXT >", colors.cyan)
+            backButton = ui.button("BACK", colors.cyan)
         end
 
         while true do
@@ -769,6 +889,12 @@ function mainframe.run(config)
                 selected = ((selected - 2) % #turbines) + 1
             elseif event == "key" and value == keys.right and #turbines > 0 then
                 selected = (selected % #turbines) + 1
+            elseif (event == "mouse_click" or event == "monitor_touch") and ui.hit(previousButton, message, protocol) and #turbines > 0 then
+                selected = ((selected - 2) % #turbines) + 1
+            elseif (event == "mouse_click" or event == "monitor_touch") and ui.hit(nextButton, message, protocol) and #turbines > 0 then
+                selected = (selected % #turbines) + 1
+            elseif (event == "mouse_click" or event == "monitor_touch") and ui.hit(backButton, message, protocol) then
+                return
             elseif event == "rednet_message" then
                 handleNetwork(value, message, protocol)
             elseif event == "peripheral" or event == "peripheral_detach" then
@@ -789,6 +915,7 @@ function mainframe.run(config)
 
     local function storageView()
         local selected = 1
+        local previousButton, nextButton, backButton
 
         local function formatPercent(value)
             if value == nil then return "N/A" end
@@ -838,7 +965,9 @@ function mainframe.run(config)
                 end
             end
             print("")
-            print("<- / -> storage | B back")
+            previousButton = ui.button("< PREVIOUS", colors.cyan)
+            nextButton = ui.button("NEXT >", colors.cyan)
+            backButton = ui.button("BACK", colors.cyan)
         end
 
         while true do
@@ -850,6 +979,12 @@ function mainframe.run(config)
                 selected = ((selected - 2) % #storages) + 1
             elseif event == "key" and value == keys.right and #storages > 0 then
                 selected = (selected % #storages) + 1
+            elseif (event == "mouse_click" or event == "monitor_touch") and ui.hit(previousButton, message, protocol) and #storages > 0 then
+                selected = ((selected - 2) % #storages) + 1
+            elseif (event == "mouse_click" or event == "monitor_touch") and ui.hit(nextButton, message, protocol) and #storages > 0 then
+                selected = (selected % #storages) + 1
+            elseif (event == "mouse_click" or event == "monitor_touch") and ui.hit(backButton, message, protocol) then
+                return
             elseif event == "rednet_message" then
                 handleNetwork(value, message, protocol)
             elseif event == "peripheral" or event == "peripheral_detach" then
@@ -893,9 +1028,20 @@ function mainframe.run(config)
         elseif event == "key" and value == keys.e then
             storageView()
             render()
-        elseif event == "mouse_click" and silenceButton and
-               y == silenceButton.y and x >= silenceButton.x1 and x <= silenceButton.x2 then
-            silenceCurrentAlarm()
+        elseif event == "key" and value == keys.c then
+            controlView()
+            render()
+        elseif event == "monitor_touch" or event == "mouse_click" then
+            local touchX, touchY = x, y
+            if silenceButton and ui.hit(silenceButton, touchX, touchY) then
+                silenceCurrentAlarm()
+            elseif ui.hit(dashboardButtons.reactors, touchX, touchY) then reactorView()
+            elseif ui.hit(dashboardButtons.turbines, touchX, touchY) then turbineView()
+            elseif ui.hit(dashboardButtons.storage, touchX, touchY) then storageView()
+            elseif ui.hit(dashboardButtons.control, touchX, touchY) then controlView()
+            elseif ui.hit(dashboardButtons.rescan, touchX, touchY) then rescan(true)
+            elseif ui.hit(dashboardButtons.settings, touchX, touchY) then settings()
+            end
             render()
         elseif event == "rednet_message" then
             handleNetwork(value, x, y)
