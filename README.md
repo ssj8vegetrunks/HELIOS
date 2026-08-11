@@ -1,4 +1,4 @@
-# HELIOS — v1.4.0 Alpha 4 Self-Calibrating Turbine Governor
+# HELIOS — v1.4.0 Alpha 5 Staged Turbine Calibration
 
 Industrial power management for **CC:Tweaked** and **Extreme Reactors**.
 
@@ -29,11 +29,16 @@ The existing touch interface and network-ID protection remain online:
 - governor states, proposed changes, and actuator results appear on mainframe and remote turbine screens;
 - the governor holds on missing, conflicting, inactive, or unsupported telemetry;
 - normal changes require two matching readings, are limited to 100 mB/t every two seconds, and are verified by read-back;
-- calibration proves full steam, spools unloaded to 1800 RPM, engages the
-  inductor once, and learns the stable loaded band;
-- the inductor remains latched after engagement, eliminating repeated clutch cycling;
-- invalid steam supply, rotor collapse, sub-850-RPM settling, or timeout aborts
-  calibration and raises a system-wide warning without saving a profile;
+- calibration proves full steam and tests the 900-RPM band first;
+- turbines that overpower 900 RPM are unloaded again and tested at 1800 RPM;
+- 1800-RPM turbines trim steam in bounded steps and save both their learned band
+  and flow limit;
+- a turbine that cannot sustain 1800 RPM may settle back to a valid 900-RPM
+  profile without a fixed total timeout;
+- the inductor only changes at deliberate calibration transitions, eliminating
+  repeated clutch cycling;
+- invalid steam supply, rotor collapse below both bands, or a genuine no-progress
+  stall aborts calibration and raises a warning without saving a profile;
 - three consecutive readings confirm overspeed before an immediate zero-flow command;
 - confirmed turbine overspeed becomes a system-wide critical alarm;
 - rejected or unverifiable actuator commands become system-wide control-fault warnings;
@@ -243,13 +248,14 @@ turbine's live governor state, target RPM, current flow-limit setting, proposed
 setting, and action. Use Previous/Next to inspect turbines independently.
 
 An uncalibrated turbine first proves that its full advertised steam rate is
-available. HELIOS then spools it unloaded to 1800 RPM, engages the inductor once,
-and measures the stable loaded ceiling. The result is saved as the nearest valid
-900- or 1800-RPM band. The inductor remains engaged after that point and normal
-flow changes are limited to 100 mB/t every two seconds. Steam loss, rotor
-collapse, an invalid low result, or timeout raises `CALIBRATION FAILED` and saves
-nothing. Three confirmed overspeed readings engage the inductor, cut steam, and
-raise a global alarm. Missing or untrusted telemetry always produces HOLD.
+available. HELIOS spools it unloaded to 900 RPM and tests that band under load.
+Only a turbine that continues climbing past 1000 RPM proceeds to the 1800-RPM
+test. At 1800 RPM HELIOS trims excess steam, or lets an unsustainable high-band
+test settle back toward 900 while maintaining full steam. It saves the valid band
+and learned flow limit. Steam loss, rotor collapse below both bands, or a genuine
+no-progress stall raises `CALIBRATION FAILED` and saves nothing. Three confirmed
+overspeed readings engage the inductor, cut steam, and raise a global alarm.
+Missing or untrusted telemetry always produces HOLD.
 
 `AUTOMATIC` remains selected and tuning controls remain locked. HELIOS may only
 change a turbine's configured flow limit and inductor state. It still cannot
