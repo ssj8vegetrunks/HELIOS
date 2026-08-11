@@ -33,6 +33,11 @@ function config.load()
     loaded.control.mode = "automatic"
     loaded.control.actuatorsEnabled = false
     loaded.control.targetRpm = tonumber(loaded.control.targetRpm) or 1800
+    loaded.control.rpmDeadband = math.max(1, tonumber(loaded.control.rpmDeadband) or 25)
+    loaded.control.overspeedRpm = math.max(loaded.control.targetRpm + loaded.control.rpmDeadband,
+        tonumber(loaded.control.overspeedRpm) or 2000)
+    loaded.control.overspeedSamples = math.max(1,
+        math.floor(tonumber(loaded.control.overspeedSamples) or 3))
     loaded.control.storageLow = tonumber(loaded.control.storageLow) or 25
     loaded.control.storageHigh = tonumber(loaded.control.storageHigh) or 85
     loaded.control.maxRodStep = tonumber(loaded.control.maxRodStep) or 5

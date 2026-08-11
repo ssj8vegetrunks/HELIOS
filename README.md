@@ -1,10 +1,10 @@
-# HELIOS — v1.3.0 Alpha 2 Control Interface and Touch
+# HELIOS — v1.4.0 Alpha 1 Observing Turbine Governor
 
 Industrial power management for **CC:Tweaked** and **Extreme Reactors**.
 
-This milestone prepares HELIOS for automatic regulation without enabling any
-actuators yet. It also brings monitor touch and network-ID conflict detection
-online:
+This milestone starts automatic regulation in observe-only mode. HELIOS now
+calculates safe turbine flow-limit recommendations without issuing hardware
+commands. The existing touch interface and network-ID protection remain online:
 
 - the active HELIOS page is mirrored to every attached CC:Tweaked monitor;
 - mainframe monitors provide touch navigation, device selection, rescan, settings access, and alarm silence;
@@ -25,6 +25,11 @@ online:
 - conflicting directed telemetry is treated as unsafe until the IDs become unique;
 - a persistent Power Control screen exposes the planned automatic/manual and tuning layout;
 - `AUTOMATIC` is fixed on, while manual mode, tuning controls, and every actuator remain locked.
+- every turbine has an independent governor targeting 1800 RPM with a 25 RPM deadband;
+- governor states and proposed flow-limit changes appear on mainframe and remote turbine screens;
+- the governor holds on missing, conflicting, inactive, or unsupported telemetry;
+- three consecutive readings confirm overspeed before recommending an immediate flow cut;
+- confirmed turbine overspeed becomes a system-wide critical alarm;
 - settings and telemetry navigation use stable touch targets that fit the mirrored terminal canvas;
 - upgrades remove obsolete HELIOS rollback copies before staging and retain only the immediately replaced version.
 
@@ -97,6 +102,7 @@ The installed layout is:
     device_registry.lua
     reactor_adapter.lua
     turbine_adapter.lua
+    turbine_governor.lua
     storage_adapter.lua
     main.lua
   terminal/
@@ -147,8 +153,10 @@ Press `G` on the mainframe dashboard to open live turbine telemetry. `T` is
 intentionally unused because ATM10 binds it to the inventory trash overlay.
 Use the left and right arrow keys to move between connected turbines.
 
-The turbine adapter is read-only. Unsupported values display `N/A`, allowing
-ATM10 to show whichever measurements its Extreme Reactors build provides.
+The turbine adapter is read-only. HELIOS distinguishes actual steam consumed,
+the configured intake limit, and the turbine's hard intake limit. Unsupported
+values display `N/A`, allowing ATM10 to show whichever measurements its Extreme
+Reactors build provides.
 
 ## Names and power display
 
@@ -220,14 +228,21 @@ terminal can press `S` to silence only its local speaker. Warnings remain visibl
 new conditions can sound, and silence resets after the condition clears.
 Press `X` on either computer's alarm interface to test its locally attached speaker.
 
-## Power control interface
+## Observing turbine governor
 
-Press `C` or touch `[CONTROL]` on the mainframe dashboard. The screen contains
-the future control mode, turbine RPM target, storage demand band, rod/flow step
-limits, and adjustment interval. For this alpha, `AUTOMATIC` is selected but
-all tuning fields and actuator calls are deliberately locked. This is an
-interface and authority test only; HELIOS still cannot move rods, change flow,
-toggle a reactor, or engage a turbine.
+Press `C` or touch `[CONTROL]` on the mainframe dashboard. The screen shows each
+turbine's live governor state, target RPM, current flow-limit setting, proposed
+setting, and action. Use Previous/Next to inspect turbines independently.
+
+The first governor targets 1800 RPM with a 25 RPM deadband and limits each
+recommended change to 100 mB/t per evaluation. Three consecutive readings at
+or above 2000 RPM trigger the observing overspeed interlock, which recommends a
+zero flow limit and raises a global alarm. Missing or untrusted telemetry always
+produces HOLD.
+
+`AUTOMATIC` remains selected, but every tuning control and actuator call is
+locked. HELIOS calculates what it would do; it still cannot move rods, change
+flow, toggle a reactor, or engage a turbine.
 
 See [`docs/CONTROL.md`](docs/CONTROL.md) for the concise control boundary and
 planned governor order.
@@ -243,6 +258,7 @@ trusting directed telemetry.
 
 ## Scope boundary
 
-Discovery, remote telemetry, and power hardware remain read-only. The control
-interface is present, but reactor/turbine governor logic and actuator calls are
-disabled. Graphs and additional specialized storage adapters come later.
+Discovery, remote telemetry, and power hardware remain read-only. The turbine
+governor calculates and distributes recommendations, but actuator calls remain
+disabled. Reactor regulation, storage coordination, graphs, and additional
+specialized storage adapters come later.

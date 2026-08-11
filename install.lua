@@ -1,7 +1,7 @@
 -- HELIOS single-file installer
--- Milestone 6.0: control interface, monitor touch, and network identity safety.
+-- Milestone 7.0: observing turbine governor and overspeed planning.
 
-local VERSION = "1.3.0-alpha.2"
+local VERSION = "1.4.0-alpha.1"
 local INSTALL_DIR = "/helios"
 local STAGE_DIR = "/.helios-install"
 
@@ -106,6 +106,11 @@ function config.load()
     loaded.control.mode = "automatic"
     loaded.control.actuatorsEnabled = false
     loaded.control.targetRpm = tonumber(loaded.control.targetRpm) or 1800
+    loaded.control.rpmDeadband = math.max(1, tonumber(loaded.control.rpmDeadband) or 25)
+    loaded.control.overspeedRpm = math.max(loaded.control.targetRpm + loaded.control.rpmDeadband,
+        tonumber(loaded.control.overspeedRpm) or 2000)
+    loaded.control.overspeedSamples = math.max(1,
+        math.floor(tonumber(loaded.control.overspeedSamples) or 3))
     loaded.control.storageLow = tonumber(loaded.control.storageLow) or 25
     loaded.control.storageHigh = tonumber(loaded.control.storageHigh) or 85
     loaded.control.maxRodStep = tonumber(loaded.control.maxRodStep) or 5
@@ -656,6 +661,7 @@ function mainframe.run(config)
     local registry = dofile("/helios/mainframe/device_registry.lua")
     local reactorAdapter = dofile("/helios/mainframe/reactor_adapter.lua")
     local turbineAdapter = dofile("/helios/mainframe/turbine_adapter.lua")
+    local turbineGovernor = dofile("/helios/mainframe/turbine_governor.lua")
     local storageAdapter = dofile("/helios/mainframe/storage_adapter.lua")
     local powerFormat = dofile("/helios/core/power_format.lua")
     local network = dofile("/helios/core/network.lua")
@@ -681,6 +687,7 @@ function mainframe.run(config)
     local identityClaims = {}
     local idConflicts = {}
     local dashboardButtons = {}
+    local governorMemory = turbineGovernor.new()
 
     local timeoutChoices = { 300, 900, 1800, 3600 }
 
@@ -780,6 +787,11 @@ function mainframe.run(config)
                 candidates[#candidates + 1] = { level = level, key = key, message = message }
             end
         end
+        local function addConfirmed(level, key, message)
+            activeKeys[key] = true
+            conditionSamples[key] = config.alarms.confirmSamples
+            candidates[#candidates + 1] = { level = level, key = key, message = message }
+        end
 
         for _, reactor in ipairs(reactors) do
             if reactor.error and not maintenance then
@@ -795,6 +807,8 @@ function mainframe.run(config)
         for _, turbine in ipairs(turbines) do
             if turbine.error and not maintenance then
                 add(3, turbine.name .. ":telemetry", alarmName(turbine.name) .. " TELEMETRY LOST")
+            elseif turbine.governor and turbine.governor.state == "OVERSPEED" then
+                addConfirmed(3, turbine.name .. ":overspeed", alarmName(turbine.name) .. " OVERSPEED")
             end
         end
         for _, storage in ipairs(storages) do
@@ -850,6 +864,11 @@ function mainframe.run(config)
         reactors = reactorAdapter.readAll(devices)
         turbines = turbineAdapter.readAll(devices)
         storages = storageAdapter.readAll(devices, config.power)
+        turbineGovernor.evaluateAll(governorMemory, turbines, config.control, {
+            maintenance = maintenance,
+            mainframeId = os.getComputerID(),
+            idConflicts = idConflicts,
+        })
         updateAlarm()
         local conflictsChanged = refreshIdConflicts()
         if conflictsChanged or #idConflicts > 0 then advertiseIntegrity() end
@@ -991,7 +1010,7 @@ function mainframe.run(config)
             (function() local count = 0 for _ in pairs(terminals) do count = count + 1 end return count end)()),
             onlineTerminalCount() > 0 and colors.lime or colors.gray)
         ui.status("Discovery", modeName(), maintenance and colors.orange or colors.cyan)
-        ui.status("Control", "AUTOMATIC / ACTUATORS DISABLED", colors.orange)
+        ui.status("Control", "GOVERNOR OBSERVING / ACTUATORS DISABLED", colors.orange)
         if registryStale then
             term.setTextColor(colors.orange)
             print("Registry may be outdated")
@@ -1053,35 +1072,58 @@ function mainframe.run(config)
     end
 
     local function controlView()
+        local selected = 1
         local buttons = {}
         local function draw()
             ui.setIdConflicts(idConflicts)
-            ui.header("POWER CONTROL", "Automatic governor configuration")
+            ui.header("POWER CONTROL", "Automatic turbine governor")
             ui.status("Mode", "AUTOMATIC", colors.lime)
-            ui.status("Actuators", "DISABLED - INTERFACE TEST", colors.orange)
-            ui.status("Target turbine RPM", config.control.targetRpm .. " RPM", colors.gray)
-            ui.status("Storage demand band", config.control.storageLow .. "% - " .. config.control.storageHigh .. "%", colors.gray)
-            ui.status("Maximum rod step", config.control.maxRodStep .. "%", colors.gray)
-            ui.status("Maximum flow step", config.control.maxFlowStep .. " mB/t", colors.gray)
-            ui.status("Adjustment interval", config.control.adjustmentInterval .. " seconds", colors.gray)
+            ui.status("Actuators", "DISABLED - OBSERVE ONLY", colors.orange)
+            if #turbines == 0 then
+                ui.status("Status", "NO TURBINES FOUND", colors.orange)
+            else
+                if selected > #turbines then selected = #turbines end
+                local turbine = turbines[selected]
+                local plan = turbine.governor or {}
+                ui.status("Turbine", ("%d/%d %s"):format(selected, #turbines,
+                    deviceName(turbine.name)), colors.cyan)
+                ui.status("Governor", plan.state or "WAITING", plan.trusted == false and colors.red or colors.lime)
+                ui.status("Rotor / target", ("%.1f / %d RPM"):format(
+                    tonumber(turbine.rotorSpeed) or 0, config.control.targetRpm), colors.cyan)
+                if plan.currentFlow ~= nil and plan.recommendedFlow ~= nil then
+                    ui.status("Flow-limit plan", ("%.0f -> %.0f mB/t"):format(
+                        plan.currentFlow, plan.recommendedFlow), colors.cyan)
+                else
+                    ui.status("Flow-limit plan", "HOLD - TELEMETRY REQUIRED", colors.gray)
+                end
+                ui.status("Action", plan.action or "HOLD", plan.action == "CUT FLOW" and colors.red or colors.white)
+            end
             print("")
             term.setTextColor(colors.lime)
-            print("[ AUTOMATIC ]")
+            write("[ AUTOMATIC ] ")
             term.setTextColor(colors.gray)
             print("[ MANUAL - LOCKED ]")
-            print("[ TARGETS - LOCKED ]")
-            print("[ LIMITS - LOCKED ]")
+            print(("Targets/limits locked: %d RPM +/- %d"):format(
+                config.control.targetRpm, config.control.rpmDeadband))
             term.setTextColor(colors.white)
-            buttons.back = ui.button("BACK", colors.cyan)
+            buttons.previous = ui.inlineButton("< PREVIOUS", colors.cyan)
+            write(" ")
+            buttons.next = ui.inlineButton("NEXT >", colors.cyan)
+            write(" ")
+            buttons.back = ui.inlineButton("BACK", colors.cyan)
+            print("")
         end
         while true do
             draw()
-            local event, value, x, y = os.pullEvent()
-            local touch = event == "monitor_touch"
-            if touch then x, y = x, y end
+            local event, value, message, protocol = os.pullEvent()
+            local x, y = ui.eventPoint(event, value, message, protocol)
             if event == "key" and value == keys.b then return
-            elseif (event == "mouse_click" or touch) and ui.hit(buttons.back, x, y) then return
-            elseif event == "rednet_message" then handleNetwork(value, x, y)
+            elseif ((event == "key" and value == keys.left) or ui.hit(buttons.previous, x, y)) and #turbines > 0 then
+                selected = ((selected - 2) % #turbines) + 1
+            elseif ((event == "key" and value == keys.right) or ui.hit(buttons.next, x, y)) and #turbines > 0 then
+                selected = (selected % #turbines) + 1
+            elseif ui.hit(buttons.back, x, y) then return
+            elseif event == "rednet_message" then handleNetwork(value, message, protocol)
             elseif event == "peripheral" or event == "peripheral_detach" then
                 if maintenance or config.discovery.defaultMode == "manual" then registryStale = true else rescan() end
             elseif event == "timer" and value == reactorTimer then
@@ -1523,7 +1565,7 @@ function mainframe.run(config)
         end
 
         local function draw()
-            ui.header("TURBINES", "Read-only live telemetry")
+            ui.header("TURBINES", "Live telemetry and governor plan")
             if #turbines == 0 then
                 ui.status("Status", "NO TURBINES FOUND", colors.orange)
                 print("")
@@ -1540,14 +1582,20 @@ function mainframe.run(config)
                 ui.status("State", turbine.active == true and "ACTIVE" or turbine.active == false and "OFFLINE" or "UNKNOWN",
                     turbine.active == true and colors.lime or colors.orange)
                 ui.status("Rotor speed", formatValue(turbine.rotorSpeed, " RPM"), colors.cyan)
+                local plan = turbine.governor or {}
+                ui.status("Governor", plan.state or "WAITING", plan.trusted == false and colors.red or colors.lime)
                 ui.status("Power output", powerFormat.power(turbine.energyProduction, config.power, true), colors.cyan)
                 ui.status("Energy buffer", formatValue(turbine.energyPercent, "%"))
-                ui.status("Fluid flow", formatValue(turbine.flowRate, " mB/t"))
-                ui.status("Max flow", formatValue(turbine.flowRateMax, " mB/t"))
-                ui.status("Input tank", formatValue(turbine.inputPercent, "%"))
-                ui.status("Output tank", formatValue(turbine.outputPercent, "%"))
+                if plan.currentFlow ~= nil and plan.recommendedFlow ~= nil then
+                    ui.status("Flow actual/set/plan", ("%s / %.0f -> %.0f"):format(
+                        plan.actualFlow and ("%.0f"):format(plan.actualFlow) or "N/A",
+                        plan.currentFlow, plan.recommendedFlow), colors.cyan)
+                else
+                    ui.status("Flow actual/set/plan", "N/A / HOLD", colors.gray)
+                end
+                ui.status("Tanks in / out", formatValue(turbine.inputPercent, "%") .. " / " ..
+                    formatValue(turbine.outputPercent, "%"))
                 ui.status("Inductor", turbine.inductorEngaged == true and "ENGAGED" or turbine.inductorEngaged == false and "DISENGAGED" or "N/A")
-                if turbine.ventMode ~= nil then ui.status("Vent mode", tostring(turbine.ventMode)) end
             end
             print("")
             previousButton = ui.inlineButton("< PREVIOUS", colors.cyan)
@@ -2220,6 +2268,7 @@ function adapter.read(device)
     turbine.energyMax = number(readAny(name, availableMethods, { "getEnergyCapacity", "getMaxEnergyStored", "energyCapacity" }))
     turbine.flowRate = number(readAny(name, availableMethods, { "getFluidFlowRate", "getFluidFlowRateLastTick", "getInputFlowRate", "fluidFlowRate" }))
     turbine.flowRateMax = number(readAny(name, availableMethods, { "getFluidFlowRateMax", "getMaxFluidFlowRate", "getMaxIntakeRate", "fluidFlowRateMax" }))
+    turbine.flowRateLimit = number(readAny(name, availableMethods, { "getFluidFlowRateMaxMax", "getFluidFlowRateLimit", "getMaxPermittedFlow", "flowRateLimit" }))
     turbine.inputAmount = number(readAny(name, availableMethods, { "getInputAmount", "getInputFluidAmount", "inputAmount" }))
     turbine.inputMax = number(readAny(name, availableMethods, { "getInputAmountMax", "getInputCapacity", "inputAmountMax" }))
     turbine.outputAmount = number(readAny(name, availableMethods, { "getOutputAmount", "getOutputFluidAmount", "outputAmount" }))
@@ -2276,6 +2325,8 @@ function adapter.printReport(turbines, config, formatter)
             print("  Power: " .. formatter.power(turbine.energyProduction, config.power, true))
             print("  Buffer: " .. value(turbine.energyPercent, "%"))
             print("  Flow: " .. value(turbine.flowRate, " mB/t"))
+            print("  Flow setting: " .. value(turbine.flowRateMax, " mB/t"))
+            print("  Flow limit: " .. value(turbine.flowRateLimit, " mB/t"))
             print("  Inductor: " .. (turbine.inductorEngaged == true and "ENGAGED" or turbine.inductorEngaged == false and "DISENGAGED" or "N/A"))
         end
         print("")
@@ -2283,6 +2334,163 @@ function adapter.printReport(turbines, config, formatter)
 end
 
 return adapter
+]=],
+
+    ["mainframe/turbine_governor.lua"] = [=[
+local governor = {}
+
+local function clamp(value, minimum, maximum)
+    return math.max(minimum, math.min(maximum, value))
+end
+
+local function round(value)
+    return math.floor(value + 0.5)
+end
+
+local function contains(list, wanted)
+    for _, value in ipairs(list or {}) do
+        if tonumber(value) == tonumber(wanted) then return true end
+    end
+    return false
+end
+
+local function hold(state, reason, trusted)
+    return {
+        mode = "observe",
+        state = state,
+        action = "HOLD",
+        reason = reason,
+        trusted = trusted ~= false,
+    }
+end
+
+function governor.new()
+    return { turbines = {} }
+end
+
+function governor.evaluate(memory, turbine, control, context)
+    control = control or {}
+    context = context or {}
+    memory.turbines = memory.turbines or {}
+
+    local target = tonumber(control.targetRpm) or 1800
+    local deadband = math.max(1, tonumber(control.rpmDeadband) or 25)
+    local overspeedRpm = math.max(target + deadband, tonumber(control.overspeedRpm) or 2000)
+    local overspeedSamples = math.max(1, math.floor(tonumber(control.overspeedSamples) or 3))
+    local maxStep = math.max(1, tonumber(control.maxFlowStep) or 100)
+    local name = tostring(turbine.name or "unknown")
+    local previous = memory.turbines[name] or { overspeedCount = 0 }
+
+    local result
+    if context.maintenance then
+        result = hold("MAINTENANCE", "Automatic decisions paused during maintenance")
+    elseif context.mainframeId and contains(context.idConflicts, context.mainframeId) then
+        result = hold("NO TRUSTED DATA", "Mainframe computer ID is conflicting", false)
+    elseif turbine.error then
+        result = hold("NO TRUSTED DATA", tostring(turbine.error), false)
+    elseif turbine.active == false then
+        result = hold("OFFLINE", "Turbine is not active")
+    elseif turbine.rotorSpeed == nil then
+        result = hold("NO RPM DATA", "Rotor-speed telemetry is unavailable", false)
+    elseif turbine.flowRateMax == nil and turbine.flowRate == nil then
+        result = hold("NO FLOW DATA", "Flow setting telemetry is unavailable", false)
+    else
+        local rpm = tonumber(turbine.rotorSpeed)
+        local currentFlow = tonumber(turbine.flowRateMax) or tonumber(turbine.flowRate)
+        local rpmError = target - rpm
+        local rpmTrend = previous.rpm and (rpm - previous.rpm) or 0
+        local overspeedCount = rpm >= overspeedRpm and (previous.overspeedCount + 1) or 0
+        local recommendedFlow = currentFlow
+        local state = "STABLE"
+        local action = "HOLD"
+        local reason = "Rotor is inside the target deadband"
+
+        if rpm >= overspeedRpm then
+            if overspeedCount >= overspeedSamples then
+                state = "OVERSPEED"
+                action = "CUT FLOW"
+                reason = "Confirmed overspeed interlock recommendation"
+                recommendedFlow = 0
+            else
+                state = "VERIFYING OVERSPEED"
+                action = "HOLD"
+                reason = ("Overspeed sample %d/%d"):format(overspeedCount, overspeedSamples)
+            end
+        elseif math.abs(rpmError) <= deadband then
+            if math.abs(rpmTrend) > deadband / 5 then
+                state = "SETTLING"
+                reason = rpmTrend > 0 and "Inside target band and still accelerating" or
+                    "Inside target band and still decelerating"
+            end
+        else
+            local scale = clamp(math.abs(rpmError) / (deadband * 4), 0.25, 1)
+            local step = math.max(1, round(maxStep * scale))
+            if rpmError > 0 then
+                state = rpm < 100 and "STARTING" or
+                    (rpmTrend > 1 and "ACCELERATING" or "BELOW TARGET")
+                action = "INCREASE FLOW"
+                reason = "Rotor is below the target band"
+                recommendedFlow = currentFlow + step
+            else
+                state = rpmTrend < -1 and "DECELERATING" or "ABOVE TARGET"
+                action = "DECREASE FLOW"
+                reason = "Rotor is above the target band"
+                recommendedFlow = currentFlow - step
+            end
+        end
+
+        local flowMaximum = tonumber(turbine.flowRateLimit)
+        recommendedFlow = clamp(recommendedFlow, 0, flowMaximum or math.max(currentFlow, recommendedFlow))
+        recommendedFlow = round(recommendedFlow)
+        result = {
+            mode = "observe",
+            state = state,
+            action = action,
+            reason = reason,
+            trusted = true,
+            targetRpm = target,
+            rpmDeadband = deadband,
+            overspeedRpm = overspeedRpm,
+            overspeedCount = overspeedCount,
+            overspeedSamples = overspeedSamples,
+            rpmError = rpmError,
+            rpmTrend = rpmTrend,
+            currentFlow = currentFlow,
+            actualFlow = tonumber(turbine.flowRate),
+            recommendedFlow = recommendedFlow,
+            flowChange = recommendedFlow - currentFlow,
+        }
+        previous.overspeedCount = overspeedCount
+    end
+
+    if result.state ~= "VERIFYING OVERSPEED" and result.state ~= "OVERSPEED" then
+        previous.overspeedCount = 0
+    end
+    previous.rpm = tonumber(turbine.rotorSpeed)
+    memory.turbines[name] = previous
+    result.targetRpm = result.targetRpm or target
+    result.rpmDeadband = result.rpmDeadband or deadband
+    result.overspeedRpm = result.overspeedRpm or overspeedRpm
+    result.currentFlow = result.currentFlow or tonumber(turbine.flowRateMax) or tonumber(turbine.flowRate)
+    result.actualFlow = result.actualFlow or tonumber(turbine.flowRate)
+    result.recommendedFlow = result.recommendedFlow or result.currentFlow
+    result.flowChange = result.flowChange or 0
+    return result
+end
+
+function governor.evaluateAll(memory, turbines, control, context)
+    local present = {}
+    for _, turbine in ipairs(turbines or {}) do
+        present[tostring(turbine.name)] = true
+        turbine.governor = governor.evaluate(memory, turbine, control, context)
+    end
+    for name in pairs(memory.turbines or {}) do
+        if not present[name] then memory.turbines[name] = nil end
+    end
+    return turbines
+end
+
+return governor
 ]=],
 
     ["terminal/main.lua"] = [=[
@@ -2450,10 +2658,17 @@ function terminal.run(config)
             if item.error then ui.status("Telemetry", item.error, colors.red) return end
             ui.status("State", item.active == true and "ACTIVE" or item.active == false and "OFFLINE" or "UNKNOWN")
             ui.status("Rotor speed", formatValue(item.rotorSpeed, " RPM"), colors.cyan)
+            local plan = item.governor or {}
+            ui.status("Governor", plan.state or "WAITING", plan.trusted == false and colors.red or colors.lime)
             ui.status("Power output", powerFormat.power(item.energyProduction, state.power, true), colors.cyan)
             ui.status("Energy buffer", formatValue(item.energyPercent, "%"))
-            ui.status("Fluid flow", formatValue(item.flowRate, " mB/t"))
-            ui.status("Max flow", formatValue(item.flowRateMax, " mB/t"))
+            if plan.currentFlow ~= nil and plan.recommendedFlow ~= nil then
+                ui.status("Flow actual/set/plan", ("%s / %.0f -> %.0f"):format(
+                    plan.actualFlow and ("%.0f"):format(plan.actualFlow) or "N/A",
+                    plan.currentFlow, plan.recommendedFlow), colors.cyan)
+            else
+                ui.status("Flow actual/set/plan", "N/A / HOLD", colors.gray)
+            end
             ui.status("Inductor", item.inductorEngaged == true and "ENGAGED" or item.inductorEngaged == false and "DISENGAGED" or "N/A")
         end)
     end
@@ -2589,7 +2804,6 @@ end
 
 return terminal
 ]=],
-
 }
 
 local function installStartup()
@@ -2663,6 +2877,12 @@ local function buildConfig(role, display, existing)
             mode = "automatic",
             actuatorsEnabled = false,
             targetRpm = tonumber(control.targetRpm) or 1800,
+            rpmDeadband = math.max(1, tonumber(control.rpmDeadband) or 25),
+            overspeedRpm = math.max((tonumber(control.targetRpm) or 1800) +
+                math.max(1, tonumber(control.rpmDeadband) or 25),
+                tonumber(control.overspeedRpm) or 2000),
+            overspeedSamples = math.max(1,
+                math.floor(tonumber(control.overspeedSamples) or 3)),
             storageLow = tonumber(control.storageLow) or 25,
             storageHigh = tonumber(control.storageHigh) or 85,
             maxRodStep = tonumber(control.maxRodStep) or 5,

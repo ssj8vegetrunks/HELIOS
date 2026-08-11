@@ -162,10 +162,17 @@ function terminal.run(config)
             if item.error then ui.status("Telemetry", item.error, colors.red) return end
             ui.status("State", item.active == true and "ACTIVE" or item.active == false and "OFFLINE" or "UNKNOWN")
             ui.status("Rotor speed", formatValue(item.rotorSpeed, " RPM"), colors.cyan)
+            local plan = item.governor or {}
+            ui.status("Governor", plan.state or "WAITING", plan.trusted == false and colors.red or colors.lime)
             ui.status("Power output", powerFormat.power(item.energyProduction, state.power, true), colors.cyan)
             ui.status("Energy buffer", formatValue(item.energyPercent, "%"))
-            ui.status("Fluid flow", formatValue(item.flowRate, " mB/t"))
-            ui.status("Max flow", formatValue(item.flowRateMax, " mB/t"))
+            if plan.currentFlow ~= nil and plan.recommendedFlow ~= nil then
+                ui.status("Flow actual/set/plan", ("%s / %.0f -> %.0f"):format(
+                    plan.actualFlow and ("%.0f"):format(plan.actualFlow) or "N/A",
+                    plan.currentFlow, plan.recommendedFlow), colors.cyan)
+            else
+                ui.status("Flow actual/set/plan", "N/A / HOLD", colors.gray)
+            end
             ui.status("Inductor", item.inductorEngaged == true and "ENGAGED" or item.inductorEngaged == false and "DISENGAGED" or "N/A")
         end)
     end
