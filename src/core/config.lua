@@ -45,6 +45,11 @@ function config.load()
     loaded.control.adjustmentInterval = tonumber(loaded.control.adjustmentInterval) or 2
     loaded.control.commandSamples = math.max(1,
         math.floor(tonumber(loaded.control.commandSamples) or 2))
+    loaded.control.spoolDisengageRpm = math.max(0,
+        tonumber(loaded.control.spoolDisengageRpm) or 1500)
+    loaded.control.spoolEngageRpm = math.max(loaded.control.spoolDisengageRpm + 1,
+        tonumber(loaded.control.spoolEngageRpm) or
+            (loaded.control.targetRpm - loaded.control.rpmDeadband))
     loaded.power = loaded.power or {}
     local validUnits = { FE = true, RF = true, J = true, EU = true }
     if not validUnits[loaded.power.unit] then loaded.power.unit = "FE" end
