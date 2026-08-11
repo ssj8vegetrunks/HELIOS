@@ -31,7 +31,7 @@ function config.load()
     loaded.ui.monitorTextScale = tonumber(loaded.ui.monitorTextScale) or 0.5
     loaded.control = loaded.control or {}
     loaded.control.mode = "automatic"
-    loaded.control.actuatorsEnabled = false
+    loaded.control.actuatorsEnabled = loaded.role == "mainframe"
     loaded.control.targetRpm = tonumber(loaded.control.targetRpm) or 1800
     loaded.control.rpmDeadband = math.max(1, tonumber(loaded.control.rpmDeadband) or 25)
     loaded.control.overspeedRpm = math.max(loaded.control.targetRpm + loaded.control.rpmDeadband,
@@ -43,6 +43,8 @@ function config.load()
     loaded.control.maxRodStep = tonumber(loaded.control.maxRodStep) or 5
     loaded.control.maxFlowStep = tonumber(loaded.control.maxFlowStep) or 100
     loaded.control.adjustmentInterval = tonumber(loaded.control.adjustmentInterval) or 2
+    loaded.control.commandSamples = math.max(1,
+        math.floor(tonumber(loaded.control.commandSamples) or 2))
     loaded.power = loaded.power or {}
     local validUnits = { FE = true, RF = true, J = true, EU = true }
     if not validUnits[loaded.power.unit] then loaded.power.unit = "FE" end
