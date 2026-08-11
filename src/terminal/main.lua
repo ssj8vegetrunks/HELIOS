@@ -16,6 +16,9 @@ function terminal.run(config)
     local lastAlarmSound = 0
     local heartbeatTimer
     local lastHelloAt = 0
+    local sessionId = network.sessionId("terminal")
+    local idConflicts = {}
+    local previousButton, nextButton, silenceButton, testButton
 
     local function nameOf(rawName, state)
         local aliases = state.aliases or {}
@@ -64,6 +67,7 @@ function terminal.run(config)
             computerId = os.getComputerID(),
             display = config.display or "all",
             version = config.version,
+            sessionId = sessionId,
         })
         lastHelloAt = network.now()
     end
@@ -72,14 +76,26 @@ function terminal.run(config)
         return lastSnapshotAt and network.now() - lastSnapshotAt <= 5
     end
 
+    local function conflictingId(id)
+        id = tonumber(id)
+        for _, conflict in ipairs(idConflicts) do
+            if tonumber(conflict) == id then return true end
+        end
+        return false
+    end
+
     local function statusLine()
         if modemCount == 0 then return "NO MODEM", colors.red end
+        if conflictingId(os.getComputerID()) or (mainframeId and conflictingId(mainframeId)) then
+            return "ID CONFLICT - TELEMETRY UNTRUSTED", colors.red
+        end
         if not snapshot then return "SEARCHING", colors.orange end
         if not linkOnline() then return "LINK LOST - DATA STALE", colors.red end
         return "ONLINE", colors.lime
     end
 
     local function alarmLine()
+        silenceButton = nil
         if not snapshot or not snapshot.alarm then return end
         term.setTextColor(snapshot.alarm.level >= 3 and colors.red or colors.orange)
         print("!! " .. tostring(snapshot.alarm.message))
@@ -88,7 +104,7 @@ function terminal.run(config)
         elseif localSilenced == alarmSignature(snapshot.alarm) then
             print("Local speaker silenced")
         else
-            print("S  Silence local speaker")
+            silenceButton = ui.button("SILENCE LOCAL", colors.orange)
         end
         term.setTextColor(colors.white)
     end
@@ -109,7 +125,9 @@ function terminal.run(config)
         drawItem(item, state)
         print("")
         alarmLine()
-        print("<- / -> device | X test | Q exit")
+        previousButton = ui.button("< PREVIOUS", colors.cyan)
+        nextButton = ui.button("NEXT >", colors.cyan)
+        testButton = ui.button("TEST SPEAKER", colors.cyan)
     end
 
     local function formatValue(value, suffix)
@@ -183,10 +201,13 @@ function terminal.run(config)
         if capacity > 0 then ui.status("Combined charge", ("%.1f%%"):format(stored / capacity * 100)) end
         print("")
         alarmLine()
-        print("X  Test local speaker | Q exit")
+        testButton = ui.button("TEST SPEAKER", colors.cyan)
+        print("Q exits on the terminal keyboard")
     end
 
     local function render()
+        previousButton, nextButton, silenceButton, testButton = nil, nil, nil, nil
+        ui.setIdConflicts(idConflicts)
         if not snapshot then
             ui.header("REMOTE TERMINAL", "Mainframe-restricted display")
             ui.status("System", "ONLINE", colors.lime)
@@ -227,6 +248,20 @@ function terminal.run(config)
             render()
         elseif event == "key" and value == keys.x then
             playSound("minecraft:block.note_block.bell", 0.8, 1.5)
+        elseif event == "monitor_touch" then
+            local x, y = message, protocol
+            if ui.hit(previousButton, x, y) then selected = math.max(1, selected - 1)
+            elseif ui.hit(nextButton, x, y) then selected = selected + 1
+            elseif ui.hit(silenceButton, x, y) and snapshot and snapshot.alarm then
+                localSilenced = alarmSignature(snapshot.alarm)
+            elseif ui.hit(testButton, x, y) then
+                playSound("minecraft:block.note_block.bell", 0.8, 1.5)
+            end
+            render()
+        elseif event == "rednet_message" and protocol == network.protocol and
+               network.valid(message, "integrity") then
+            idConflicts = type(message.idConflicts) == "table" and message.idConflicts or {}
+            render()
         elseif event == "rednet_message" and protocol == network.protocol and
                network.valid(message, "snapshot") and (not mainframeId or value == mainframeId) then
             if not mainframeId then
@@ -236,6 +271,7 @@ function terminal.run(config)
             end
             local oldSignature = snapshot and alarmSignature(snapshot.alarm)
             snapshot = message
+            idConflicts = type(snapshot.idConflicts) == "table" and snapshot.idConflicts or idConflicts
             lastSnapshotAt = network.now()
             local newSignature = alarmSignature(snapshot.alarm)
             if oldSignature and not newSignature then
