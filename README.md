@@ -260,7 +260,7 @@ terminal can press `S` to silence only its local speaker. Warnings remain visibl
 new conditions can sound, and silence resets after the condition clears.
 Press `X` on either computer's alarm interface to test its locally attached speaker.
 
-## Automatic turbine governor
+## Automatic plant governors
 
 Press `C` or touch `[CONTROL]` on the mainframe dashboard. The screen shows each
 turbine's live governor state, target RPM, current flow-limit setting, proposed
@@ -276,9 +276,10 @@ no-progress stall raises `CALIBRATION FAILED` and saves nothing. Three confirmed
 overspeed readings engage the inductor, cut steam, and raise a global alarm.
 Missing or untrusted telemetry always produces HOLD.
 
-`AUTOMATIC` remains selected and tuning controls remain locked. HELIOS may only
-change a turbine's configured flow limit and inductor state. It still cannot
-move rods, toggle a reactor, start or stop a turbine, or change venting.
+`AUTOMATIC` remains selected and tuning controls remain locked. HELIOS may
+change a turbine's configured flow limit and inductor state, plus the uniform
+control-rod insertion of one active steam reactor. It still cannot toggle a
+reactor, start or stop a turbine, change venting, eject fuel, or eject waste.
 
 See [`docs/CONTROL.md`](docs/CONTROL.md) for the concise control boundary and
 planned governor order.
@@ -295,5 +296,6 @@ trusting directed telemetry.
 ## Scope boundary
 
 Remote terminals remain read-only. The mainframe may control only turbine flow
-limits and inductors through the guarded governor. Reactor regulation, storage
-coordination, graphs, and additional specialized storage adapters come later.
+limits, turbine inductors, and verified all-rod insertion on one active steam
+reactor. Multi-reactor routing, storage coordination, graphs, and additional
+specialized storage adapters come later.

@@ -66,7 +66,7 @@ actively cooled reactor:
 - No total calibration timeout; no-progress stall timeout: 3 minutes
 
 These defaults are persisted during upgrades but cannot be changed from the
-interface until the automatic governors and safety interlocks are implemented.
+interface until user tuning controls and their validation limits are implemented.
 
 ## Next implementation order
 
