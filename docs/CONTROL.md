@@ -1,6 +1,6 @@
 # HELIOS Control Boundary
 
-## v1.4.0-alpha.4
+## v1.4.0-alpha.5
 
 The Power Control screen now runs a guarded automatic turbine governor.
 
@@ -15,11 +15,16 @@ The Power Control screen now runs a guarded automatic turbine governor.
 - Normal direction changes require two matching samples.
 - Flow-limit changes are capped at 100 mB/t every two seconds.
 - Calibration first verifies full steam with the inductor engaged.
-- It then spools unloaded to 1800 RPM, engages the inductor once, measures the
-  stable loaded RPM, and saves the nearest valid 900/1800-RPM band.
-- Once engaged, the inductor stays latched; normal RPM sag never restarts spool-up.
-- Steam loss, rotor collapse, a loaded result below 850 RPM, or timeout aborts
-  calibration, saves no profile, and raises a global warning.
+- It spools unloaded to 900 RPM and tests that band under full load first.
+- A confirmed climb past 1000 RPM releases the load once more and proceeds to
+  the 1800-RPM test.
+- Excess speed at 1800 RPM is corrected with bounded steam reductions; the
+  learned flow limit is saved with the turbine profile.
+- If 1800 RPM is unsustainable, HELIOS keeps full steam while the rotor falls and
+  accepts a stable 900-RPM fallback. A rotor that settles between bands is
+  deliberately trimmed toward 900 RPM.
+- Steam loss, rotor collapse below both bands, or a genuine no-progress stall
+  aborts calibration, saves no profile, and raises a global warning.
 - Three consecutive samples at or above 2000 RPM confirm overspeed and propose
   a zero flow limit with the inductor engaged.
 - Missing, inactive, conflicting, maintenance, or unsupported telemetry produces `HOLD`.
@@ -37,12 +42,14 @@ The Power Control screen now runs a guarded automatic turbine governor.
 - Maximum reactor rod step: 5%
 - Maximum turbine flow step: 100 mB/t
 - Adjustment interval: 2 seconds
-- Calibration spool target: 1800 RPM
+- First calibration target: 900 RPM
+- Escalation threshold: climbing past 1000 RPM for 3 readings
+- Second calibration target: 1800 RPM
 - Full-steam preflight: 5 readings
 - Steam loss during spool: abort after 2 readings
 - Stable loaded measurement: 8 readings within 2 RPM/tick
 - Minimum valid loaded result: 850 RPM
-- Calibration timeout: 10 minutes
+- No total calibration timeout; no-progress stall timeout: 3 minutes
 
 These defaults are persisted during upgrades but cannot be changed from the
 interface until the automatic governors and safety interlocks are implemented.
