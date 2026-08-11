@@ -1,11 +1,14 @@
 local governor = dofile("src/mainframe/turbine_governor.lua")
 
 local control = {
+    actuatorsEnabled = true,
     targetRpm = 1800,
     rpmDeadband = 25,
     overspeedRpm = 2000,
     overspeedSamples = 3,
     maxFlowStep = 100,
+    adjustmentInterval = 2,
+    commandSamples = 2,
 }
 
 local function evaluate(memory, name, rpm, flowSetting, flowLimit, extra)
@@ -24,6 +27,67 @@ end
 local function equal(actual, expected, label)
     assert(actual == expected, ("%s: expected %s, got %s"):format(
         label, tostring(expected), tostring(actual)))
+end
+
+do
+    local memory = governor.new()
+    local calls = 0
+    local first = evaluate(memory, "automatic", 1700, 1000, 2000)
+    local verifying = governor.apply(memory, {
+        name = "automatic", governor = first,
+    }, control, { now = 9 }, function(_, flow)
+        calls = calls + 1
+        return true, flow
+    end)
+    equal(calls, 0, "unconfirmed write count")
+    equal(verifying.actuatorState, "VERIFYING", "unconfirmed actuator state")
+    local plan = evaluate(memory, "automatic", 1700, 1000, 2000)
+    local applied = governor.apply(memory, {
+        name = "automatic", governor = plan,
+    }, control, { now = 10 }, function(_, flow)
+        calls = calls + 1
+        return true, flow
+    end)
+    equal(calls, 1, "automatic write count")
+    equal(applied.actuatorState, "APPLIED", "automatic actuator state")
+    equal(applied.appliedFlow, 1100, "automatic applied flow")
+end
+
+do
+    local memory = governor.new()
+    local first = evaluate(memory, "rate-limited", 1700, 1000, 2000)
+    governor.apply(memory, { name = "rate-limited", governor = first }, control,
+        { now = 9 }, function(_, flow) return true, flow end)
+    local second = evaluate(memory, "rate-limited", 1700, 1000, 2000)
+    governor.apply(memory, { name = "rate-limited", governor = second }, control,
+        { now = 10 }, function(_, flow) return true, flow end)
+    local third = evaluate(memory, "rate-limited", 1700, 1100, 2000)
+    local writes = 0
+    local result = governor.apply(memory, { name = "rate-limited", governor = third }, control,
+        { now = 11 }, function(_, flow) writes = writes + 1 return true, flow end)
+    equal(writes, 0, "rate-limited write count")
+    equal(result.actuatorState, "WAITING", "rate-limited state")
+end
+
+do
+    local memory = governor.new()
+    evaluate(memory, "fault", 1700, 1000, 2000)
+    local plan = evaluate(memory, "fault", 1700, 1000, 2000)
+    local result = governor.apply(memory, { name = "fault", governor = plan }, control,
+        { now = 10 }, function() return false, nil, "rejected" end)
+    equal(result.actuatorState, "FAULT", "failed actuator state")
+    equal(result.actuatorError, "rejected", "failed actuator reason")
+end
+
+do
+    local memory = governor.new()
+    evaluate(memory, "maintenance", 1700, 1000, 2000)
+    local plan = evaluate(memory, "maintenance", 1700, 1000, 2000)
+    local writes = 0
+    local result = governor.apply(memory, { name = "maintenance", governor = plan }, control,
+        { now = 10, maintenance = true }, function() writes = writes + 1 return true end)
+    equal(writes, 0, "maintenance write count")
+    equal(result.actuatorState, "PAUSED", "maintenance actuator state")
 end
 
 do
