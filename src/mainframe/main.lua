@@ -156,6 +156,8 @@ function mainframe.run(config)
                 add(3, turbine.name .. ":telemetry", alarmName(turbine.name) .. " TELEMETRY LOST")
             elseif turbine.governor and turbine.governor.state == "OVERSPEED" then
                 addConfirmed(3, turbine.name .. ":overspeed", alarmName(turbine.name) .. " OVERSPEED")
+            elseif turbine.governor and turbine.governor.actuatorState == "FAULT" then
+                add(2, turbine.name .. ":control", alarmName(turbine.name) .. " CONTROL FAULT")
             end
         end
         for _, storage in ipairs(storages) do
@@ -216,6 +218,10 @@ function mainframe.run(config)
             mainframeId = os.getComputerID(),
             idConflicts = idConflicts,
         })
+        turbineGovernor.applyAll(governorMemory, turbines, config.control, {
+            maintenance = maintenance,
+            now = os.epoch("utc") / 1000,
+        }, turbineAdapter.setFlowLimit)
         updateAlarm()
         local conflictsChanged = refreshIdConflicts()
         if conflictsChanged or #idConflicts > 0 then advertiseIntegrity() end
@@ -425,7 +431,7 @@ function mainframe.run(config)
             ui.setIdConflicts(idConflicts)
             ui.header("POWER CONTROL", "Automatic turbine governor")
             ui.status("Mode", "AUTOMATIC", colors.lime)
-            ui.status("Actuators", "DISABLED - OBSERVE ONLY", colors.orange)
+            ui.status("Actuators", "ENABLED - GUARDED", colors.lime)
             if #turbines == 0 then
                 ui.status("Status", "NO TURBINES FOUND", colors.orange)
             else
@@ -434,7 +440,8 @@ function mainframe.run(config)
                 local plan = turbine.governor or {}
                 ui.status("Turbine", ("%d/%d %s"):format(selected, #turbines,
                     deviceName(turbine.name)), colors.cyan)
-                ui.status("Governor", plan.state or "WAITING", plan.trusted == false and colors.red or colors.lime)
+                ui.status("Governor", plan.state or "WAITING",
+                    (plan.trusted == false or plan.actuatorState == "FAULT") and colors.red or colors.lime)
                 ui.status("Rotor / target", ("%.1f / %d RPM"):format(
                     tonumber(turbine.rotorSpeed) or 0, config.control.targetRpm), colors.cyan)
                 if plan.currentFlow ~= nil and plan.recommendedFlow ~= nil then
@@ -443,7 +450,9 @@ function mainframe.run(config)
                 else
                     ui.status("Flow-limit plan", "HOLD - TELEMETRY REQUIRED", colors.gray)
                 end
-                ui.status("Action", plan.action or "HOLD", plan.action == "CUT FLOW" and colors.red or colors.white)
+                ui.status("Action", (plan.action or "HOLD") .. " / " ..
+                    (plan.actuatorState or "WAITING"),
+                    (plan.action == "CUT FLOW" or plan.actuatorState == "FAULT") and colors.red or colors.white)
             end
             print("")
             term.setTextColor(colors.lime)
@@ -930,7 +939,9 @@ function mainframe.run(config)
                     turbine.active == true and colors.lime or colors.orange)
                 ui.status("Rotor speed", formatValue(turbine.rotorSpeed, " RPM"), colors.cyan)
                 local plan = turbine.governor or {}
-                ui.status("Governor", plan.state or "WAITING", plan.trusted == false and colors.red or colors.lime)
+                ui.status("Governor", (plan.state or "WAITING") .. " / " ..
+                    (plan.actuatorState or "WAITING"),
+                    (plan.trusted == false or plan.actuatorState == "FAULT") and colors.red or colors.lime)
                 ui.status("Power output", powerFormat.power(turbine.energyProduction, config.power, true), colors.cyan)
                 ui.status("Energy buffer", formatValue(turbine.energyPercent, "%"))
                 if plan.currentFlow ~= nil and plan.recommendedFlow ~= nil then
