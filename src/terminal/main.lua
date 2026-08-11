@@ -125,8 +125,10 @@ function terminal.run(config)
         drawItem(item, state)
         print("")
         alarmLine()
-        previousButton = ui.button("< PREVIOUS", colors.cyan)
-        nextButton = ui.button("NEXT >", colors.cyan)
+        previousButton = ui.inlineButton("< PREVIOUS", colors.cyan)
+        write(" ")
+        nextButton = ui.inlineButton("NEXT >", colors.cyan)
+        print("")
         testButton = ui.button("TEST SPEAKER", colors.cyan)
     end
 
