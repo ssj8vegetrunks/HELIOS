@@ -1,7 +1,7 @@
 -- HELIOS single-file installer
--- Milestone 7.2: automatic turbine spool-up and regulation.
+-- Milestone 7.3: staged 900/1800-RPM turbine calibration.
 
-local VERSION = "1.4.0-alpha.4"
+local VERSION = "1.4.0-alpha.5"
 local INSTALL_DIR = "/helios"
 local STAGE_DIR = "/.helios-install"
 
@@ -120,8 +120,10 @@ function config.load()
         math.floor(tonumber(loaded.control.commandSamples) or 2))
     loaded.control.lowBandRpm = tonumber(loaded.control.lowBandRpm) or 900
     loaded.control.highBandRpm = tonumber(loaded.control.highBandRpm) or 1800
-    loaded.control.calibrationSpoolRpm = tonumber(loaded.control.calibrationSpoolRpm) or
-        loaded.control.highBandRpm
+    loaded.control.calibrationLowEscapeRpm = math.max(
+        loaded.control.lowBandRpm + loaded.control.rpmDeadband,
+        tonumber(loaded.control.calibrationLowEscapeRpm) or
+            (loaded.control.lowBandRpm + 100))
     loaded.control.coldStartRpm = math.max(0,
         tonumber(loaded.control.coldStartRpm) or 100)
     loaded.control.calibrationSettleDelta = math.max(0.1,
@@ -139,8 +141,10 @@ function config.load()
         math.floor(tonumber(loaded.control.calibrationFailureSamples) or 10))
     loaded.control.calibrationSpoolFailureSamples = math.max(1,
         math.floor(tonumber(loaded.control.calibrationSpoolFailureSamples) or 2))
-    loaded.control.calibrationTimeout = math.max(60,
-        tonumber(loaded.control.calibrationTimeout) or 600)
+    loaded.control.calibrationBandEscapeSamples = math.max(2,
+        math.floor(tonumber(loaded.control.calibrationBandEscapeSamples) or 3))
+    loaded.control.calibrationStallTimeout = math.max(30,
+        tonumber(loaded.control.calibrationStallTimeout) or 180)
     loaded.control.overspeedMargin = math.max(loaded.control.rpmDeadband,
         tonumber(loaded.control.overspeedMargin) or 200)
     loaded.control.turbineProfiles = loaded.control.turbineProfiles or {}
@@ -2501,7 +2505,7 @@ local function profileFor(control, name)
     return profile
 end
 
-local function saveProfile(memory, control, name, learnedRpm)
+local function saveProfile(memory, control, name, learnedRpm, learnedFlow)
     local lowBand = tonumber(control.lowBandRpm) or 900
     local highBand = tonumber(control.highBandRpm) or 1800
     local target = math.abs(learnedRpm - lowBand) <= math.abs(learnedRpm - highBand)
@@ -2510,6 +2514,7 @@ local function saveProfile(memory, control, name, learnedRpm)
     control.turbineProfiles[name] = {
         targetRpm = target,
         learnedRpm = learnedRpm,
+        flowLimit = learnedFlow and round(learnedFlow) or nil,
         calibrated = true,
     }
     memory.profileDirty = true
@@ -2531,7 +2536,7 @@ function governor.resetCalibration(memory, control, name)
     control.turbineProfiles = control.turbineProfiles or {}
     local hadProfile = control.turbineProfiles[name] ~= nil
     control.turbineProfiles[name] = nil
-    memory.turbines[name] = { phase = "PREFLIGHT", overspeedCount = 0 }
+    memory.turbines[name] = { overspeedCount = 0 }
     if hadProfile then memory.profileDirty = true end
     return true
 end
@@ -2553,7 +2558,8 @@ function governor.evaluate(memory, turbine, control, context)
         math.max(highBand + deadband, tonumber(control.overspeedRpm) or 2000)
     local overspeedSamples = math.max(1, math.floor(tonumber(control.overspeedSamples) or 3))
     local maxStep = math.max(1, tonumber(control.maxFlowStep) or 100)
-    local spoolTarget = math.max(highBand, tonumber(control.calibrationSpoolRpm) or highBand)
+    local lowEscapeRpm = math.max(lowBand + deadband,
+        tonumber(control.calibrationLowEscapeRpm) or (lowBand + 100))
     local coldStartRpm = math.max(0, tonumber(control.coldStartRpm) or 100)
     local settleDelta = math.max(0.1, tonumber(control.calibrationSettleDelta) or 2)
     local settleSamples = math.max(3,
@@ -2567,8 +2573,10 @@ function governor.evaluate(memory, turbine, control, context)
         math.floor(tonumber(control.calibrationFailureSamples) or 10))
     local spoolFailureSamples = math.max(1,
         math.floor(tonumber(control.calibrationSpoolFailureSamples) or 2))
-    local calibrationTimeout = math.max(60,
-        tonumber(control.calibrationTimeout) or 600)
+    local escapeSamples = math.max(2,
+        math.floor(tonumber(control.calibrationBandEscapeSamples) or 3))
+    local stallTimeout = math.max(30,
+        tonumber(control.calibrationStallTimeout) or 180)
     local now = tonumber(context.now) or 0
 
     local result
@@ -2600,30 +2608,83 @@ function governor.evaluate(memory, turbine, control, context)
         local recommendedInductor = turbine.inductorEngaged
         local state, action, reason = "STABLE", "HOLD", "Rotor is inside the target deadband"
 
+        local function beginPhase(phase)
+            previous.phase = phase
+            previous.phaseStartedAt = now
+            previous.progressAt = now
+            previous.progressRpm = rpm
+            previous.settleCount = 0
+            previous.settleSum = 0
+            previous.escapeCount = 0
+            previous.failureCount = 0
+            previous.lowSteamCount = 0
+        end
+
+        local function updateProgress(direction)
+            if previous.progressRpm == nil then
+                previous.progressRpm = rpm
+                previous.progressAt = now
+            end
+            local delta = rpm - previous.progressRpm
+            if (direction > 0 and delta >= settleDelta) or
+               (direction < 0 and delta <= -settleDelta) or
+               (direction == 0 and math.abs(delta) >= settleDelta) then
+                previous.progressRpm = rpm
+                previous.progressAt = now
+            end
+            return now > 0 and previous.progressAt and
+                now - previous.progressAt >= stallTimeout
+        end
+
+        local function fullSteam(required)
+            local actual = tonumber(turbine.flowRate)
+            required = math.max(0, tonumber(required) or 0)
+            return actual ~= nil and (required == 0 or actual >= required * steamRatio), actual
+        end
+
+        local function countStable(wanted)
+            local stable = math.abs(rpm - wanted) <= deadband and previous.rpm and
+                math.abs(rpmTrend) <= settleDelta
+            previous.settleCount = stable and ((previous.settleCount or 0) + 1) or 0
+            previous.settleSum = stable and ((previous.settleSum or 0) + rpm) or 0
+            return previous.settleCount >= settleSamples
+        end
+
+        local function countStableRange(minimum, maximum)
+            local stable = rpm >= minimum and rpm <= maximum and previous.rpm and
+                math.abs(rpmTrend) <= settleDelta
+            previous.settleCount = stable and ((previous.settleCount or 0) + 1) or 0
+            previous.settleSum = stable and ((previous.settleSum or 0) + rpm) or 0
+            return previous.settleCount >= settleSamples
+        end
+
+        local function learnBand(wanted, flow)
+            local learned = previous.settleCount > 0 and
+                previous.settleSum / previous.settleCount or rpm
+            profile = saveProfile(memory, control, name, learned, flow)
+            target = wanted
+            overspeedRpm = target + overspeedMargin
+            previous.phase = "OPERATING"
+            previous.settleCount, previous.settleSum = 0, 0
+            return learned
+        end
+
         if profile then
             previous.phase = "OPERATING"
         elseif previous.phase == nil then
-            previous.phase = "PREFLIGHT"
-            previous.phaseStartedAt = now
-        elseif previous.phase == "ENGAGING" and turbine.inductorEngaged == true then
-            previous.phase = "LEARNING"
-            previous.phaseStartedAt = now
-            previous.settleCount = 0
-            previous.settleSum = 0
+            beginPhase("PREFLIGHT")
+        elseif previous.phase == "ENGAGE_LOW" and turbine.inductorEngaged == true then
+            beginPhase("TEST_LOW")
+        elseif previous.phase == "RELEASE_HIGH" and turbine.inductorEngaged == false then
+            beginPhase("SPOOL_HIGH")
+        elseif previous.phase == "ENGAGE_HIGH" and turbine.inductorEngaged == true then
+            beginPhase("TEST_HIGH")
         end
 
         if previous.phase == "FAILED" then
             state = "CALIBRATION FAILED"
             action = turbine.inductorEngaged and "HOLD" or "ENGAGE INDUCTOR"
             reason = previous.calibrationError or "Calibration conditions were invalid"
-            recommendedInductor = true
-        elseif not profile and previous.phaseStartedAt and now > 0 and
-               now - previous.phaseStartedAt >= calibrationTimeout then
-            previous.phase = "FAILED"
-            previous.calibrationError = "Calibration timed out before a valid operating band was learned"
-            state = "CALIBRATION FAILED"
-            action = turbine.inductorEngaged and "HOLD" or "ENGAGE INDUCTOR"
-            reason = previous.calibrationError
             recommendedInductor = true
         elseif rpm >= overspeedRpm then
             recommendedInductor = true
@@ -2666,25 +2727,25 @@ function governor.evaluate(memory, turbine, control, context)
                 reason = previous.calibrationError
                 recommendedFlow = currentFlow
             elseif previous.fullSteamCount >= steamSamples then
-                previous.phase = "SPOOLING"
-                previous.phaseStartedAt = now
-                previous.lowSteamCount = 0
+                beginPhase("SPOOL_LOW")
                 action = "DISENGAGE INDUCTOR"
                 recommendedInductor = false
-                reason = ("Full steam verified %d/%d; begin unloaded spool"):format(
+                reason = ("Full steam verified %d/%d; test 900 RPM band first"):format(
                     previous.fullSteamCount, steamSamples)
             else
                 action = "VERIFY STEAM"
                 reason = ("Full-steam sample %d/%d"):format(
                     previous.fullSteamCount, steamSamples)
             end
-        elseif not profile and previous.phase == "SPOOLING" then
-            local actualFlow = tonumber(turbine.flowRate)
-            local steamStarved = actualFlow == nil or
-                actualFlow < flowMaximum * steamRatio
+        elseif not profile and (previous.phase == "SPOOL_LOW" or
+               previous.phase == "SPOOL_HIGH") then
+            local spoolTarget = previous.phase == "SPOOL_LOW" and lowBand or highBand
+            local steamOk, actualFlow = fullSteam(flowMaximum)
+            local steamStarved = not steamOk
             previous.lowSteamCount = steamStarved and
                 ((previous.lowSteamCount or 0) + 1) or 0
-            state = "CALIBRATION SPOOL"
+            state = previous.phase == "SPOOL_LOW" and "CALIBRATION SPOOL 900" or
+                "CALIBRATION SPOOL 1800"
             recommendedFlow = flowMaximum
             if previous.lowSteamCount >= spoolFailureSamples then
                 previous.phase = "FAILED"
@@ -2698,86 +2759,199 @@ function governor.evaluate(memory, turbine, control, context)
                 recommendedInductor = true
                 recommendedFlow = currentFlow
             elseif rpm >= spoolTarget then
-                previous.phase = "ENGAGING"
+                previous.phase = previous.phase == "SPOOL_LOW" and
+                    "ENGAGE_LOW" or "ENGAGE_HIGH"
                 recommendedInductor = true
                 action = "ENGAGE INDUCTOR"
-                reason = ("Reached %.0f RPM calibration speed"):format(spoolTarget)
+                reason = ("Reached %.0f RPM; apply generator load"):format(spoolTarget)
+            elseif updateProgress(1) then
+                previous.phase = "FAILED"
+                previous.calibrationError = ("Rotor stopped gaining speed before %.0f RPM"):format(
+                    spoolTarget)
+                state = "CALIBRATION FAILED"
+                action = turbine.inductorEngaged and "HOLD" or "ENGAGE INDUCTOR"
+                reason = previous.calibrationError
+                recommendedInductor = true
             else
                 recommendedInductor = false
                 action = turbine.inductorEngaged and "DISENGAGE INDUCTOR" or
                     (currentFlow < flowMaximum and "MAXIMIZE FLOW" or "WAIT FOR SPEED")
                 reason = ("Unloaded spool to %.0f RPM"):format(spoolTarget)
             end
-        elseif not profile and previous.phase == "ENGAGING" then
-            state = "CALIBRATION ENGAGE"
+        elseif not profile and (previous.phase == "ENGAGE_LOW" or
+               previous.phase == "ENGAGE_HIGH") then
+            local band = previous.phase == "ENGAGE_LOW" and lowBand or highBand
+            state = ("CALIBRATION ENGAGE %.0f"):format(band)
             action = "ENGAGE INDUCTOR"
-            reason = "Engage generator load once; clutch remains latched"
+            reason = ("Engage generator load and observe %.0f RPM band"):format(band)
             recommendedInductor = true
             recommendedFlow = flowMaximum
-        elseif not profile and previous.phase == "LEARNING" then
-            state = "LEARNING BAND"
+        elseif not profile and previous.phase == "RELEASE_HIGH" then
+            state = "CALIBRATION ESCALATE"
+            action = "DISENGAGE INDUCTOR"
+            reason = "900 RPM band was overpowered; continue unloaded to 1800 RPM"
+            recommendedInductor = false
+            recommendedFlow = flowMaximum
+        elseif not profile and previous.phase == "TEST_LOW" then
+            state = "CALIBRATION TEST 900"
             recommendedInductor = true
             recommendedFlow = flowMaximum
-            local actualFlow = tonumber(turbine.flowRate)
-            local steamStarved = actualFlow ~= nil and flowMaximum > 0 and
-                actualFlow < flowMaximum * steamRatio
-            previous.lowSteamCount = steamStarved and
+            local steamOk, actualFlow = fullSteam(flowMaximum)
+            previous.lowSteamCount = not steamOk and
                 ((previous.lowSteamCount or 0) + 1) or 0
-            previous.stoppedCount = rpm <= coldStartRpm and
-                ((previous.stoppedCount or 0) + 1) or 0
             if turbine.inductorEngaged == false then
                 action = "ENGAGE INDUCTOR"
-                reason = "Calibration load must remain engaged"
+                reason = "900 RPM test requires generator load"
                 previous.settleCount, previous.settleSum = 0, 0
-            elseif previous.stoppedCount >= failureSamples then
+            elseif previous.lowSteamCount >= spoolFailureSamples then
                 previous.phase = "FAILED"
-                previous.calibrationError = "Rotor stopped after the inductor engaged"
+                previous.calibrationError = ("Steam supply lost during 900 RPM test: requested %.0f, received %.0f mB/t"):format(
+                    flowMaximum, actualFlow or 0)
                 state, action, reason = "CALIBRATION FAILED", "HOLD", previous.calibrationError
                 recommendedFlow = currentFlow
-            elseif previous.lowSteamCount >= failureSamples then
-                previous.phase = "FAILED"
-                previous.calibrationError = ("Insufficient steam: receiving %.0f of %.0f mB/t required"):format(
-                    actualFlow or 0, flowMaximum)
-                state, action, reason = "CALIBRATION FAILED", "HOLD", previous.calibrationError
-                recommendedFlow = currentFlow
-            elseif steamStarved then
-                action = "VERIFY STEAM"
-                reason = ("Waiting for full steam: %.0f of %.0f mB/t"):format(
-                    actualFlow or 0, flowMaximum)
+            elseif rpm > lowEscapeRpm and rpmTrend > 0 then
+                previous.escapeCount = (previous.escapeCount or 0) + 1
                 previous.settleCount, previous.settleSum = 0, 0
-            elseif currentFlow < flowMaximum then
-                action = "MAXIMIZE FLOW"
-                reason = "Measure loaded ceiling at maximum steam"
-                previous.settleCount, previous.settleSum = 0, 0
-            elseif previous.rpm and math.abs(rpmTrend) <= settleDelta and rpm > coldStartRpm then
-                previous.settleCount = (previous.settleCount or 0) + 1
-                previous.settleSum = (previous.settleSum or 0) + rpm
-                action = "MEASURE SETTLE"
-                reason = ("Stable sample %d/%d"):format(previous.settleCount, settleSamples)
-                if previous.settleCount >= settleSamples then
-                    local learned = previous.settleSum / previous.settleCount
-                    if learned < minimumCalibrationRpm then
-                        previous.phase = "FAILED"
-                        previous.calibrationError = ("Loaded rotor settled at %.1f RPM; minimum valid band is %.0f RPM"):format(
-                            learned, minimumCalibrationRpm)
-                        state, action, reason = "CALIBRATION FAILED", "HOLD",
-                            previous.calibrationError
-                        recommendedFlow = currentFlow
-                    else
-                        profile = saveProfile(memory, control, name, learned)
-                        target = tonumber(profile.targetRpm)
-                        overspeedRpm = target + overspeedMargin
-                        previous.phase = "OPERATING"
-                        previous.settleCount, previous.settleSum = 0, 0
-                        state = "CALIBRATED"
-                        action = "HOLD"
-                        reason = ("Learned %.1f RPM; selected %.0f RPM band"):format(learned, target)
-                    end
+                action = "VERIFY HIGH BAND"
+                reason = ("Rotor climbing past %.0f RPM: %d/%d"):format(
+                    lowEscapeRpm, previous.escapeCount, escapeSamples)
+                if previous.escapeCount >= escapeSamples then
+                    previous.phase = "RELEASE_HIGH"
+                    action = "DISENGAGE INDUCTOR"
+                    recommendedInductor = false
+                    reason = "900 RPM band cannot absorb full steam; test 1800 RPM"
                 end
+            elseif countStableRange(minimumCalibrationRpm, lowEscapeRpm) then
+                local learned = learnBand(lowBand, currentFlow)
+                state, action = "CALIBRATED", "HOLD"
+                reason = ("Stable at %.1f RPM; saved 900 RPM profile"):format(learned)
+            elseif rpm < minimumCalibrationRpm and rpmTrend < -settleDelta then
+                previous.failureCount = (previous.failureCount or 0) + 1
+                action = "VERIFY LOW BAND"
+                reason = ("Rotor falling below valid 900 RPM band: %d/%d"):format(
+                    previous.failureCount, failureSamples)
+                if previous.failureCount >= failureSamples then
+                    previous.phase = "FAILED"
+                    previous.calibrationError = "No sustainable 900 RPM operating band"
+                    state, action, reason = "CALIBRATION FAILED", "HOLD",
+                        previous.calibrationError
+                end
+            elseif updateProgress(0) then
+                previous.phase = "FAILED"
+                previous.calibrationError = ("Rotor stalled at %.1f RPM outside the 900 RPM band"):format(rpm)
+                state, action, reason = "CALIBRATION FAILED", "HOLD", previous.calibrationError
+                recommendedFlow = currentFlow
             else
+                previous.escapeCount = 0
+                previous.failureCount = 0
+                action = "OBSERVE 900 BAND"
+                reason = "Generator loaded at full steam; watching RPM trend"
+            end
+        elseif not profile and previous.phase == "TEST_HIGH" then
+            state = "CALIBRATION TEST 1800"
+            recommendedInductor = true
+            local requiredFlow = currentFlow
+            local steamOk, actualFlow = fullSteam(requiredFlow)
+            previous.lowSteamCount = not steamOk and
+                ((previous.lowSteamCount or 0) + 1) or 0
+            if turbine.inductorEngaged == false then
+                action = "ENGAGE INDUCTOR"
+                reason = "1800 RPM test requires generator load"
                 previous.settleCount, previous.settleSum = 0, 0
-                action = "WAIT TO SETTLE"
-                reason = "Inductor latched; measuring loaded RPM"
+            elseif previous.lowSteamCount >= spoolFailureSamples then
+                previous.phase = "FAILED"
+                previous.calibrationError = ("Steam supply lost during 1800 RPM test: requested %.0f, received %.0f mB/t"):format(
+                    requiredFlow, actualFlow or 0)
+                state, action, reason = "CALIBRATION FAILED", "HOLD", previous.calibrationError
+            elseif countStable(highBand) then
+                local learned = learnBand(highBand, currentFlow)
+                state, action = "CALIBRATED", "HOLD"
+                reason = ("Stable at %.1f RPM; saved 1800 RPM at %.0f mB/t"):format(
+                    learned, currentFlow)
+            elseif rpm > highBand + deadband and rpmTrend > 0 then
+                action = "DECREASE FLOW"
+                reason = "Rotor still climbing above 1800 RPM; trim steam"
+                recommendedFlow = currentFlow - maxStep
+                previous.settleCount, previous.settleSum = 0, 0
+            elseif rpm < highBand - deadband and rpmTrend <= settleDelta then
+                previous.escapeCount = (previous.escapeCount or 0) + 1
+                action = "VERIFY FALLBACK"
+                reason = ("1800 RPM band losing speed: %d/%d"):format(
+                    previous.escapeCount, escapeSamples)
+                recommendedFlow = flowMaximum
+                if previous.escapeCount >= escapeSamples then
+                    beginPhase("FALLBACK_LOW")
+                    state = "CALIBRATION FALLBACK 900"
+                    action = "MAXIMIZE FLOW"
+                    reason = "1800 RPM unsustainable; keep full steam and test 900 RPM"
+                end
+            elseif updateProgress(0) then
+                previous.phase = "FAILED"
+                previous.calibrationError = ("Rotor stalled at %.1f RPM outside the 1800 RPM band"):format(rpm)
+                state, action, reason = "CALIBRATION FAILED", "HOLD", previous.calibrationError
+            else
+                previous.escapeCount = 0
+                action = "OBSERVE 1800 BAND"
+                reason = "Generator loaded; watching RPM trend"
+            end
+        elseif not profile and previous.phase == "FALLBACK_LOW" then
+            state = "CALIBRATION FALLBACK 900"
+            recommendedInductor = true
+            local steamOk, actualFlow = fullSteam(currentFlow)
+            previous.lowSteamCount = not steamOk and
+                ((previous.lowSteamCount or 0) + 1) or 0
+            if turbine.inductorEngaged == false then
+                action = "ENGAGE INDUCTOR"
+                reason = "Fallback test keeps generator load engaged"
+            elseif previous.lowSteamCount >= spoolFailureSamples then
+                previous.phase = "FAILED"
+                previous.calibrationError = ("Steam supply lost during 900 RPM fallback: requested %.0f, received %.0f mB/t"):format(
+                    flowMaximum, actualFlow or 0)
+                state, action, reason = "CALIBRATION FAILED", "HOLD", previous.calibrationError
+            elseif countStableRange(minimumCalibrationRpm, lowBand + deadband) then
+                local learned = learnBand(lowBand, currentFlow)
+                state, action = "CALIBRATED", "HOLD"
+                reason = ("1800 RPM failed; stable at %.1f RPM, saved 900 RPM profile"):format(
+                    learned)
+            elseif rpm < minimumCalibrationRpm and rpmTrend < -settleDelta and
+                   currentFlow >= flowMaximum then
+                previous.failureCount = (previous.failureCount or 0) + 1
+                action = "VERIFY FAILURE"
+                reason = ("Rotor falling below both operating bands: %d/%d"):format(
+                    previous.failureCount, failureSamples)
+                if previous.failureCount >= failureSamples then
+                    previous.phase = "FAILED"
+                    previous.calibrationError = "No sustainable 900 or 1800 RPM operating band"
+                    state, action, reason = "CALIBRATION FAILED", "HOLD",
+                        previous.calibrationError
+                end
+            elseif rpm >= highBand - deadband and rpmTrend > settleDelta then
+                beginPhase("TEST_HIGH")
+                state = "CALIBRATION TEST 1800"
+                action = "OBSERVE 1800 BAND"
+                reason = "Rotor recovered toward the 1800 RPM band"
+            elseif rpm > lowBand + deadband and rpmTrend < -settleDelta then
+                recommendedFlow = flowMaximum
+                action = currentFlow < flowMaximum and "MAXIMIZE FLOW" or "WAIT FOR 900 BAND"
+                reason = "Rotor is still falling; maintain full steam toward 900 RPM"
+                updateProgress(-1)
+            elseif rpm > lowBand + deadband then
+                recommendedFlow = currentFlow - maxStep
+                action = "DECREASE FLOW"
+                reason = "Rotor settled above 900 RPM; trim steam toward low band"
+                updateProgress(0)
+            elseif rpm < minimumCalibrationRpm and currentFlow < flowMaximum then
+                recommendedFlow = flowMaximum
+                action = "MAXIMIZE FLOW"
+                reason = "Restore full steam before rejecting the 900 RPM band"
+            elseif updateProgress(0) then
+                previous.phase = "FAILED"
+                previous.calibrationError = ("Rotor stalled at %.1f RPM outside either operating band"):format(rpm)
+                state, action, reason = "CALIBRATION FAILED", "HOLD", previous.calibrationError
+            else
+                previous.failureCount = 0
+                action = "OBSERVE 900 BAND"
+                reason = "Watching the fallback RPM trend"
             end
         else
             recommendedInductor = true
@@ -2820,6 +2994,7 @@ function governor.evaluate(memory, turbine, control, context)
             calibrationPhase = previous.phase,
             calibrated = profile ~= nil,
             learnedRpm = profile and tonumber(profile.learnedRpm) or nil,
+            learnedFlow = profile and tonumber(profile.flowLimit) or nil,
             targetRpm = target,
             rpmDeadband = deadband,
             overspeedRpm = overspeedRpm,
@@ -2834,7 +3009,7 @@ function governor.evaluate(memory, turbine, control, context)
             currentInductor = turbine.inductorEngaged,
             recommendedInductor = recommendedInductor,
             inductorChange = recommendedInductor ~= turbine.inductorEngaged,
-            calibrationSpoolRpm = spoolTarget,
+            calibrationSpoolRpm = previous.phase == "SPOOL_LOW" and lowBand or highBand,
             calibrationSettleCount = previous.settleCount or 0,
             calibrationSettleSamples = settleSamples,
         }
@@ -3374,7 +3549,11 @@ local function buildConfig(role, display, existing)
                 math.floor(tonumber(control.commandSamples) or 2)),
             lowBandRpm = tonumber(control.lowBandRpm) or 900,
             highBandRpm = tonumber(control.highBandRpm) or 1800,
-            calibrationSpoolRpm = tonumber(control.calibrationSpoolRpm) or 1800,
+            calibrationLowEscapeRpm = math.max(
+                (tonumber(control.lowBandRpm) or 900) +
+                    math.max(1, tonumber(control.rpmDeadband) or 25),
+                tonumber(control.calibrationLowEscapeRpm) or
+                    ((tonumber(control.lowBandRpm) or 900) + 100)),
             coldStartRpm = math.max(0, tonumber(control.coldStartRpm) or 100),
             calibrationSettleDelta = math.max(0.1,
                 tonumber(control.calibrationSettleDelta) or 2),
@@ -3390,8 +3569,10 @@ local function buildConfig(role, display, existing)
                 math.floor(tonumber(control.calibrationFailureSamples) or 10)),
             calibrationSpoolFailureSamples = math.max(1,
                 math.floor(tonumber(control.calibrationSpoolFailureSamples) or 2)),
-            calibrationTimeout = math.max(60,
-                tonumber(control.calibrationTimeout) or 600),
+            calibrationBandEscapeSamples = math.max(2,
+                math.floor(tonumber(control.calibrationBandEscapeSamples) or 3)),
+            calibrationStallTimeout = math.max(30,
+                tonumber(control.calibrationStallTimeout) or 180),
             overspeedMargin = math.max(25,
                 tonumber(control.overspeedMargin) or 200),
             turbineProfiles = type(control.turbineProfiles) == "table" and
