@@ -1,6 +1,6 @@
 # HELIOS Control Boundary
 
-## v1.4.0-alpha.3
+## v1.4.0-alpha.4
 
 The Power Control screen now runs a guarded automatic turbine governor.
 
@@ -11,13 +11,15 @@ The Power Control screen now runs a guarded automatic turbine governor.
   inductor controls.
 - Every write is read back and verified immediately.
 - Each turbine is evaluated independently once per telemetry sample.
-- The target is 1800 RPM with a 25 RPM deadband.
+- Each turbine learns and persists its own 900- or 1800-RPM operating band.
 - Normal direction changes require two matching samples.
 - Flow-limit changes are capped at 100 mB/t every two seconds.
-- Below 1500 RPM the startup governor disengages the inductor and requests the
-  turbine's maximum permitted steam flow.
-- At 1775 RPM the governor re-engages the inductor and hands the turbine to
-  normal 1800 RPM regulation. The 275 RPM hysteresis prevents clutch chatter.
+- Calibration first verifies full steam with the inductor engaged.
+- It then spools unloaded to 1800 RPM, engages the inductor once, measures the
+  stable loaded RPM, and saves the nearest valid 900/1800-RPM band.
+- Once engaged, the inductor stays latched; normal RPM sag never restarts spool-up.
+- Steam loss, rotor collapse, a loaded result below 850 RPM, or timeout aborts
+  calibration, saves no profile, and raises a global warning.
 - Three consecutive samples at or above 2000 RPM confirm overspeed and propose
   a zero flow limit with the inductor engaged.
 - Missing, inactive, conflicting, maintenance, or unsupported telemetry produces `HOLD`.
@@ -28,15 +30,19 @@ The Power Control screen now runs a guarded automatic turbine governor.
 
 ## Prepared settings
 
-- Turbine target: 1800 RPM
+- Turbine targets: learned 900- or 1800-RPM band
 - Turbine deadband: 25 RPM
 - Overspeed threshold: 2000 RPM for 3 readings
 - Storage demand band: 25% to 85%
 - Maximum reactor rod step: 5%
 - Maximum turbine flow step: 100 mB/t
 - Adjustment interval: 2 seconds
-- Inductor respool threshold: 1500 RPM
-- Inductor engagement threshold: 1775 RPM
+- Calibration spool target: 1800 RPM
+- Full-steam preflight: 5 readings
+- Steam loss during spool: abort after 2 readings
+- Stable loaded measurement: 8 readings within 2 RPM/tick
+- Minimum valid loaded result: 850 RPM
+- Calibration timeout: 10 minutes
 
 These defaults are persisted during upgrades but cannot be changed from the
 interface until the automatic governors and safety interlocks are implemented.
