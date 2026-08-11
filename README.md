@@ -1,4 +1,4 @@
-# HELIOS — v1.3.0 Alpha 1 Control Interface and Touch
+# HELIOS — v1.3.0 Alpha 2 Control Interface and Touch
 
 Industrial power management for **CC:Tweaked** and **Extreme Reactors**.
 
@@ -25,6 +25,8 @@ online:
 - conflicting directed telemetry is treated as unsafe until the IDs become unique;
 - a persistent Power Control screen exposes the planned automatic/manual and tuning layout;
 - `AUTOMATIC` is fixed on, while manual mode, tuning controls, and every actuator remain locked.
+- settings and telemetry navigation use stable touch targets that fit the mirrored terminal canvas;
+- upgrades remove obsolete HELIOS rollback copies before staging and retain only the immediately replaced version.
 
 The existing telemetry foundation includes:
 
