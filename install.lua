@@ -1,7 +1,7 @@
 -- HELIOS single-file installer
 -- Milestone 8.1: verified reactor steam-demand control.
 
-local VERSION = "1.4.0-alpha.6"
+local VERSION = "1.4.0-alpha.7"
 local INSTALL_DIR = "/helios"
 local STAGE_DIR = "/.helios-install"
 
@@ -125,6 +125,14 @@ function config.load()
         tonumber(loaded.control.reactorSteamDeadbandMin) or 25)
     loaded.control.reactorHotFluidHigh = math.max(50, math.min(99,
         tonumber(loaded.control.reactorHotFluidHigh) or 85))
+    loaded.control.reactorCooldownWindow = math.max(5,
+        tonumber(loaded.control.reactorCooldownWindow) or 10)
+    loaded.control.reactorCooldownStallTimeout = math.max(60,
+        tonumber(loaded.control.reactorCooldownStallTimeout) or 180)
+    loaded.control.reactorCooldownSteamDelta = math.max(0.1,
+        tonumber(loaded.control.reactorCooldownSteamDelta) or 2)
+    loaded.control.reactorCooldownTemperatureDelta = math.max(0.01,
+        tonumber(loaded.control.reactorCooldownTemperatureDelta) or 0.05)
     loaded.control.maxFlowStep = tonumber(loaded.control.maxFlowStep) or 100
     loaded.control.adjustmentInterval = tonumber(loaded.control.adjustmentInterval) or 2
     loaded.control.commandSamples = math.max(1,
@@ -1100,6 +1108,8 @@ function mainframe.run(config)
             local plan = reactor.governor or {}
             if plan.actuatorState == "FAULT" then
                 return "CONTROL FAULT / ATTENTION REQUIRED", colors.red
+            elseif plan.state == "COOLING" then
+                return "AUTOMATIC / REACTOR COOLING", colors.orange
             elseif plan.state == "STEAM DEFICIT" or plan.state == "STEAM SURPLUS" then
                 return "AUTOMATIC / STEAM CAPACITY LIMIT", colors.orange
             elseif reactor.active == true and reactor.mode == "steam" and
@@ -2241,6 +2251,51 @@ function governor.steamDemand(turbines)
     return total, active
 end
 
+local function clearCooldown(previous)
+    previous.cooldownStartedAt = nil
+    previous.cooldownReferenceAt = nil
+    previous.cooldownReferenceSteam = nil
+    previous.cooldownReferenceTemperature = nil
+    previous.cooldownLastProgressAt = nil
+end
+
+local function observeCooldown(previous, reactor, control, context, production)
+    local now = tonumber(context and context.now) or 0
+    local casingTemperature = tonumber(reactor and reactor.casingTemperature)
+    local window = math.max(5, tonumber(control.reactorCooldownWindow) or 10)
+    local timeout = math.max(60,
+        tonumber(control.reactorCooldownStallTimeout) or 180)
+    local steamDelta = math.max(0.1,
+        tonumber(control.reactorCooldownSteamDelta) or 2)
+    local temperatureDelta = math.max(0.01,
+        tonumber(control.reactorCooldownTemperatureDelta) or 0.05)
+
+    if previous.cooldownStartedAt == nil then
+        previous.cooldownStartedAt = now
+        previous.cooldownReferenceAt = now
+        previous.cooldownReferenceSteam = production
+        previous.cooldownReferenceTemperature = casingTemperature
+        previous.cooldownLastProgressAt = now
+    elseif now - (previous.cooldownReferenceAt or now) >= window then
+        local steamFalling = previous.cooldownReferenceSteam ~= nil and
+            production <= previous.cooldownReferenceSteam - steamDelta
+        local temperatureFalling = casingTemperature ~= nil and
+            previous.cooldownReferenceTemperature ~= nil and
+            casingTemperature <= previous.cooldownReferenceTemperature -
+                temperatureDelta
+        if steamFalling or temperatureFalling then
+            previous.cooldownLastProgressAt = now
+        end
+        previous.cooldownReferenceAt = now
+        previous.cooldownReferenceSteam = production
+        previous.cooldownReferenceTemperature = casingTemperature
+    end
+
+    local stalledFor = math.max(0,
+        now - (previous.cooldownLastProgressAt or now))
+    return stalledFor < timeout, stalledFor, casingTemperature
+end
+
 function governor.evaluate(memory, reactor, control, context, targetSteam, activeTurbines)
     memory.reactors = memory.reactors or {}
     control, context = control or {}, context or {}
@@ -2330,6 +2385,24 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
         end
 
         proposed = round(clamp(proposed, 0, 100))
+
+        if state == "STEAM SURPLUS" and current >= 100 then
+            local cooling, stalledFor, casingTemperature = observeCooldown(
+                previous, reactor, control, context, production)
+            if cooling then
+                state = "COOLING"
+                reason = casingTemperature and
+                    ("Rods fully inserted; residual heat is cooling (case %.1f C)"):
+                        format(casingTemperature) or
+                    "Rods fully inserted; observing residual steam decay"
+            else
+                reason = ("Steam and casing temperature have not declined for %.0f seconds"):
+                    format(stalledFor)
+            end
+        else
+            clearCooldown(previous)
+        end
+
         local changing = proposed ~= round(current)
         if changing then
             previous.actionSamples = previous.action == action and
@@ -2355,6 +2428,8 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
             rodChange = proposed - current,
             actionSamples = previous.actionSamples,
             hotFluidPercent = hotFluid,
+            coolingSince = previous.cooldownStartedAt,
+            coolingLastProgressAt = previous.cooldownLastProgressAt,
         }
     end
 
