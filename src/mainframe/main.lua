@@ -404,6 +404,8 @@ function mainframe.run(config)
             local plan = reactor.governor or {}
             if plan.actuatorState == "FAULT" then
                 return "CONTROL FAULT / ATTENTION REQUIRED", colors.red
+            elseif plan.state == "COOLING" then
+                return "AUTOMATIC / REACTOR COOLING", colors.orange
             elseif plan.state == "STEAM DEFICIT" or plan.state == "STEAM SURPLUS" then
                 return "AUTOMATIC / STEAM CAPACITY LIMIT", colors.orange
             elseif reactor.active == true and reactor.mode == "steam" and
