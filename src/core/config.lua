@@ -52,6 +52,14 @@ function config.load()
         tonumber(loaded.control.reactorSteamDeadbandMin) or 25)
     loaded.control.reactorHotFluidHigh = math.max(50, math.min(99,
         tonumber(loaded.control.reactorHotFluidHigh) or 85))
+    loaded.control.reactorCooldownWindow = math.max(5,
+        tonumber(loaded.control.reactorCooldownWindow) or 10)
+    loaded.control.reactorCooldownStallTimeout = math.max(60,
+        tonumber(loaded.control.reactorCooldownStallTimeout) or 180)
+    loaded.control.reactorCooldownSteamDelta = math.max(0.1,
+        tonumber(loaded.control.reactorCooldownSteamDelta) or 2)
+    loaded.control.reactorCooldownTemperatureDelta = math.max(0.01,
+        tonumber(loaded.control.reactorCooldownTemperatureDelta) or 0.05)
     loaded.control.maxFlowStep = tonumber(loaded.control.maxFlowStep) or 100
     loaded.control.adjustmentInterval = tonumber(loaded.control.adjustmentInterval) or 2
     loaded.control.commandSamples = math.max(1,
