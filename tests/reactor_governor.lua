@@ -8,6 +8,10 @@ local control = {
     reactorSteamDeadband = 0.03,
     reactorSteamDeadbandMin = 25,
     reactorHotFluidHigh = 85,
+    reactorCooldownWindow = 10,
+    reactorCooldownStallTimeout = 180,
+    reactorCooldownSteamDelta = 2,
+    reactorCooldownTemperatureDelta = 0.05,
 }
 
 local function equal(actual, expected, label)
@@ -61,6 +65,34 @@ do
     local deficit = governor.evaluate(memory, reactor(1200, 0), control, {}, 2000, 1)
     equal(deficit.state, "STEAM DEFICIT", "maximum-output warning")
     equal(deficit.action, "HOLD", "maximum-output action")
+end
+
+do
+    local memory = governor.new()
+    local cooling = governor.evaluate(memory, reactor(3000, 100, {
+        casingTemperature = 800,
+    }), control, { now = 0 }, 2000, 1)
+    equal(cooling.state, "COOLING", "full-insertion cooldown starts safely")
+
+    cooling = governor.evaluate(memory, reactor(2995, 100, {
+        casingTemperature = 799.9,
+    }), control, { now = 10 }, 2000, 1)
+    equal(cooling.state, "COOLING", "falling residual heat remains cooldown")
+
+    cooling = governor.evaluate(memory, reactor(2990, 100, {
+        casingTemperature = 799.8,
+    }), control, { now = 300 }, 2000, 1)
+    equal(cooling.state, "COOLING", "large reactor may cool indefinitely with progress")
+
+    local stalled = governor.evaluate(memory, reactor(2990, 100, {
+        casingTemperature = 799.8,
+    }), control, { now = 481 }, 2000, 1)
+    equal(stalled.state, "STEAM SURPLUS", "stalled cooldown becomes capacity warning")
+
+    local controlled = governor.evaluate(memory, reactor(2000, 95, {
+        casingTemperature = 799.8,
+    }), control, { now = 482 }, 2000, 1)
+    equal(controlled.state, "STABLE", "normal control clears cooldown tracking")
 end
 
 do
