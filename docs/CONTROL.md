@@ -1,6 +1,6 @@
 # HELIOS Control Boundary
 
-## v1.4.0-alpha.8
+## v1.4.0-alpha.9
 
 The Power Control screen now runs a guarded automatic turbine governor.
 
@@ -37,8 +37,10 @@ The mainframe also runs a guarded steam-demand governor for one active,
 actively cooled reactor:
 
 - Trusted demand is the sum of configured intake limits for all active turbines.
-- HELIOS converts all rods to exposed rod-equivalents and uses full rods plus one fractional trim rod.
-- A new or non-sequential bank first moves to zero exposure and cools before learning begins.
+- HELIOS spreads each rod-equivalent setting across all fuel columns as evenly as possible.
+- A 25-rod setting of 0.26 equivalent becomes one rod at 98% insertion and 24 at 99%.
+- A new or unbalanced bank first moves to zero exposure and cools before learning begins.
+- Steam decisions use a 10-sample rolling average and target 2.5% above turbine demand.
 - A stable measurement provides a proportional estimate; two stable measurements allow interpolation toward the target.
 - Formula estimates are bounded to 0.25 rod-equivalent per change and corrected by feedback.
 - Steam, hot-fluid-buffer, and casing-temperature motion pauses further changes and invalidates learning samples.
@@ -58,6 +60,9 @@ actively cooled reactor:
 - Overspeed threshold: 2000 RPM for 3 readings
 - Storage demand band: 25% to 85%
 - Maximum reactor exposure step: 0.25 rod-equivalent after 3 matching decisions
+- Reactor fine-control resolution: 0.01 rod-equivalent
+- Steam reserve margin: 2.5%
+- Steam rolling average: 10 one-second samples
 - Minimum post-command response wait: 15 seconds, extended while plant telemetry is moving
 - Maximum turbine flow step: 100 mB/t
 - Adjustment interval: 2 seconds

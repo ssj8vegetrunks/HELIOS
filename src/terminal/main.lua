@@ -150,8 +150,9 @@ function terminal.run(config)
                 formatValue(item.casingTemperature, " C")))
             if item.mode == "steam" then
                 local plan = item.governor or {}
-                ui.status("Steam out/target", ("%s / %s"):format(
-                    formatValue(item.steamProduction, ""),
+                ui.status("Steam avg/target", ("%s / %s"):format(
+                    formatValue(plan.averageSteamProduction or
+                        item.steamProduction, ""),
                     formatValue(plan.targetSteam, " mB/t")), colors.cyan)
                 ui.status("Coolant / hot", ("%s / %s"):format(
                     formatValue(item.coolantPercent, "%"),

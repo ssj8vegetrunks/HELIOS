@@ -29,16 +29,29 @@ local reactor = { name = "reactor_0", controlRods = 3 }
 local ok, applied, reason = adapter.setControlRodExposure(reactor, 1.35)
 assert(ok, tostring(reason))
 assert(math.abs(applied - 1.35) < 0.001, "exposure was not verified")
-assert(levels[0] == 0 and levels[1] == 65 and levels[2] == 100,
-    "rod-equivalent layout is incorrect")
-assert(calls[4].method == "setControlRodLevel" and calls[4].first == 1,
+assert(levels[0] == 55 and levels[1] == 55 and levels[2] == 55,
+    "rod-equivalent exposure should be spread evenly")
+assert(calls[4].method == "setControlRodLevel" and calls[4].first == 0,
     "safer insertions should be issued before withdrawals")
 
 ok, applied, reason = adapter.setControlRodExposure(reactor, 99)
 assert(ok, tostring(reason))
 assert(applied == 3, "exposure should be clamped to the rod count")
 
+levels = {}
+for index = 0, 24 do levels[index] = 100 end
+reactor.controlRods = 25
+ok, applied, reason = adapter.setControlRodExposure(reactor, 0.26)
+assert(ok, tostring(reason))
+assert(math.abs(applied - 0.26) < 0.001, "fine exposure was not verified")
+assert(levels[0] == 98, "one trim rod should be 98% inserted")
+for index = 1, 24 do
+    assert(levels[index] == 99, "remaining rods should be 99% inserted")
+end
+
 stuck = true
+reactor.controlRods = 3
+levels = { [0] = 40, [1] = 40, [2] = 40 }
 ok, applied, reason = adapter.setControlRodExposure(reactor, 0.5)
 assert(ok == false, "mismatched rods should fail verification")
 assert(reason and reason:find("Rod 1", 1, true),

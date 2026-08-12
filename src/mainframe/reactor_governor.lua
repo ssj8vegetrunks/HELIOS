@@ -41,25 +41,36 @@ local function rodExposure(reactor)
     return exposure, count
 end
 
-local function wantedRodLevel(index, exposure)
-    local full = math.floor(exposure)
-    local fraction = exposure - full
-    if index < full then return 0 end
-    if index == full and fraction > 0.0001 then
-        return round(100 - fraction * 100)
-    end
-    return 100
+local function wantedRodLevel(index, exposure, count)
+    local exposurePoints = math.floor(clamp(exposure, 0, count) * 100 + 0.5)
+    local pointsPerRod = math.floor(exposurePoints / count)
+    local remainder = exposurePoints % count
+    local exposedPercent = pointsPerRod + (index < remainder and 1 or 0)
+    return 100 - exposedPercent
 end
 
-local function layoutIsSequential(reactor, exposure, count)
+local function layoutIsBalanced(reactor, exposure, count)
     local levels = reactor.controlRodLevels or {}
     for index = 0, count - 1 do
         local actual = tonumber(levels[index])
-        if actual == nil or math.abs(actual - wantedRodLevel(index, exposure)) > 0.5 then
+        if actual == nil or
+           math.abs(actual - wantedRodLevel(index, exposure, count)) > 0.5 then
             return false
         end
     end
     return true
+end
+
+local function rollingSteam(previous, production, control)
+    local wanted = math.max(3,
+        math.floor(tonumber(control.reactorSteamAverageSamples) or 10))
+    previous.productionSamples = previous.productionSamples or {}
+    local samples = previous.productionSamples
+    samples[#samples + 1] = production
+    while #samples > wanted do table.remove(samples, 1) end
+    local total = 0
+    for _, sample in ipairs(samples) do total = total + sample end
+    return total / #samples, #samples, #samples >= wanted
 end
 
 function governor.new()
@@ -248,13 +259,19 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
             result = hold("NO ROD DATA",
                 "Individual control-rod telemetry is unavailable", false)
         else
-            local production = math.max(0, tonumber(reactor.steamProduction))
-            local target = math.max(0, tonumber(targetSteam))
+            local rawProduction = math.max(0, tonumber(reactor.steamProduction))
+            local production, averageSamples, averageReady = rollingSteam(previous,
+                rawProduction, control)
+            local requestedSteam = math.max(0, tonumber(targetSteam))
+            local reserveMargin = math.max(0, math.min(0.25,
+                tonumber(control.reactorSteamReserveMargin) or 0.025))
+            local target = requestedSteam > 0 and
+                requestedSteam * (1 + reserveMargin) or 0
             local hotFluid = tonumber(reactor.hotFluidPercent)
             local highBuffer = tonumber(control.reactorHotFluidHigh) or 85
             local lowBuffer = tonumber(control.reactorHotFluidLow) or 15
             local deadband = math.max(tonumber(control.reactorSteamDeadbandMin) or 25,
-                target * (tonumber(control.reactorSteamDeadband) or 0.03))
+                target * (tonumber(control.reactorSteamDeadband) or 0.01))
             local maxStep = math.max(0.01, math.min(1,
                 tonumber(control.maxRodEquivalentStep) or 0.25))
             local stableRequired = math.max(3,
@@ -265,12 +282,12 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
             local stable = (previous.stableSamples or 0) >= stableRequired
             local proposed, state, action, reason = exposure, "STABLE", "HOLD",
                 "Steam production matches trusted turbine demand"
-            local sequential = layoutIsSequential(reactor, exposure, rodCount)
+            local balanced = layoutIsBalanced(reactor, exposure, rodCount)
 
-            if not sequential then
+            if not balanced then
                 proposed = 0
                 state, action = "BASELINING", "REDUCE EXPOSURE"
-                reason = "Insert every rod and establish a known-safe learning baseline"
+                reason = "Insert every rod before switching to balanced exposure"
             elseif target <= 0 then
                 if exposure > 0.005 then
                     proposed, state, action = 0, "NO DEMAND", "REDUCE EXPOSURE"
@@ -292,6 +309,13 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
                     reason = ("Steam and casing temperature have not declined for %.0f seconds"):
                         format(stalledFor)
                 end
+            elseif not averageReady then
+                previous.stableSamples = 0
+                state = "AVERAGING"
+                reason = ("Collecting steam sample %d/%d"):
+                    format(averageSamples,
+                        math.max(3, math.floor(tonumber(
+                            control.reactorSteamAverageSamples) or 10)))
             elseif responding or not stable then
                 state = "RESPONDING"
                 reason = "Waiting for steam, buffer, and casing temperature to settle"
@@ -338,7 +362,7 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
 
             proposed = round(clamp(proposed, 0, rodCount), 2)
             local changing = action ~= "HOLD" and
-                (math.abs(proposed - exposure) >= 0.005 or not sequential)
+                (math.abs(proposed - exposure) >= 0.005 or not balanced)
             if changing then
                 previous.actionSamples = previous.action == action and
                     ((previous.actionSamples or 0) + 1) or 1
@@ -354,8 +378,11 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
                 reason = reason,
                 trusted = true,
                 activeTurbines = activeTurbines or 0,
+                requestedSteam = requestedSteam,
                 targetSteam = target,
-                steamProduction = production,
+                steamProduction = rawProduction,
+                averageSteamProduction = round(production, 1),
+                averageSteamSamples = averageSamples,
                 steamError = target - production,
                 steamDeadband = deadband,
                 rodCount = rodCount,
@@ -450,6 +477,8 @@ function governor.apply(memory, reactor, control, context, writers)
             previous.lastAppliedRodExposure = tonumber(applied) or proposed
             previous.lastError = nil
             previous.stableSamples = 0
+            previous.productionSamples = {}
+            previous.observation = nil
             plan.appliedRodExposure = previous.lastAppliedRodExposure
             plan.actuatorState = "APPLIED"
         else

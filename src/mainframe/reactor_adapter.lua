@@ -174,18 +174,14 @@ end
 local function exposureLevels(count, exposure)
     count = math.max(0, math.floor(tonumber(count) or 0))
     exposure = math.max(0, math.min(count, tonumber(exposure) or 0))
-    local full = math.floor(exposure)
-    local fraction = exposure - full
+    if count < 1 then return {} end
+    local exposurePoints = math.floor(exposure * 100 + 0.5)
+    local pointsPerRod = math.floor(exposurePoints / count)
+    local remainder = exposurePoints % count
     local levels = {}
     for index = 0, count - 1 do
-        if index < full then
-            levels[index] = 0
-        elseif index == full and fraction > 0.0001 then
-            levels[index] = math.max(0, math.min(100,
-                math.floor(100 - fraction * 100 + 0.5)))
-        else
-            levels[index] = 100
-        end
+        local exposedPercent = pointsPerRod + (index < remainder and 1 or 0)
+        levels[index] = 100 - exposedPercent
     end
     return levels
 end

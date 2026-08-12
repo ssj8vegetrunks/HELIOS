@@ -1,4 +1,4 @@
-# HELIOS — v1.4.0 Alpha 8 Rod-Equivalent Reactor Governor
+# HELIOS — v1.4.0 Alpha 9 Balanced Reactor Governor
 
 Industrial power management for **CC:Tweaked** and **Extreme Reactors**.
 
@@ -45,8 +45,10 @@ The existing touch interface and network-ID protection remain online:
 - rejected or unverifiable actuator commands become system-wide control-fault warnings;
 - the dashboard reports live automatic, calibration, maintenance, and fault state instead of the obsolete observe-only banner;
 - one active steam reactor follows the summed configured intake of all active turbines;
-- reactor output is controlled as exposed rod-equivalents: full rods plus one fractional trim rod;
-- a new or non-sequential rod bank is first fully inserted to establish a known-safe baseline;
+- reactor exposure is spread as evenly as possible across every fuel column;
+- one-percent insertion differences provide 0.01 rod-equivalent fine control;
+- steam control uses a rolling average and a 2.5% reserve above turbine demand;
+- a new or unbalanced rod bank is first fully inserted to establish a known-safe baseline;
 - formula-assisted learning estimates the needed exposure, then bounded feedback corrects it;
 - reactor commands wait for steam, buffer, and casing-temperature response before another change;
 - stable learned exposure is saved per reactor and every individual rod command is verified;
@@ -169,12 +171,13 @@ severe alarm can still sound, and silence resets after the condition clears.
 
 For one active steam reactor, HELIOS totals the configured intake requested by
 all active turbines and regulates exposed rod-equivalents until reactor steam
-production matches that demand. It uses full exposed rods plus one fractional
-trim rod, giving 0.01-equivalent resolution regardless of reactor size. Stable
-measurements feed a proportional/interpolated estimate; live feedback corrects
-for temperature, fuel, moderator layout, and other nonlinear effects. Samples
-are not learned while steam, the hot-fluid buffer, or casing temperature is
-still moving. Each individual rod write is read back and verified.
+production matches that demand plus a small reserve. Total exposure is spread
+across every fuel column as evenly as integer insertion levels allow. For
+example, 0.26 equivalent on 25 rods becomes one rod at 98% insertion and 24 at
+99%. A rolling steam average filters the reactor's fuel-column cycle before
+stable measurements feed the proportional/interpolated learner. Live feedback
+still corrects for temperature, fuel, moderator layout, and other nonlinear
+effects. Each individual rod write is read back and verified.
 
 The reactor governor holds during maintenance, ID conflict, missing or
 untrusted turbine telemetry, unsupported rod control, or when more than one

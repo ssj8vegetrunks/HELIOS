@@ -46,10 +46,14 @@ function config.load()
         tonumber(loaded.control.reactorAdjustmentInterval) or 5)
     loaded.control.reactorCommandSamples = math.max(2,
         math.floor(tonumber(loaded.control.reactorCommandSamples) or 3))
-    loaded.control.reactorSteamDeadband = math.max(0.01, math.min(0.25,
-        tonumber(loaded.control.reactorSteamDeadband) or 0.03))
+    loaded.control.reactorSteamDeadband = math.max(0.005, math.min(0.25,
+        tonumber(loaded.control.reactorSteamDeadband) or 0.01))
     loaded.control.reactorSteamDeadbandMin = math.max(1,
         tonumber(loaded.control.reactorSteamDeadbandMin) or 25)
+    loaded.control.reactorSteamReserveMargin = math.max(0, math.min(0.25,
+        tonumber(loaded.control.reactorSteamReserveMargin) or 0.025))
+    loaded.control.reactorSteamAverageSamples = math.max(3,
+        math.floor(tonumber(loaded.control.reactorSteamAverageSamples) or 10))
     loaded.control.reactorHotFluidHigh = math.max(50, math.min(99,
         tonumber(loaded.control.reactorHotFluidHigh) or 85))
     loaded.control.reactorHotFluidLow = math.max(1, math.min(

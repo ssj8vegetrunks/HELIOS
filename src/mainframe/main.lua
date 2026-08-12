@@ -949,8 +949,9 @@ function mainframe.run(config)
                     formatValue(reactor.casingTemperature, " C")))
                 if reactor.mode == "steam" then
                     local plan = reactor.governor or {}
-                    ui.status("Steam out/target", ("%s / %s"):format(
-                        formatValue(reactor.steamProduction, ""),
+                    ui.status("Steam avg/target", ("%s / %s"):format(
+                        formatValue(plan.averageSteamProduction or
+                            reactor.steamProduction, ""),
                         formatValue(plan.targetSteam, " mB/t")), colors.cyan)
                     ui.status("Coolant / hot", ("%s / %s"):format(
                         formatValue(reactor.coolantPercent, "%"),

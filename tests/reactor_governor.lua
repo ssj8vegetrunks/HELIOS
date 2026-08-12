@@ -4,8 +4,10 @@ local control = {
     actuatorsEnabled = true,
     reactorAdjustmentInterval = 5,
     reactorCommandSamples = 3,
-    reactorSteamDeadband = 0.03,
-    reactorSteamDeadbandMin = 25,
+    reactorSteamDeadband = 0.01,
+    reactorSteamDeadbandMin = 10,
+    reactorSteamReserveMargin = 0.025,
+    reactorSteamAverageSamples = 4,
     reactorHotFluidHigh = 85,
     reactorHotFluidLow = 15,
     maxRodEquivalentStep = 0.25,
@@ -27,6 +29,16 @@ local function equal(actual, expected, label)
 end
 
 local function levelsFor(count, exposure)
+    local levels = {}
+    local points = math.floor(exposure * 100 + 0.5)
+    local each, remainder = math.floor(points / count), points % count
+    for index = 0, count - 1 do
+        levels[index] = 100 - each - (index < remainder and 1 or 0)
+    end
+    return levels
+end
+
+local function sequentialLevels(count, exposure)
     local levels, full, fraction = {}, math.floor(exposure), exposure % 1
     for index = 0, count - 1 do
         if index < full then levels[index] = 0
@@ -66,7 +78,7 @@ end
 
 local function settle(memory, unit, target, first, samples)
     local result
-    for offset = 0, (samples or 5) - 1 do
+    for offset = 0, (samples or 8) - 1 do
         result = governor.evaluate(memory, unit, control,
             { now = (first or 0) + offset }, target, 1)
     end
@@ -93,7 +105,7 @@ do
     assert(high.recommendedRodExposure >= 1.75, "reduction step must be bounded")
 
     memory = governor.new()
-    local stable = settle(memory, reactor(2010, 1.25), 2000)
+    local stable = settle(memory, reactor(2050, 1.25), 2000, 0, 8)
     equal(stable.state, "LEARNED", "stable operating point")
     assert(control.reactorProfiles.reactor_0, "stable profile was not saved")
     assert(governor.consumeProfileChanges(memory), "profile change was not reported")
@@ -112,15 +124,42 @@ end
 
 do
     local memory = governor.new()
-    local uniform = {}
-    for index = 0, 24 do uniform[index] = 66 end
+    local concentrated = sequentialLevels(25, 8.5)
     local plan = governor.evaluate(memory, reactor(7376, 8.5, {
-        controlRodLevels = uniform,
+        controlRodLevels = concentrated,
         hotFluidPercent = 90,
     }), control, { now = 0 }, 2000, 1)
-    equal(plan.state, "BASELINING", "uniform bank starts safe baseline")
+    equal(plan.state, "BASELINING", "concentrated bank starts safe baseline")
     equal(plan.action, "REDUCE EXPOSURE", "baseline insertion action")
     equal(plan.recommendedRodExposure, 0, "baseline fully inserts every rod")
+end
+
+do
+    local memory = governor.new()
+    local low = settle(memory, reactor(1970, 0.25), 2000, 0, 8)
+    equal(low.recommendedRodExposure, 0.26,
+        "one percent of one rod supplies the reserve margin")
+    equal(low.action, "INCREASE EXPOSURE", "1970 mB/t is below reserve target")
+
+    memory = governor.new()
+    local exact = settle(memory, reactor(2050, 0.26), 2000, 0, 8)
+    equal(exact.state, "LEARNED", "live 25-rod operating point is learned")
+    equal(exact.requestedSteam, 2000, "raw turbine demand is retained")
+    equal(exact.targetSteam, 2050, "two-and-a-half percent reserve target")
+end
+
+do
+    local memory = governor.new()
+    local unit = reactor(1900, 0.26)
+    local sequence = { 1900, 2200, 1900, 2200, 1900, 2200, 1900, 2200 }
+    local plan
+    for index, production in ipairs(sequence) do
+        unit.steamProduction = production
+        plan = governor.evaluate(memory, unit, control, { now = index }, 2000, 1)
+    end
+    equal(plan.averageSteamProduction, 2050,
+        "rolling average smooths cyclic rod output")
+    equal(plan.state, "LEARNED", "cyclic samples learn from their average")
 end
 
 do
@@ -131,7 +170,7 @@ do
     changing.hotFluidPercent = 90
     changing.casingTemperature = 590
     local plan = governor.evaluate(memory, changing, control, { now = 1 }, 2000, 1)
-    equal(plan.state, "RESPONDING", "buffer-fill slump is not learned")
+    equal(plan.state, "AVERAGING", "buffer-fill slump is not learned")
     equal(plan.action, "HOLD", "moving reactor receives no stacked command")
 end
 
@@ -189,7 +228,7 @@ end
 do
     local memory, calls = governor.new(), 0
     local unit = reactor(1000, 1)
-    local plan = settle(memory, unit, 2000, 0, 7)
+    local plan = settle(memory, unit, 2000, 0, 9)
     unit.governor = plan
     governor.apply(memory, unit, control, { now = 10 }, {
         setControlRodExposure = function(_, exposure)
