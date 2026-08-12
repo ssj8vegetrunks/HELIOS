@@ -46,6 +46,7 @@ The existing touch interface and network-ID protection remain online:
 - the dashboard reports live automatic, calibration, maintenance, and fault state instead of the obsolete observe-only banner;
 - one active steam reactor follows the summed configured intake of all active turbines;
 - reactor output is controlled as exposed rod-equivalents: full rods plus one fractional trim rod;
+- a new or non-sequential rod bank is first fully inserted to establish a known-safe baseline;
 - formula-assisted learning estimates the needed exposure, then bounded feedback corrects it;
 - reactor commands wait for steam, buffer, and casing-temperature response before another change;
 - stable learned exposure is saved per reactor and every individual rod command is verified;

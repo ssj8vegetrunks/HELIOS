@@ -2576,9 +2576,9 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
             local sequential = layoutIsSequential(reactor, exposure, rodCount)
 
             if not sequential then
-                state, action = "NORMALIZING", "NORMALIZE RODS"
-                reason = ("Convert %.2f exposed rod-equivalents to sequential control"):
-                    format(exposure)
+                proposed = 0
+                state, action = "BASELINING", "REDUCE EXPOSURE"
+                reason = "Insert every rod and establish a known-safe learning baseline"
             elseif target <= 0 then
                 if exposure > 0.005 then
                     proposed, state, action = 0, "NO DEMAND", "REDUCE EXPOSURE"
@@ -2727,7 +2727,7 @@ function governor.apply(memory, reactor, control, context, writers)
     local current, proposed = tonumber(plan.currentRodExposure),
         tonumber(plan.recommendedRodExposure)
     local needsWrite = current ~= nil and proposed ~= nil and
-        (math.abs(current - proposed) >= 0.005 or plan.action == "NORMALIZE RODS")
+        math.abs(current - proposed) >= 0.005
 
     if control.actuatorsEnabled ~= true then
         plan.actuatorState = "DISABLED"

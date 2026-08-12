@@ -38,6 +38,7 @@ actively cooled reactor:
 
 - Trusted demand is the sum of configured intake limits for all active turbines.
 - HELIOS converts all rods to exposed rod-equivalents and uses full rods plus one fractional trim rod.
+- A new or non-sequential bank first moves to zero exposure and cools before learning begins.
 - A stable measurement provides a proportional estimate; two stable measurements allow interpolation toward the target.
 - Formula estimates are bounded to 0.25 rod-equivalent per change and corrected by feedback.
 - Steam, hot-fluid-buffer, and casing-temperature motion pauses further changes and invalidates learning samples.

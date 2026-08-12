@@ -118,9 +118,9 @@ do
         controlRodLevels = uniform,
         hotFluidPercent = 90,
     }), control, { now = 0 }, 2000, 1)
-    equal(plan.state, "NORMALIZING", "uniform bank is converted")
-    equal(plan.action, "NORMALIZE RODS", "normalization action")
-    equal(plan.recommendedRodExposure, 8.5, "normalization preserves exposure")
+    equal(plan.state, "BASELINING", "uniform bank starts safe baseline")
+    equal(plan.action, "REDUCE EXPOSURE", "baseline insertion action")
+    equal(plan.recommendedRodExposure, 0, "baseline fully inserts every rod")
 end
 
 do
