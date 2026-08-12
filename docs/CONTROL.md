@@ -1,6 +1,6 @@
 # HELIOS Control Boundary
 
-## v1.4.0-alpha.11
+## v1.4.0-alpha.12
 
 The Power Control screen now runs a guarded automatic turbine governor.
 
@@ -50,6 +50,9 @@ cooled reactor:
 - HELIOS spreads each rod-equivalent setting across all fuel columns as evenly as possible.
 - A 25-rod setting of 0.26 equivalent becomes one rod at 98% insertion and 24 at 99%.
 - A new or unbalanced bank first moves to zero exposure and cools before learning begins.
+- A zero-exposure baseline is ready once its rolling steam output is negligible,
+  its hot-fluid buffer is drained, and casing temperature is below 150 C. The
+  casing does not need to reach ambient temperature or stop changing completely.
 - Steam decisions use a 10-sample rolling average and target 2.5% above turbine demand.
 - A stable measurement provides a proportional estimate; two stable measurements allow interpolation toward the target.
 - Formula estimates are bounded to 0.25 rod-equivalent per change and corrected by feedback.
@@ -82,6 +85,7 @@ cooled reactor:
 - Steam reserve margin: 2.5%
 - Steam rolling average: 10 one-second samples
 - Minimum post-command response wait: 15 seconds, extended while plant telemetry is moving
+- Maximum casing temperature for a fresh calibration baseline: 150 C
 - Maximum turbine flow step: 100 mB/t
 - Adjustment interval: 2 seconds
 - First calibration target: 900 RPM

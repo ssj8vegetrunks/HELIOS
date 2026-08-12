@@ -80,6 +80,8 @@ function config.load()
         tonumber(loaded.control.reactorCooldownSteamDelta) or 2)
     loaded.control.reactorCooldownTemperatureDelta = math.max(0.01,
         tonumber(loaded.control.reactorCooldownTemperatureDelta) or 0.05)
+    loaded.control.reactorCalibrationMaxTemperature = math.max(50,
+        tonumber(loaded.control.reactorCalibrationMaxTemperature) or 150)
     loaded.control.maxFlowStep = tonumber(loaded.control.maxFlowStep) or 100
     loaded.control.adjustmentInterval = tonumber(loaded.control.adjustmentInterval) or 2
     loaded.control.commandSamples = math.max(1,

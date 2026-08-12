@@ -1,4 +1,4 @@
-# HELIOS — v1.4.0 Alpha 11 Reactor Recovery
+# HELIOS — v1.4.0 Alpha 12 Practical Reactor Baseline
 
 Industrial power management for **CC:Tweaked** and **Extreme Reactors**.
 
@@ -54,6 +54,9 @@ The existing touch interface and network-ID protection remain online:
 - one-percent insertion differences provide 0.01 rod-equivalent fine control;
 - steam control uses a rolling average and a 2.5% reserve above turbine demand;
 - a new or unbalanced rod bank is first fully inserted to establish a known-safe baseline;
+- calibration begins once residual steam is negligible, the hot-fluid buffer is
+  drained, and casing temperature is below 150 C; it does not wait for a massive
+  casing to reach ambient temperature or become perfectly motionless;
 - formula-assisted learning estimates the needed exposure, then bounded feedback corrects it;
 - reactor commands wait for steam, buffer, and casing-temperature response before another change;
 - stable learned exposure is saved per reactor and every individual rod command is verified;

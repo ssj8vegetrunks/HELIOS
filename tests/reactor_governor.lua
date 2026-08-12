@@ -20,6 +20,7 @@ local control = {
     reactorCooldownStallTimeout = 180,
     reactorCooldownSteamDelta = 2,
     reactorCooldownTemperatureDelta = 0.05,
+    reactorCalibrationMaxTemperature = 150,
     reactorProfiles = {},
 }
 
@@ -267,22 +268,57 @@ end
 
 do
     local memory = governor.new()
-    local cooling = governor.evaluate(memory, reactor(3000, 0, {
+    control.reactorProfiles.reactor_0 = nil
+    local cooling = settle(memory, reactor(3000, 0, {
         casingTemperature = 800,
-    }), control, { now = 0 }, 2000, 1)
+    }), 2000, 0, control.reactorSteamAverageSamples)
     equal(cooling.state, "COOLING", "full-insertion cooldown starts safely")
     cooling = governor.evaluate(memory, reactor(2995, 0, {
         casingTemperature = 799.9,
-    }), control, { now = 10 }, 2000, 1)
+    }), control, { now = 13 }, 2000, 1)
     equal(cooling.state, "COOLING", "falling residual heat remains cooldown")
     cooling = governor.evaluate(memory, reactor(2990, 0, {
         casingTemperature = 799.8,
-    }), control, { now = 300 }, 2000, 1)
+    }), control, { now = 303 }, 2000, 1)
     equal(cooling.state, "COOLING", "large reactor may cool indefinitely")
+    memory.reactors.reactor_0.productionSamples = { 2990, 2990, 2990, 2990 }
+    for now = 484, 487 do
+        governor.evaluate(memory, reactor(2990, 0, {
+            casingTemperature = 799.8,
+        }), control, { now = now }, 2000, 1)
+    end
     local stalled = governor.evaluate(memory, reactor(2990, 0, {
         casingTemperature = 799.8,
-    }), control, { now = 481 }, 2000, 1)
+    }), control, { now = 668 }, 2000, 1)
     equal(stalled.state, "STEAM SURPLUS", "stalled cooldown warns")
+end
+
+do
+    local memory = governor.new()
+    governor.beginRecalibration(memory, control, "reactor_0")
+    local unit = reactor(1, 0, {
+        casingTemperature = 73,
+        hotFluidPercent = 0,
+    })
+    local plan = settle(memory, unit, 2000, 0,
+        control.reactorSteamAverageSamples + 2)
+    equal(plan.state, "RECALIBRATING",
+        "negligible residual steam releases the calibration baseline")
+    equal(plan.action, "INCREASE EXPOSURE",
+        "cool baseline begins exposure learning")
+    equal(plan.recommendedRodExposure, 0.25,
+        "fresh calibration begins with one bounded step")
+
+    memory = governor.new()
+    governor.beginRecalibration(memory, control, "reactor_0")
+    local hot = settle(memory, reactor(1, 0, {
+        casingTemperature = 200,
+        hotFluidPercent = 0,
+    }), 2000, 0, control.reactorSteamAverageSamples + 2)
+    equal(hot.state, "COOLING",
+        "unsafe casing temperature still holds calibration")
+    equal(hot.action, "HOLD",
+        "temperature safety threshold does not expose fuel")
 end
 
 do

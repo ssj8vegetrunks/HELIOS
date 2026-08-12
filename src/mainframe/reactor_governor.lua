@@ -441,6 +441,12 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
             local stableRequired = math.max(3,
                 math.floor(tonumber(control.reactorLearningSamples) or 8))
             local profile = (control.reactorProfiles or {})[name]
+            local calibrationTemperature = tonumber(reactor.casingTemperature)
+            local calibrationMaxTemperature = math.max(50,
+                tonumber(control.reactorCalibrationMaxTemperature) or 150)
+            local baselineSteamLimit = deadband
+            local needsFreshBaseline = exposure <= 0.005 and
+                (previous.recalibrating == true or type(profile) ~= "table")
             local _, responding = observeResponse(previous, reactor, control,
                 context, production)
             local stable = (previous.stableSamples or 0) >= stableRequired
@@ -463,20 +469,45 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
                 else
                     state, reason = "IDLE", "No active turbine demand; all rods inserted"
                 end
-            elseif exposure <= 0.005 and production > target + deadband then
+            elseif needsFreshBaseline and not averageReady then
+                previous.stableSamples = 0
+                state = "AVERAGING"
+                reason = ("Collecting zero-exposure steam sample %d/%d"):
+                    format(averageSamples,
+                        math.max(3, math.floor(tonumber(
+                            control.reactorSteamAverageSamples) or 10)))
+            elseif needsFreshBaseline and production > baselineSteamLimit then
                 local cooling, stalledFor, temperature = observeCooldown(previous,
                     reactor, control, context, production)
                 if cooling then
                     state = "COOLING"
                     reason = temperature and
-                        ("All rods inserted; residual heat is cooling (case %.1f C)"):
-                            format(temperature) or
-                        "All rods inserted; observing residual steam decay"
+                        ("Residual steam %.0f mB/t; waiting below %.0f (case %.1f C)"):
+                            format(production, baselineSteamLimit, temperature) or
+                        ("Residual steam %.0f mB/t; waiting below %.0f"):
+                            format(production, baselineSteamLimit)
                 else
                     state = "STEAM SURPLUS"
                     reason = ("Steam and casing temperature have not declined for %.0f seconds"):
                         format(stalledFor)
                 end
+            elseif needsFreshBaseline and hotFluid ~= nil and
+                   hotFluid > lowBuffer then
+                state = "COOLING"
+                reason = ("Hot-fluid buffer is %.1f%%; waiting below %.1f%%"):
+                    format(hotFluid, lowBuffer)
+            elseif needsFreshBaseline and calibrationTemperature ~= nil and
+                   calibrationTemperature > calibrationMaxTemperature then
+                state = "COOLING"
+                reason = ("Casing is %.1f C; calibration begins below %.1f C"):
+                    format(calibrationTemperature, calibrationMaxTemperature)
+            elseif needsFreshBaseline then
+                clearCooldown(previous)
+                addLearningPoint(previous, exposure, production)
+                proposed = math.min(maxStep, rodCount)
+                state, action = "RECALIBRATING", "INCREASE EXPOSURE"
+                reason = ("Zero-exposure baseline ready at %.0f mB/t; begin learning"):
+                    format(production)
             elseif not averageReady then
                 previous.stableSamples = 0
                 state = "AVERAGING"
