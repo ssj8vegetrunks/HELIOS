@@ -420,7 +420,8 @@ function mainframe.run(config)
                 return "CONTROL FAULT / ATTENTION REQUIRED", colors.red
             elseif plan.state == "STARTING" or plan.state == "BASELINING" or
                    plan.state == "AVERAGING" or plan.state == "RESPONDING" or
-                   plan.state == "STEAM LOW" or plan.state == "STEAM HIGH" then
+                   plan.state == "STEAM LOW" or plan.state == "STEAM HIGH" or
+                   plan.state == "RECOVERING" or plan.state == "RECALIBRATING" then
                 return "AUTOMATIC / PREPARING STEAM", colors.orange
             elseif plan.state == "COOLING" then
                 return "AUTOMATIC / REACTOR COOLING", colors.orange
@@ -932,6 +933,8 @@ function mainframe.run(config)
         local previousButton
         local nextButton
         local backButton
+        local calibrationButton
+        local notice
 
         local function formatValue(value, suffix)
             if value == nil then return "N/A" end
@@ -953,12 +956,184 @@ function mainframe.run(config)
                 exposure ~= nil and ("%.2f"):format(exposure) or "N/A")
         end
 
+        local function reactorByName(name)
+            for _, candidate in ipairs(reactors) do
+                if candidate.name == name then return candidate end
+            end
+        end
+
+        local function serviceEvent(event, value, message, protocol)
+            if event == "rednet_message" then
+                handleNetwork(value, message, protocol)
+            elseif event == "peripheral" or event == "peripheral_detach" then
+                if maintenance or config.discovery.defaultMode == "manual" then
+                    registryStale = true
+                else
+                    rescan()
+                    updateAlarm()
+                end
+            elseif event == "timer" then
+                if maintenance and value == maintenanceTimer then
+                    stopMaintenance()
+                elseif maintenance and value == countdownTimer then
+                    countdownTimer = os.startTimer(1)
+                elseif value == reactorTimer then
+                    pollReactors()
+                    broadcastSnapshots()
+                    reactorTimer = os.startTimer(1)
+                end
+            end
+        end
+
+        local function confirm(title, lines, yesLabel, noLabel)
+            local yesButton, noButton
+            local function drawConfirm()
+                ui.header(title, "Confirmation required")
+                for _, line in ipairs(lines or {}) do print(line) end
+                print("")
+                yesButton = ui.inlineButton(yesLabel or "YES", colors.lime)
+                write("   ")
+                noButton = ui.inlineButton(noLabel or "NO", colors.orange)
+                print("")
+            end
+            while true do
+                drawConfirm()
+                local event, value, message, protocol = os.pullEvent()
+                local touchX, touchY = ui.eventPoint(event, value, message, protocol)
+                if (event == "key" and value == keys.y) or
+                   ui.hit(yesButton, touchX, touchY) then
+                    return true
+                elseif (event == "key" and (value == keys.n or value == keys.b)) or
+                       ui.hit(noButton, touchX, touchY) then
+                    return false
+                else
+                    serviceEvent(event, value, message, protocol)
+                end
+            end
+        end
+
+        local function calibrationView(reactorName, maintenanceEnabledHere)
+            local buttons = {}
+            local calibrationNotice
+
+            local function formatUpdatedAt(value)
+                value = tonumber(value)
+                if not value or value <= 0 then return "UNKNOWN" end
+                local ok, formatted = pcall(os.date, "!%Y-%m-%d %H:%M UTC", value)
+                return ok and formatted or tostring(value)
+            end
+
+            local function drawCalibration()
+                local reactor = reactorByName(reactorName)
+                ui.header("REACTOR CALIBRATION", deviceName(reactorName))
+                ui.status("Control mode", maintenance and "MAINTENANCE" or "AUTOMATIC",
+                    maintenance and colors.orange or colors.lime)
+                if not reactor then
+                    ui.status("Status", "REACTOR NOT FOUND", colors.red)
+                    buttons = { close = ui.button("CLOSE", colors.cyan) }
+                    return
+                end
+                if reactor.mode ~= "steam" then
+                    ui.status("Status", "POWER REACTOR / CALIBRATION NOT REQUIRED",
+                        colors.orange)
+                    print("")
+                    buttons = { close = ui.button("CLOSE", colors.cyan) }
+                    return
+                end
+
+                local plan = reactor.governor or {}
+                local profile = (config.control.reactorProfiles or {})[reactorName]
+                ui.status("Calibration state", plan.state or "UNCALIBRATED",
+                    plan.recalibrating and colors.orange or colors.lime)
+                ui.status("Target output", plan.targetSteam and
+                    ("%.0f mB/t"):format(plan.targetSteam) or "NO TURBINE DEMAND")
+                ui.status("Current output", plan.averageSteamProduction and
+                    ("%.0f mB/t average"):format(plan.averageSteamProduction) or "AVERAGING")
+                ui.status("Current setting", formatRodLayout(reactor,
+                    plan.currentRodExposure))
+                ui.status("Saved calibration", profile and
+                    (("%.2f eq / %.0f mB/t"):format(
+                        tonumber(profile.exposure) or 0,
+                        tonumber(profile.targetSteam) or 0)) or "NONE")
+                ui.status("Last calibrated", profile and
+                    formatUpdatedAt(profile.updatedAt) or "NEVER")
+                if plan.reason then ui.status("Governor", plan.reason, colors.lightGray) end
+                if calibrationNotice then
+                    print("")
+                    ui.status("Result", calibrationNotice.text, calibrationNotice.colour)
+                end
+                print("")
+                buttons.delete = ui.button("DELETE CALIBRATION DATA", colors.red)
+                buttons.recalibrate = ui.button("RECALIBRATE", colors.orange)
+                buttons.save = ui.button("SAVE CURRENT REACTOR SETUP", colors.lime)
+                buttons.close = ui.button("CLOSE", colors.cyan)
+            end
+
+            while true do
+                drawCalibration()
+                local event, value, message, protocol = os.pullEvent()
+                local touchX, touchY = ui.eventPoint(event, value, message, protocol)
+                local reactor = reactorByName(reactorName)
+                if (event == "key" and value == keys.b) or
+                   ui.hit(buttons.close, touchX, touchY) then
+                    if maintenanceEnabledHere and maintenance and confirm(
+                        "MAINTENANCE MODE",
+                        { "Disable Maintenance Mode and", "return control to HELIOS?" },
+                        "YES", "NO") then
+                        stopMaintenance()
+                    end
+                    return
+                elseif reactor and reactor.mode == "steam" and
+                       ui.hit(buttons.delete, touchX, touchY) then
+                    if confirm("DELETE CALIBRATION",
+                        { "Delete the saved calibration for", deviceName(reactorName) .. "?",
+                          "Rod positions will not change immediately." },
+                        "DELETE", "CANCEL") then
+                        reactorGovernor.deleteCalibration(reactorGovernorMemory,
+                            config.control, reactorName)
+                        saveConfig()
+                        calibrationNotice = { text = "CALIBRATION DATA DELETED", colour = colors.orange }
+                    end
+                elseif reactor and reactor.mode == "steam" and
+                       ui.hit(buttons.recalibrate, touchX, touchY) then
+                    if confirm("RECALIBRATE REACTOR",
+                        { "Close all rods and relearn this", "reactor from zero exposure?",
+                          "HELIOS will resume automatic control." },
+                        "RECALIBRATE", "CANCEL") then
+                        reactorGovernor.beginRecalibration(reactorGovernorMemory,
+                            config.control, reactorName)
+                        saveConfig()
+                        if maintenance then stopMaintenance() end
+                        maintenanceEnabledHere = false
+                        calibrationNotice = { text = "RECALIBRATION STARTED", colour = colors.orange }
+                    end
+                elseif reactor and reactor.mode == "steam" and
+                       ui.hit(buttons.save, touchX, touchY) then
+                    if confirm("SAVE CURRENT SETUP",
+                        { "Save the reactor's current rod layout", "as its learned calibration?" },
+                        "SAVE", "CANCEL") then
+                        local ok, reason = reactorGovernor.saveCurrentCalibration(
+                            reactorGovernorMemory, config.control, reactor,
+                            { now = os.epoch("utc") / 1000 })
+                        if ok then
+                            saveConfig()
+                            calibrationNotice = { text = "CURRENT SETUP SAVED", colour = colors.lime }
+                        else
+                            calibrationNotice = { text = tostring(reason), colour = colors.red }
+                        end
+                    end
+                else
+                    serviceEvent(event, value, message, protocol)
+                end
+            end
+        end
+
         local function draw()
             ui.header("REACTORS", "Live telemetry and steam governor")
             if #reactors == 0 then
                 ui.status("Status", "NO REACTORS FOUND", colors.orange)
                 print("")
-                previousButton, nextButton, viewSilenceButton = nil, nil, nil
+                previousButton, nextButton, viewSilenceButton, calibrationButton = nil, nil, nil, nil
                 backButton = ui.button("BACK", colors.cyan)
                 return
             end
@@ -1016,6 +1191,10 @@ function mainframe.run(config)
             write(" ")
             backButton = ui.inlineButton("BACK", colors.cyan)
             print("")
+            local selectedReactor = reactors[selected]
+            calibrationButton = selectedReactor and ui.button("CALIBRATION STATUS",
+                selectedReactor.mode == "steam" and colors.lime or colors.gray) or nil
+            if notice then ui.status("Result", notice, colors.orange) end
         end
 
         while true do
@@ -1035,6 +1214,18 @@ function mainframe.run(config)
                 selected = (selected % #reactors) + 1
             elseif (event == "mouse_click" or event == "monitor_touch") and ui.hit(backButton, x, y) then
                 return
+            elseif (event == "mouse_click" or event == "monitor_touch") and
+                   ui.hit(calibrationButton, x, y) and #reactors > 0 then
+                local reactor = reactors[selected]
+                local enabledHere = false
+                if reactor.mode == "steam" and not maintenance then
+                    enabledHere = confirm("CALIBRATION STATUS",
+                        { "Enable Maintenance Mode?", "",
+                          "This prevents HELIOS from changing", "the reactor while settings are reviewed." },
+                        "YES", "NO")
+                    if enabledHere then startMaintenance() end
+                end
+                calibrationView(reactor.name, enabledHere)
             elseif event == "rednet_message" then
                 handleNetwork(value, x, y)
             elseif event == "peripheral" or event == "peripheral_detach" then

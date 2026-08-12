@@ -192,6 +192,42 @@ end
 
 do
     local memory = governor.new()
+    local learned = settle(memory, reactor(2050, 0.26), 2000, 0, 8)
+    equal(learned.state, "LEARNED", "recovery test learns live operating point")
+
+    local overridden = reactor(1900, 0, { casingTemperature = 590 })
+    local plan
+    for sample = 1, control.reactorSteamAverageSamples + 2 do
+        overridden.steamProduction = 1900 - sample * 10
+        overridden.casingTemperature = 590 - sample
+        plan = governor.evaluate(memory, overridden, control,
+            { now = 20 + sample }, 2000, 1)
+    end
+    equal(plan.state, "RECOVERING",
+        "manual full insertion restores learned exposure while cooling")
+    equal(plan.action, "INCREASE EXPOSURE",
+        "manual full insertion recovery direction")
+    equal(plan.recommendedRodExposure, 0.25,
+        "learned exposure recovery remains bounded")
+    equal(plan.averageSteamSamples, control.reactorSteamAverageSamples,
+        "external rod change collects a fresh rolling average")
+
+    overridden.governor = plan
+    local applied
+    governor.apply(memory, overridden, control, { now = 40 }, {
+        setControlRodExposure = function(_, exposure)
+            applied = exposure
+            return true, exposure
+        end,
+    })
+    equal(applied, 0.25,
+        "confirmed recovery command reaches the rod actuator")
+    equal(plan.actuatorState, "APPLIED",
+        "manual full insertion recovery is applied")
+end
+
+do
+    local memory = governor.new()
     local unit = reactor(1900, 0.26)
     local sequence = { 1900, 2200, 1900, 2200, 1900, 2200, 1900, 2200 }
     local plan
@@ -288,6 +324,46 @@ do
     })
     equal(plan.actuatorState, "PAUSED", "maintenance pause")
     equal(calls, 1, "maintenance write count")
+end
+
+do
+    local memory = governor.new()
+    control.reactorProfiles.reactor_0 = {
+        exposure = 0.26,
+        steam = 2050,
+        targetSteam = 2050,
+        updatedAt = 10,
+    }
+    governor.beginRecalibration(memory, control, "reactor_0")
+    equal(control.reactorProfiles.reactor_0, nil,
+        "recalibration removes the active learned profile")
+    local plan = governor.evaluate(memory, reactor(2050, 0.26), control,
+        { now = 20 }, 2000, 1)
+    equal(plan.state, "RECALIBRATING", "recalibration closes rods first")
+    equal(plan.recommendedRodExposure, 0,
+        "recalibration establishes a zero-exposure baseline")
+
+    local unit = reactor(2050, 0.26)
+    unit.governor = {
+        averageSteamProduction = 2050,
+        targetSteam = 2050,
+    }
+    local ok = governor.saveCurrentCalibration(memory, control, unit, { now = 30 })
+    equal(ok, true, "current reactor setup can be saved")
+    equal(control.reactorProfiles.reactor_0.exposure, 0.26,
+        "saved current setup retains balanced rod exposure")
+    equal(control.reactorProfiles.reactor_0.updatedAt, 30,
+        "saved current setup records calibration time")
+
+    governor.deleteCalibration(memory, control, "reactor_0")
+    equal(control.reactorProfiles.reactor_0, nil,
+        "delete calibration removes saved reactor data")
+
+    local power = reactor(0, 0, { mode = "power", steamProduction = nil })
+    local saved, reason = governor.saveCurrentCalibration(memory, control, power, {})
+    equal(saved, false, "power reactor calibration is rejected")
+    equal(reason, "Only steam reactors can be calibrated",
+        "power reactor calibration rejection explains why")
 end
 
 print("reactor governor tests passed")

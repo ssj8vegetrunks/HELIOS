@@ -1,4 +1,6 @@
 local governor = {}
+local clearCooldown
+local saveProfile
 
 local function clamp(value, minimum, maximum)
     return math.max(minimum, math.min(maximum, value))
@@ -81,6 +83,70 @@ function governor.consumeProfileChanges(memory)
     local dirty = memory and memory.profileDirty == true
     if memory then memory.profileDirty = false end
     return dirty
+end
+
+local function clearTransient(previous)
+    previous.productionSamples = {}
+    previous.stableSamples = 0
+    previous.actionSamples = 0
+    previous.action = nil
+    previous.observation = nil
+    previous.points = {}
+    previous.observedRodExposure = nil
+    previous.lastAttemptAt = nil
+    previous.lastError = nil
+    clearCooldown(previous)
+end
+
+function governor.deleteCalibration(memory, control, name)
+    name = tostring(name or "unknown")
+    control.reactorProfiles = control.reactorProfiles or {}
+    control.reactorProfiles[name] = nil
+    memory.reactors = memory.reactors or {}
+    local previous = memory.reactors[name] or {}
+    previous.recalibrating = false
+    previous.previousProfile = nil
+    clearTransient(previous)
+    memory.reactors[name] = previous
+    memory.profileDirty = true
+    return true
+end
+
+function governor.beginRecalibration(memory, control, name)
+    name = tostring(name or "unknown")
+    control.reactorProfiles = control.reactorProfiles or {}
+    memory.reactors = memory.reactors or {}
+    local previous = memory.reactors[name] or {}
+    previous.previousProfile = control.reactorProfiles[name]
+    control.reactorProfiles[name] = nil
+    clearTransient(previous)
+    previous.recalibrating = true
+    memory.reactors[name] = previous
+    memory.profileDirty = true
+    return true
+end
+
+function governor.saveCurrentCalibration(memory, control, reactor, context)
+    if type(reactor) ~= "table" or reactor.mode ~= "steam" then
+        return false, "Only steam reactors can be calibrated"
+    end
+    local exposure = rodExposure(reactor)
+    if exposure == nil then return false, "Control-rod telemetry is unavailable" end
+    local plan = reactor.governor or {}
+    local production = tonumber(plan.averageSteamProduction) or
+        tonumber(reactor.steamProduction)
+    local target = tonumber(plan.targetSteam)
+    if production == nil then return false, "Steam-production telemetry is unavailable" end
+    if target == nil or target <= 0 then return false, "No turbine steam target is available" end
+    saveProfile(memory, control, tostring(reactor.name), exposure, production,
+        target, context or {})
+    local previous = memory.reactors[tostring(reactor.name)] or {}
+    previous.recalibrating = false
+    previous.previousProfile = nil
+    clearTransient(previous)
+    previous.observedRodExposure = exposure
+    memory.reactors[tostring(reactor.name)] = previous
+    return true
 end
 
 function governor.steamDemand(turbines, control)
@@ -166,7 +232,7 @@ function governor.steamSourceStatus(reactors, demand, control)
     }
 end
 
-local function clearCooldown(previous)
+clearCooldown = function(previous)
     previous.cooldownStartedAt = nil
     previous.cooldownReferenceAt = nil
     previous.cooldownReferenceSteam = nil
@@ -276,7 +342,7 @@ local function learnedExposure(previous, profile, current, production, target, c
     return clamp(current + 0.25, 0, count)
 end
 
-local function saveProfile(memory, control, name, exposure, production, target, context)
+saveProfile = function(memory, control, name, exposure, production, target, context)
     control.reactorProfiles = control.reactorProfiles or {}
     local old = control.reactorProfiles[name]
     if not old or math.abs((tonumber(old.exposure) or -1) - exposure) >= 0.01 or
@@ -347,6 +413,17 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
                 "Individual control-rod telemetry is unavailable", false)
         else
             local rawProduction = math.max(0, tonumber(reactor.steamProduction))
+            -- Rod changes made outside HELIOS do not pass through apply(), so they
+            -- must invalidate the same observations as a governor command. Mixing
+            -- samples from two layouts can hide a real steam deficit.
+            if previous.observedRodExposure ~= nil and
+               math.abs(exposure - previous.observedRodExposure) >= 0.005 then
+                previous.productionSamples = {}
+                previous.stableSamples = 0
+                previous.observation = nil
+                clearCooldown(previous)
+            end
+            previous.observedRodExposure = exposure
             local production, averageSamples, averageReady = rollingSteam(previous,
                 rawProduction, control)
             local requestedSteam = math.max(0, tonumber(targetSteam))
@@ -371,7 +448,11 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
                 "Steam production matches trusted turbine demand"
             local balanced = layoutIsBalanced(reactor, exposure, rodCount)
 
-            if not balanced then
+            if previous.recalibrating and exposure > 0.005 then
+                proposed = 0
+                state, action = "RECALIBRATING", "REDUCE EXPOSURE"
+                reason = "Insert every rod and establish a fresh zero-exposure baseline"
+            elseif not balanced then
                 proposed = 0
                 state, action = "BASELINING", "REDUCE EXPOSURE"
                 reason = "Insert every rod before switching to balanced exposure"
@@ -403,6 +484,15 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
                     format(averageSamples,
                         math.max(3, math.floor(tonumber(
                             control.reactorSteamAverageSamples) or 10)))
+            elseif exposure <= 0.005 and production < requestedSteam - deadband and
+                   type(profile) == "table" and tonumber(profile.exposure) and
+                   tonumber(profile.exposure) > 0 then
+                local estimate = learnedExposure(previous, profile, exposure,
+                    production, target, rodCount)
+                proposed = math.min(maxStep, math.max(0.01, estimate))
+                state, action = "RECOVERING", "INCREASE EXPOSURE"
+                reason = ("Steam is below demand; restore learned %.2f rod-equivalents"):
+                    format(tonumber(profile.exposure))
             elseif responding or not stable then
                 state = "RESPONDING"
                 reason = "Waiting for steam, buffer, and casing temperature to settle"
@@ -441,6 +531,8 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
                 elseif bufferUsable then
                     saveProfile(memory, control, name, exposure, production, target,
                         context)
+                    previous.recalibrating = false
+                    previous.previousProfile = nil
                     state = "LEARNED"
                     reason = ("Holding %.2f exposed rod-equivalents for %.0f mB/t"):
                         format(exposure, target)
@@ -481,6 +573,7 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
                 stableSamples = previous.stableSamples or 0,
                 hotFluidPercent = hotFluid,
                 learnedProfile = profile,
+                recalibrating = previous.recalibrating == true,
                 coolingSince = previous.cooldownStartedAt,
                 coolingLastProgressAt = previous.cooldownLastProgressAt,
             }

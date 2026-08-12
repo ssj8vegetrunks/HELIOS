@@ -1,4 +1,4 @@
-# HELIOS — v1.4.0 Alpha 10 Coordinated Steam Startup
+# HELIOS — v1.4.0 Alpha 11 Reactor Recovery
 
 Industrial power management for **CC:Tweaked** and **Extreme Reactors**.
 
@@ -57,6 +57,7 @@ The existing touch interface and network-ID protection remain online:
 - formula-assisted learning estimates the needed exposure, then bounded feedback corrects it;
 - reactor commands wait for steam, buffer, and casing-temperature response before another change;
 - stable learned exposure is saved per reactor and every individual rod command is verified;
+- external rod changes clear stale steam samples and automatically restore the learned exposure when turbine supply falls short;
 - high hot-fluid buffer pressure and zero turbine demand insert rods to reduce fuel use;
 - missing turbine demand, duplicate IDs, maintenance, unsupported rod telemetry, and ambiguous multiple-reactor routing hold reactor output unchanged;
 - settings and telemetry navigation use stable touch targets that fit the mirrored terminal canvas;

@@ -1,6 +1,6 @@
 # HELIOS Control Boundary
 
-## v1.4.0-alpha.10
+## v1.4.0-alpha.11
 
 The Power Control screen now runs a guarded automatic turbine governor.
 
@@ -55,6 +55,14 @@ cooled reactor:
 - Formula estimates are bounded to 0.25 rod-equivalent per change and corrected by feedback.
 - Steam, hot-fluid-buffer, and casing-temperature motion pauses further changes and invalidates learning samples.
 - Learned exposure is saved per reactor only at a stable, unsaturated operating point.
+- A rod layout changed outside HELIOS invalidates the old rolling average; automatic mode restores the learned exposure once fresh samples confirm turbine starvation.
+- Maintenance mode suppresses this recovery so deliberate manual rod settings remain untouched.
+- The reactor page opens a dedicated calibration-status screen. Entering it offers to enable Maintenance Mode so HELIOS cannot move rods while settings are reviewed.
+- The calibration screen shows current and saved exposure, current and target steam, governor state, and the last calibration time.
+- `DELETE CALIBRATION DATA` removes only the selected steam reactor's saved profile and does not immediately move its rods.
+- `RECALIBRATE` clears the active profile, returns HELIOS to automatic control, inserts every rod, and learns again from zero exposure.
+- `SAVE CURRENT REACTOR SETUP` records the selected reactor's actual balanced rod layout and live steam target as its learned profile.
+- Closing the screen offers to disable Maintenance Mode when that screen enabled it. Power reactors report that calibration is not required and expose no calibration actions.
 - Every `setControlRodLevel` command is verified by reading that physical rod back.
 - An 85% hot-fluid buffer forces rod insertion to reduce backed-up production.
 - Zero active turbine demand gradually inserts all rods to 100%.
