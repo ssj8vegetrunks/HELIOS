@@ -1,7 +1,7 @@
 -- HELIOS single-file installer
 -- Milestone 8.5: coordinated reactor-first steam startup.
 
-local VERSION = "1.4.0-alpha.12"
+local VERSION = "1.4.0-alpha.13"
 local INSTALL_DIR = "/helios"
 local STAGE_DIR = "/.helios-install"
 
@@ -2672,6 +2672,7 @@ function governor.deleteCalibration(memory, control, name)
     memory.reactors = memory.reactors or {}
     local previous = memory.reactors[name] or {}
     previous.recalibrating = false
+    previous.calibrationPhase = nil
     previous.previousProfile = nil
     clearTransient(previous)
     memory.reactors[name] = previous
@@ -2688,6 +2689,7 @@ function governor.beginRecalibration(memory, control, name)
     control.reactorProfiles[name] = nil
     clearTransient(previous)
     previous.recalibrating = true
+    previous.calibrationPhase = "BASELINE"
     memory.reactors[name] = previous
     memory.profileDirty = true
     return true
@@ -2709,6 +2711,7 @@ function governor.saveCurrentCalibration(memory, control, reactor, context)
         target, context or {})
     local previous = memory.reactors[tostring(reactor.name)] or {}
     previous.recalibrating = false
+    previous.calibrationPhase = nil
     previous.previousProfile = nil
     clearTransient(previous)
     previous.observedRodExposure = exposure
@@ -3008,12 +3011,21 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
             local stableRequired = math.max(3,
                 math.floor(tonumber(control.reactorLearningSamples) or 8))
             local profile = (control.reactorProfiles or {})[name]
+            -- Calibration advances through a durable, forward-only phase. The
+            -- old recalibrating boolean could not distinguish a completed
+            -- baseline from one still being collected, so every positive test
+            -- exposure was mistaken for a reason to close the rods again.
+            if previous.calibrationPhase == "TESTING" and exposure > 0.005 then
+                previous.calibrationPhase = "ADJUSTING"
+            end
+            local calibrationPhase = previous.calibrationPhase
             local calibrationTemperature = tonumber(reactor.casingTemperature)
             local calibrationMaxTemperature = math.max(50,
                 tonumber(control.reactorCalibrationMaxTemperature) or 150)
             local baselineSteamLimit = deadband
             local needsFreshBaseline = exposure <= 0.005 and
-                (previous.recalibrating == true or type(profile) ~= "table")
+                (calibrationPhase == "BASELINE" or
+                    (calibrationPhase == nil and type(profile) ~= "table"))
             local _, responding = observeResponse(previous, reactor, control,
                 context, production)
             local stable = (previous.stableSamples or 0) >= stableRequired
@@ -3021,7 +3033,7 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
                 "Steam production matches trusted turbine demand"
             local balanced = layoutIsBalanced(reactor, exposure, rodCount)
 
-            if previous.recalibrating and exposure > 0.005 then
+            if calibrationPhase == "BASELINE" and exposure > 0.005 then
                 proposed = 0
                 state, action = "RECALIBRATING", "REDUCE EXPOSURE"
                 reason = "Insert every rod and establish a fresh zero-exposure baseline"
@@ -3071,10 +3083,18 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
             elseif needsFreshBaseline then
                 clearCooldown(previous)
                 addLearningPoint(previous, exposure, production)
+                previous.calibrationPhase = "TESTING"
                 proposed = math.min(maxStep, rodCount)
                 state, action = "RECALIBRATING", "INCREASE EXPOSURE"
                 reason = ("Zero-exposure baseline ready at %.0f mB/t; begin learning"):
                     format(production)
+            elseif calibrationPhase == "TESTING" and exposure <= 0.005 then
+                -- Keep proposing the first bounded test until the three-reading
+                -- actuator confirmation succeeds. Do not fall back into baseline.
+                proposed = math.min(maxStep, rodCount)
+                state, action = "RECALIBRATING", "INCREASE EXPOSURE"
+                reason = ("Baseline complete; testing %.2f rod-equivalents"):
+                    format(proposed)
             elseif not averageReady then
                 previous.stableSamples = 0
                 state = "AVERAGING"
@@ -3130,6 +3150,7 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
                     saveProfile(memory, control, name, exposure, production, target,
                         context)
                     previous.recalibrating = false
+                    previous.calibrationPhase = nil
                     previous.previousProfile = nil
                     state = "LEARNED"
                     reason = ("Holding %.2f exposed rod-equivalents for %.0f mB/t"):
@@ -3172,6 +3193,7 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
                 hotFluidPercent = hotFluid,
                 learnedProfile = profile,
                 recalibrating = previous.recalibrating == true,
+                calibrationPhase = previous.calibrationPhase,
                 coolingSince = previous.cooldownStartedAt,
                 coolingLastProgressAt = previous.cooldownLastProgressAt,
             }

@@ -309,6 +309,64 @@ do
     equal(plan.recommendedRodExposure, 0.25,
         "fresh calibration begins with one bounded step")
 
+    -- The completed baseline must survive the confirmation window and the rod
+    -- write. Alpha.12 returned to BASELINE as soon as it observed 0.25 eq.
+    for now = 20, 21 do
+        plan = governor.evaluate(memory, unit, control, { now = now }, 2000, 1)
+    end
+    equal(plan.calibrationPhase, "TESTING",
+        "completed baseline remains in the testing phase")
+    equal(plan.recommendedRodExposure, 0.25,
+        "first test exposure persists through actuator confirmation")
+    unit.governor = plan
+    local applied
+    governor.apply(memory, unit, control, { now = 30 }, {
+        setControlRodExposure = function(_, exposure)
+            applied = exposure
+            return true, exposure
+        end,
+    })
+    equal(applied, 0.25, "first recalibration test reaches the actuator")
+
+    local testing = reactor(1970, 0.25, {
+        casingTemperature = 90,
+        hotFluidPercent = 5,
+    })
+    plan = governor.evaluate(memory, testing, control, { now = 31 }, 2000, 1)
+    equal(plan.calibrationPhase, "ADJUSTING",
+        "positive exposure advances calibration beyond baseline")
+    assert(plan.recommendedRodExposure ~= 0,
+        "positive calibration test must never return to zero baseline")
+
+    plan = settle(memory, testing, 2000, 40,
+        control.reactorSteamAverageSamples + control.reactorLearningSamples + 2)
+    equal(plan.action, "INCREASE EXPOSURE",
+        "low first test advances toward the target")
+    equal(plan.recommendedRodExposure, 0.26,
+        "calibration advances from 0.25 to the measured 0.26 setting")
+    equal(plan.calibrationPhase, "ADJUSTING",
+        "adjustment remains forward of the completed baseline")
+
+    testing.governor = plan
+    governor.apply(memory, testing, control, { now = 60 }, {
+        setControlRodExposure = function(_, exposure)
+            applied = exposure
+            return true, exposure
+        end,
+    })
+    equal(applied, 0.26, "fine calibration adjustment reaches the actuator")
+    local learned = settle(memory, reactor(2050, 0.26, {
+        casingTemperature = 90,
+        hotFluidPercent = 40,
+    }), 2000, 70, control.reactorSteamAverageSamples +
+        control.reactorLearningSamples + 2)
+    equal(learned.state, "LEARNED",
+        "forward calibration finishes at the measured operating point")
+    equal(learned.calibrationPhase, nil,
+        "completed calibration clears its transient phase")
+    equal(control.reactorProfiles.reactor_0.exposure, 0.26,
+        "completed calibration saves the measured exposure")
+
     memory = governor.new()
     governor.beginRecalibration(memory, control, "reactor_0")
     local hot = settle(memory, reactor(1, 0, {

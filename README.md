@@ -1,4 +1,4 @@
-# HELIOS — v1.4.0 Alpha 12 Practical Reactor Baseline
+# HELIOS â v1.4.0 Alpha 13 Forward-Only Reactor Calibration
 
 Industrial power management for **CC:Tweaked** and **Extreme Reactors**.
 
@@ -57,6 +57,8 @@ The existing touch interface and network-ID protection remain online:
 - calibration begins once residual steam is negligible, the hot-fluid buffer is
   drained, and casing temperature is below 150 C; it does not wait for a massive
   casing to reach ambient temperature or become perfectly motionless;
+- recalibration records explicit baseline, testing, and adjusting phases so a
+  positive test exposure cannot restart the zero-exposure baseline loop;
 - formula-assisted learning estimates the needed exposure, then bounded feedback corrects it;
 - reactor commands wait for steam, buffer, and casing-temperature response before another change;
 - stable learned exposure is saved per reactor and every individual rod command is verified;

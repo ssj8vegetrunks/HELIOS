@@ -1,6 +1,6 @@
 # HELIOS Control Boundary
 
-## v1.4.0-alpha.12
+## v1.4.0-alpha.13
 
 The Power Control screen now runs a guarded automatic turbine governor.
 
@@ -64,6 +64,9 @@ cooled reactor:
 - The calibration screen shows current and saved exposure, current and target steam, governor state, and the last calibration time.
 - `DELETE CALIBRATION DATA` removes only the selected steam reactor's saved profile and does not immediately move its rods.
 - `RECALIBRATE` clears the active profile, returns HELIOS to automatic control, inserts every rod, and learns again from zero exposure.
+- Recalibration advances through a forward-only `BASELINE` -> `TESTING` ->
+  `ADJUSTING` sequence. Rod movement and fresh sample windows cannot send an
+  active calibration back to `BASELINE`; only a new `RECALIBRATE` command can.
 - `SAVE CURRENT REACTOR SETUP` records the selected reactor's actual balanced rod layout and live steam target as its learned profile.
 - Closing the screen offers to disable Maintenance Mode when that screen enabled it. Power reactors report that calibration is not required and expose no calibration actions.
 - Every `setControlRodLevel` command is verified by reading that physical rod back.
