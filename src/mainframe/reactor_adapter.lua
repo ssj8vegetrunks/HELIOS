@@ -171,6 +171,42 @@ function adapter.setAllControlRodLevels(reactor, requested)
     return true, average
 end
 
+function adapter.setActive(reactor, requested)
+    if type(reactor) ~= "table" or type(reactor.name) ~= "string" then
+        return false, nil, "Invalid reactor identity"
+    end
+    if not peripheral.isPresent(reactor.name) then
+        return false, nil, "Peripheral unavailable"
+    end
+
+    local methods = availableMethods(reactor.name)
+    if not methods.setActive then
+        return false, nil, "Verified reactor activation control is unavailable"
+    end
+    local readMethod
+    for _, candidate in ipairs({ "getActive", "isActive", "active" }) do
+        if methods[candidate] then readMethod = candidate break end
+    end
+    if not readMethod then
+        return false, nil, "Reactor active-state read-back is unavailable"
+    end
+
+    requested = requested == true
+    local ok, reason = pcall(peripheral.call, reactor.name, "setActive", requested)
+    if not ok then return false, nil, tostring(reason) end
+
+    local readOk, actual = pcall(peripheral.call, reactor.name, readMethod)
+    if not readOk or type(actual) ~= "boolean" then
+        return false, nil, "Reactor activation verification failed"
+    end
+    if actual ~= requested then
+        return false, actual, ("Requested reactor %s; reactor reports %s"):format(
+            requested and "active" or "inactive",
+            actual and "active" or "inactive")
+    end
+    return true, actual
+end
+
 local function exposureLevels(count, exposure)
     count = math.max(0, math.floor(tonumber(count) or 0))
     exposure = math.max(0, math.min(count, tonumber(exposure) or 0))

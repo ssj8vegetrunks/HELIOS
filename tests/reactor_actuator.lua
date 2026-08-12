@@ -1,12 +1,13 @@
 local calls = {}
 local levels = { [0] = 40, [1] = 40, [2] = 40 }
 local stuck = false
+local active = false
 
 peripheral = {
     isPresent = function(name) return name == "reactor_0" end,
     getMethods = function(name)
         if name ~= "reactor_0" then return {} end
-        return { "setControlRodLevel", "getControlRodLevel",
+        return { "setActive", "active", "setControlRodLevel", "getControlRodLevel",
             "getNumberOfControlRods" }
     end,
     call = function(name, method, first, second)
@@ -17,6 +18,8 @@ peripheral = {
             if not stuck or first ~= 1 then levels[first] = second end
             return
         end
+        if method == "setActive" then active = first return end
+        if method == "active" then return active end
         if method == "getControlRodLevel" then return levels[first] end
         if method == "getNumberOfControlRods" then return 3 end
         error("unexpected method")
@@ -26,13 +29,25 @@ peripheral = {
 local adapter = dofile("src/mainframe/reactor_adapter.lua")
 local reactor = { name = "reactor_0", controlRods = 3 }
 
+local activeOk, reportedActive, activeReason = adapter.setActive(reactor, true)
+assert(activeOk, tostring(activeReason))
+assert(reportedActive == true and active == true,
+    "reactor activation was not verified")
+
 local ok, applied, reason = adapter.setControlRodExposure(reactor, 1.35)
 assert(ok, tostring(reason))
 assert(math.abs(applied - 1.35) < 0.001, "exposure was not verified")
 assert(levels[0] == 55 and levels[1] == 55 and levels[2] == 55,
     "rod-equivalent exposure should be spread evenly")
-assert(calls[4].method == "setControlRodLevel" and calls[4].first == 0,
-    "safer insertions should be issued before withdrawals")
+local sawFirstRodWrite = false
+for _, call in ipairs(calls) do
+    if call.method == "setControlRodLevel" then
+        assert(call.first == 0, "safer insertions should be issued before withdrawals")
+        sawFirstRodWrite = true
+        break
+    end
+end
+assert(sawFirstRodWrite, "control-rod write was not issued")
 
 ok, applied, reason = adapter.setControlRodExposure(reactor, 99)
 assert(ok, tostring(reason))

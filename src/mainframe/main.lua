@@ -230,37 +230,45 @@ function mainframe.run(config)
         reactors = reactorAdapter.readAll(devices)
         turbines = turbineAdapter.readAll(devices)
         storages = storageAdapter.readAll(devices, config.power)
-        turbineGovernor.evaluateAll(governorMemory, turbines, config.control, {
-            maintenance = maintenance,
-            mainframeId = os.getComputerID(),
-            idConflicts = idConflicts,
-            now = os.epoch("utc") / 1000,
-        })
-        if turbineGovernor.consumeProfileChanges(governorMemory) then
-            configStore.save(config)
-        end
-        turbineGovernor.applyAll(governorMemory, turbines, config.control, {
-            maintenance = maintenance,
-            now = os.epoch("utc") / 1000,
-        }, {
-            setFlowLimit = turbineAdapter.setFlowLimit,
-            setInductor = turbineAdapter.setInductor,
-        })
-        reactorGovernor.evaluateAll(reactorGovernorMemory, reactors, turbines,
-            config.control, {
+        local now = os.epoch("utc") / 1000
+        local _, steamDemand = reactorGovernor.evaluateAll(reactorGovernorMemory,
+            reactors, turbines, config.control, {
                 maintenance = maintenance,
                 mainframeId = os.getComputerID(),
                 idConflicts = idConflicts,
-                now = os.epoch("utc") / 1000,
+                now = now,
             })
         if reactorGovernor.consumeProfileChanges(reactorGovernorMemory) then
             configStore.save(config)
         end
         reactorGovernor.applyAll(reactorGovernorMemory, reactors, config.control, {
             maintenance = maintenance,
-            now = os.epoch("utc") / 1000,
+            now = now,
         }, {
+            setActive = reactorAdapter.setActive,
             setControlRodExposure = reactorAdapter.setControlRodExposure,
+        })
+
+        local steamSource = reactorGovernor.steamSourceStatus(reactors,
+            steamDemand, config.control)
+        turbineGovernor.evaluateAll(governorMemory, turbines, config.control, {
+            maintenance = maintenance,
+            mainframeId = os.getComputerID(),
+            idConflicts = idConflicts,
+            now = now,
+            steamSourceManaged = steamSource.managed,
+            steamSourceReady = steamSource.ready,
+            steamSourceReason = steamSource.reason,
+        })
+        if turbineGovernor.consumeProfileChanges(governorMemory) then
+            configStore.save(config)
+        end
+        turbineGovernor.applyAll(governorMemory, turbines, config.control, {
+                maintenance = maintenance,
+                now = now,
+        }, {
+            setFlowLimit = turbineAdapter.setFlowLimit,
+            setInductor = turbineAdapter.setInductor,
         })
         updateAlarm()
         local conflictsChanged = refreshIdConflicts()
@@ -399,6 +407,9 @@ function mainframe.run(config)
             if plan.actuatorState == "FAULT" or plan.state == "CALIBRATION FAILED" then
                 return "CONTROL FAULT / ATTENTION REQUIRED", colors.red
             end
+            if plan.state == "WAITING FOR STEAM SOURCE" then
+                return "AUTOMATIC / PREPARING STEAM", colors.orange
+            end
             if tostring(plan.state or ""):find("CALIBRATION", 1, true) then
                 return "AUTOMATIC / CALIBRATING TURBINES", colors.orange
             end
@@ -407,6 +418,10 @@ function mainframe.run(config)
             local plan = reactor.governor or {}
             if plan.actuatorState == "FAULT" then
                 return "CONTROL FAULT / ATTENTION REQUIRED", colors.red
+            elseif plan.state == "STARTING" or plan.state == "BASELINING" or
+                   plan.state == "AVERAGING" or plan.state == "RESPONDING" or
+                   plan.state == "STEAM LOW" or plan.state == "STEAM HIGH" then
+                return "AUTOMATIC / PREPARING STEAM", colors.orange
             elseif plan.state == "COOLING" then
                 return "AUTOMATIC / REACTOR COOLING", colors.orange
             elseif plan.state == "STEAM DEFICIT" or plan.state == "STEAM SURPLUS" then
@@ -923,6 +938,21 @@ function mainframe.run(config)
             return ("%.1f%s"):format(value, suffix or "")
         end
 
+        local function formatRodLayout(reactor, exposure)
+            local minimum = tonumber(reactor.controlRodMinimum)
+            local maximum = tonumber(reactor.controlRodMaximum)
+            local range
+            if minimum == nil or maximum == nil then
+                range = "N/A"
+            elseif math.abs(maximum - minimum) < 0.05 then
+                range = ("%.0f%%"):format(minimum)
+            else
+                range = ("%.0f-%.0f%%"):format(minimum, maximum)
+            end
+            return ("%s / %s eq"):format(range,
+                exposure ~= nil and ("%.2f"):format(exposure) or "N/A")
+        end
+
         local function draw()
             ui.header("REACTORS", "Live telemetry and steam governor")
             if #reactors == 0 then
@@ -956,9 +986,8 @@ function mainframe.run(config)
                     ui.status("Coolant / hot", ("%s / %s"):format(
                         formatValue(reactor.coolantPercent, "%"),
                         formatValue(reactor.hotFluidPercent, "%")))
-                    ui.status("Rods avg / exposed", ("%s / %s eq"):format(
-                        formatValue(reactor.controlRodLevel, "%"),
-                        formatValue(plan.currentRodExposure, "")))
+                    ui.status("Rods range / exposed",
+                        formatRodLayout(reactor, plan.currentRodExposure))
                     ui.status("Governor", (plan.state or "WAITING") .. " / " ..
                         (plan.actuatorState or "WAITING"),
                         (plan.trusted == false or plan.actuatorState == "FAULT") and

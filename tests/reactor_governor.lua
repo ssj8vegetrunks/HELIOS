@@ -92,6 +92,48 @@ do
 end
 
 do
+    local uncalibrated = turbine(500, { flowRateLimit = 2000 })
+    local demand = governor.steamDemand({ uncalibrated }, control)
+    equal(demand, 2000, "uncalibrated turbine requests its hard intake limit")
+end
+
+do
+    local memory = governor.new()
+    local power = reactor(0, 0, { mode = "power", steamProduction = nil })
+    local plan = governor.evaluate(memory, power, control, {}, 2000, 1)
+    equal(plan.state, "MONITOR ONLY", "power reactor steam exclusion")
+    equal(plan.managed, false, "power reactor management flag")
+
+    local offline = reactor(0, 0, { active = false })
+    plan = governor.evaluate(memory, offline, control, {}, 2000, 1)
+    equal(plan.state, "STARTING", "offline steam reactor startup")
+    equal(plan.recommendedActive, true, "steam reactor activation request")
+    offline.governor = plan
+    local calls = 0
+    governor.apply(memory, offline, control, { now = 10 }, {
+        setActive = function(_, active)
+            calls = calls + 1
+            return true, active
+        end,
+    })
+    equal(calls, 1, "verified steam reactor startup write")
+    equal(plan.actuatorState, "APPLIED", "steam reactor startup state")
+end
+
+do
+    local power = reactor(0, 0, { name = "power_0", mode = "power" })
+    local steam = reactor(2050, 0.26, { name = "steam_0" })
+    steam.governor = {
+        trusted = true,
+        averageSteamProduction = 2050,
+        averageSteamSamples = control.reactorSteamAverageSamples,
+    }
+    local source = governor.steamSourceStatus({ power, steam }, 2000, control)
+    equal(source.managed, true, "steam source detected beside power reactor")
+    equal(source.ready, true, "power reactor does not block ready steam source")
+end
+
+do
     local memory = governor.new()
     local low = settle(memory, reactor(1200, 1), 2000)
     equal(low.action, "INCREASE EXPOSURE", "low steam direction")

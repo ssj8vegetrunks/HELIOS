@@ -1,9 +1,9 @@
-# HELIOS — v1.4.0 Alpha 9 Balanced Reactor Governor
+# HELIOS — v1.4.0 Alpha 10 Coordinated Steam Startup
 
 Industrial power management for **CC:Tweaked** and **Extreme Reactors**.
 
 This milestone adds guarded reactor steam regulation to the automatic turbine
-governor. HELIOS now matches one active steam reactor to the trusted intake
+governor. HELIOS now matches one steam reactor to the trusted intake
 requested by its active turbines, reducing fuel waste without starving them.
 The existing touch interface and network-ID protection remain online:
 
@@ -44,7 +44,12 @@ The existing touch interface and network-ID protection remain online:
 - confirmed turbine overspeed becomes a system-wide critical alarm;
 - rejected or unverifiable actuator commands become system-wide control-fault warnings;
 - the dashboard reports live automatic, calibration, maintenance, and fault state instead of the obsolete observe-only banner;
-- one active steam reactor follows the summed configured intake of all active turbines;
+- one steam reactor follows the summed configured intake of all active turbines;
+- managed turbine calibration waits for its steam reactor to start and supply
+  the full intake instead of failing while reactor output is still rising;
+- an offline steam reactor is started through verified activation control when
+  active turbine demand exists;
+- power-mode reactors remain telemetry-only and never enter steam alarms or control;
 - reactor exposure is spread as evenly as possible across every fuel column;
 - one-percent insertion differences provide 0.01 rod-equivalent fine control;
 - steam control uses a rolling average and a 2.5% reserve above turbine demand;
@@ -169,7 +174,7 @@ threshold is 20% and the critical threshold is 5%. Clicking
 `[ SILENCE ALARM ]` silences only the current condition. A different or more
 severe alarm can still sound, and silence resets after the condition clears.
 
-For one active steam reactor, HELIOS totals the configured intake requested by
+For one steam reactor, HELIOS totals the configured intake requested by
 all active turbines and regulates exposed rod-equivalents until reactor steam
 production matches that demand plus a small reserve. Total exposure is spread
 across every fuel column as evenly as integer insertion levels allow. For
@@ -178,6 +183,12 @@ example, 0.26 equivalent on 25 rods becomes one rod at 98% insertion and 24 at
 stable measurements feed the proportional/interpolated learner. Live feedback
 still corrects for temperature, fuel, moderator layout, and other nonlinear
 effects. Each individual rod write is read back and verified.
+
+For an uncalibrated turbine, the reactor target is based on the turbine's hard
+intake limit. HELIOS starts an offline steam reactor, averages its output, and
+holds the turbine in `WAITING FOR STEAM SOURCE` until supply is ready. Only then
+does the turbine begin its own 900/1800-RPM calibration. A power-mode reactor is
+never considered a steam source.
 
 The reactor governor holds during maintenance, ID conflict, missing or
 untrusted turbine telemetry, unsupported rod control, or when more than one
@@ -287,8 +298,9 @@ Missing or untrusted telemetry always produces HOLD.
 
 `AUTOMATIC` remains selected and tuning controls remain locked. HELIOS may
 change a turbine's configured flow limit and inductor state, plus the individual
-control-rod insertion of one active steam reactor. It still cannot toggle a
-reactor, start or stop a turbine, change venting, eject fuel, or eject waste.
+control-rod insertion and active state of one steam reactor. It still cannot
+control a power-mode reactor, start or stop a turbine, change venting, eject
+fuel, or eject waste.
 
 See [`docs/CONTROL.md`](docs/CONTROL.md) for the concise control boundary and
 planned governor order.
@@ -305,6 +317,6 @@ trusting directed telemetry.
 ## Scope boundary
 
 Remote terminals remain read-only. The mainframe may control only turbine flow
-limits, turbine inductors, and verified individual rods on one active steam
-reactor. Multi-reactor routing, storage coordination, graphs, and additional
-specialized storage adapters come later.
+limits, turbine inductors, and the verified active state and individual rods of
+one steam reactor. Multi-reactor routing, storage coordination, graphs, and
+additional specialized storage adapters come later.

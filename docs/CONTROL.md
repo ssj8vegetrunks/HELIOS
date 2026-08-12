@@ -1,6 +1,6 @@
 # HELIOS Control Boundary
 
-## v1.4.0-alpha.9
+## v1.4.0-alpha.10
 
 The Power Control screen now runs a guarded automatic turbine governor.
 
@@ -14,7 +14,11 @@ The Power Control screen now runs a guarded automatic turbine governor.
 - Each turbine learns and persists its own 900- or 1800-RPM operating band.
 - Normal direction changes require two matching samples.
 - Flow-limit changes are capped at 100 mB/t every two seconds.
-- Calibration first verifies full steam with the inductor engaged.
+- When a managed steam reactor is present, turbine calibration waits in
+  `WAITING FOR STEAM SOURCE` until that reactor is online and its rolling
+  output can sustain the turbine's full intake.
+- Waiting for the reactor never consumes turbine calibration-failure samples.
+- Calibration then verifies full steam with the inductor engaged.
 - It spools unloaded to 900 RPM and tests that band under full load first.
 - A confirmed climb past 1000 RPM releases the load once more and proceeds to
   the 1800-RPM test.
@@ -33,10 +37,16 @@ The Power Control screen now runs a guarded automatic turbine governor.
 - Mainframe monitors may navigate the interface by touch.
 - Remote terminals remain read-only.
 
-The mainframe also runs a guarded steam-demand governor for one active,
-actively cooled reactor:
+The mainframe also runs a guarded steam-demand governor for one actively
+cooled reactor:
 
 - Trusted demand is the sum of configured intake limits for all active turbines.
+- An uncalibrated turbine requests its hard intake limit so the reactor is
+  prepared before turbine calibration begins.
+- Trusted turbine demand starts an offline steam reactor through verified
+  `setActive(true)` control and read-back.
+- Power-mode reactors are telemetry-only and are excluded from every steam
+  demand, readiness, and capacity decision.
 - HELIOS spreads each rod-equivalent setting across all fuel columns as evenly as possible.
 - A 25-rod setting of 0.26 equivalent becomes one rod at 98% insertion and 24 at 99%.
 - A new or unbalanced bank first moves to zero exposure and cools before learning begins.
@@ -48,8 +58,8 @@ actively cooled reactor:
 - Every `setControlRodLevel` command is verified by reading that physical rod back.
 - An 85% hot-fluid buffer forces rod insertion to reduce backed-up production.
 - Zero active turbine demand gradually inserts all rods to 100%.
-- Missing or untrusted turbine demand, maintenance, ID conflict, unsupported telemetry, and inactive reactors hold.
-- More than one active steam reactor holds until explicit reactor-to-turbine routing is implemented.
+- Missing or untrusted turbine demand, maintenance, ID conflict, and unsupported telemetry hold.
+- More than one steam reactor holds until explicit reactor-to-turbine routing is implemented.
 - Reactor actuator rejection or read-back mismatch raises a global control fault.
 - A reactor that cannot meet demand at 0% insertion, or cannot reduce output at 100%, raises a global steam-capacity warning.
 
@@ -80,7 +90,7 @@ interface until user tuning controls and their validation limits are implemented
 
 ## Next implementation order
 
-1. Validate rod-equivalent learning and fuel use on the live plant
+1. Validate coordinated reactor-first startup on the live plant
 2. Explicit reactor-to-turbine routing for multiple steam loops
 3. Storage-based plant demand coordinator
 4. Action history and user-defined tuning controls

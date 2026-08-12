@@ -209,12 +209,7 @@ function governor.evaluate(memory, turbine, control, context)
             beginPhase("TEST_HIGH")
         end
 
-        if previous.phase == "FAILED" then
-            state = "CALIBRATION FAILED"
-            action = turbine.inductorEngaged and "HOLD" or "ENGAGE INDUCTOR"
-            reason = previous.calibrationError or "Calibration conditions were invalid"
-            recommendedInductor = true
-        elseif rpm >= overspeedRpm then
+        if rpm >= overspeedRpm then
             recommendedInductor = true
             if overspeedCount >= overspeedSamples then
                 state, action = "OVERSPEED", "CUT FLOW"
@@ -225,6 +220,31 @@ function governor.evaluate(memory, turbine, control, context)
                 action = turbine.inductorEngaged and "HOLD" or "ENGAGE INDUCTOR"
                 reason = ("Overspeed sample %d/%d"):format(overspeedCount, overspeedSamples)
             end
+        elseif not profile and context.steamSourceManaged == true and
+               context.steamSourceReady ~= true then
+            previous.phase = "PREFLIGHT"
+            previous.calibrationError = nil
+            previous.fullSteamCount = 0
+            previous.lowSteamCount = 0
+            previous.settleCount = 0
+            previous.settleSum = 0
+            state = "WAITING FOR STEAM SOURCE"
+            recommendedInductor = true
+            recommendedFlow = flowMaximum
+            if turbine.inductorEngaged == false then
+                action = "ENGAGE INDUCTOR"
+            elseif currentFlow < flowMaximum then
+                action = "MAXIMIZE FLOW"
+            else
+                action = "WAIT FOR STEAM SOURCE"
+            end
+            reason = tostring(context.steamSourceReason or
+                "Preparing managed steam supply before turbine calibration")
+        elseif previous.phase == "FAILED" then
+            state = "CALIBRATION FAILED"
+            action = turbine.inductorEngaged and "HOLD" or "ENGAGE INDUCTOR"
+            reason = previous.calibrationError or "Calibration conditions were invalid"
+            recommendedInductor = true
         elseif not profile and previous.phase == "PREFLIGHT" then
             local actualFlow = tonumber(turbine.flowRate)
             local fullSteam = actualFlow ~= nil and flowMaximum > 0 and
@@ -550,6 +570,7 @@ function governor.evaluate(memory, turbine, control, context)
             calibrationSettleSamples = settleSamples,
         }
         if action ~= "HOLD" and action ~= "WAIT FOR SPEED" and
+           action ~= "WAIT FOR STEAM SOURCE" and
            action ~= "WAIT TO SETTLE" and action ~= "MEASURE SETTLE" then
             previous.actionSamples = previous.action == action and
                 ((previous.actionSamples or 0) + 1) or 1

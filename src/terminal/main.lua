@@ -137,6 +137,21 @@ function terminal.run(config)
         return ("%.1f%s"):format(value, suffix or "")
     end
 
+    local function formatRodLayout(reactor, exposure)
+        local minimum = tonumber(reactor.controlRodMinimum)
+        local maximum = tonumber(reactor.controlRodMaximum)
+        local range
+        if minimum == nil or maximum == nil then
+            range = "N/A"
+        elseif math.abs(maximum - minimum) < 0.05 then
+            range = ("%.0f%%"):format(minimum)
+        else
+            range = ("%.0f-%.0f%%"):format(minimum, maximum)
+        end
+        return ("%s / %s eq"):format(range,
+            exposure ~= nil and ("%.2f"):format(exposure) or "N/A")
+    end
+
     local function renderReactors(state)
         renderList("REACTORS", state.reactors, state, function(item)
             ui.status("Mode", string.upper(item.mode or "unknown"))
@@ -157,9 +172,8 @@ function terminal.run(config)
                 ui.status("Coolant / hot", ("%s / %s"):format(
                     formatValue(item.coolantPercent, "%"),
                     formatValue(item.hotFluidPercent, "%")))
-                ui.status("Rods avg / exposed", ("%s / %s eq"):format(
-                    formatValue(item.controlRodLevel, "%"),
-                    formatValue(plan.currentRodExposure, "")))
+                ui.status("Rods range / exposed",
+                    formatRodLayout(item, plan.currentRodExposure))
                 ui.status("Governor", (plan.state or "WAITING") .. " / " ..
                     (plan.actuatorState or "WAITING"),
                     (plan.trusted == false or plan.actuatorState == "FAULT") and

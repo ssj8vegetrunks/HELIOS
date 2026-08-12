@@ -83,10 +83,11 @@ function governor.consumeProfileChanges(memory)
     return dirty
 end
 
-function governor.steamDemand(turbines)
+function governor.steamDemand(turbines, control)
     if #(turbines or {}) == 0 then
         return nil, 0, "No turbine telemetry is available"
     end
+    control = control or {}
     local total, active = 0, 0
     for _, turbine in ipairs(turbines or {}) do
         if turbine.active == true then
@@ -96,7 +97,9 @@ function governor.steamDemand(turbines)
             if turbine.governor and turbine.governor.trusted == false then
                 return nil, active, "Active turbine telemetry is untrusted"
             end
-            local requested = tonumber(turbine.flowRateMax)
+            local profile = (control.turbineProfiles or {})[tostring(turbine.name)]
+            local requested = profile and tonumber(profile.flowLimit) or
+                tonumber(turbine.flowRateLimit) or tonumber(turbine.flowRateMax)
             if requested == nil then
                 return nil, active, "Active turbine intake setting is unavailable"
             end
@@ -104,6 +107,63 @@ function governor.steamDemand(turbines)
         end
     end
     return total, active
+end
+
+function governor.steamSourceStatus(reactors, demand, control)
+    local sources = {}
+    for _, reactor in ipairs(reactors or {}) do
+        if reactor.mode == "steam" and not reactor.error then
+            sources[#sources + 1] = reactor
+        end
+    end
+    if #sources == 0 then
+        return { managed = false, ready = true, state = "UNMANAGED" }
+    elseif #sources > 1 then
+        return {
+            managed = true,
+            ready = false,
+            state = "ROUTING REQUIRED",
+            reason = "Multiple steam reactors require routing assignments",
+        }
+    end
+
+    local reactor = sources[1]
+    local plan = reactor.governor or {}
+    local required = math.max(0, tonumber(demand) or 0)
+    local production = tonumber(plan.averageSteamProduction)
+    local samples = tonumber(plan.averageSteamSamples) or 0
+    local wantedSamples = math.max(3,
+        math.floor(tonumber((control or {}).reactorSteamAverageSamples) or 10))
+    local ratio = clamp(tonumber((control or {}).calibrationSteamRatio) or 0.98,
+        0.1, 1)
+    local ready = required <= 0 or (
+        reactor.active == true and plan.trusted ~= false and
+        production ~= nil and samples >= wantedSamples and
+        production >= required * ratio)
+    local reason
+    if reactor.active ~= true then
+        reason = "Starting steam reactor"
+    elseif plan.trusted == false then
+        reason = tostring(plan.reason or "Steam reactor telemetry is untrusted")
+    elseif samples < wantedSamples then
+        reason = ("Averaging reactor steam %d/%d"):format(samples, wantedSamples)
+    elseif production == nil then
+        reason = "Waiting for reactor steam telemetry"
+    elseif not ready then
+        reason = ("Reactor supplying %.0f of %.0f mB/t"):format(production, required)
+    else
+        reason = ("Reactor supplying %.0f mB/t for %.0f mB/t demand"):format(
+            production, required)
+    end
+    return {
+        managed = true,
+        ready = ready,
+        state = ready and "READY" or "PREPARING",
+        reason = reason,
+        reactor = reactor.name,
+        demand = required,
+        production = production,
+    }
 end
 
 local function clearCooldown(previous)
@@ -244,15 +304,42 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
         result = hold("ID CONFLICT", "Mainframe identity is not unique", false)
     elseif reactor.error then
         result = hold("NO TRUSTED DATA", tostring(reactor.error), false)
-    elseif reactor.active ~= true then
-        result = hold("INACTIVE", "Reactor is not active", false)
+    elseif reactor.mode == "power" then
+        result = hold("MONITOR ONLY", "Power reactor is excluded from steam control")
+        result.managed = false
+        result.actuatorState = "MONITOR"
     elseif reactor.mode ~= "steam" then
-        result = hold("NOT STEAM MODE", "Only actively cooled reactors are managed", false)
-    elseif tonumber(reactor.steamProduction) == nil then
-        result = hold("NO STEAM DATA", "Steam-production telemetry is unavailable", false)
+        result = hold("UNKNOWN MODE", "Reactor cooling mode is unavailable", false)
     elseif tonumber(targetSteam) == nil then
         result = hold("NO TRUSTED DEMAND", tostring(context.demandError or
             "Turbine steam demand is unavailable"), false)
+    elseif reactor.active == false then
+        local requested = math.max(0, tonumber(targetSteam) or 0)
+        local reserve = math.max(0, math.min(0.25,
+            tonumber(control.reactorSteamReserveMargin) or 0.025))
+        if requested > 0 then
+            result = {
+                mode = "automatic",
+                state = "STARTING",
+                action = "START REACTOR",
+                reason = "Turbine demand requires the steam reactor online",
+                trusted = true,
+                managed = true,
+                currentActive = false,
+                recommendedActive = true,
+                activeChange = true,
+                requestedSteam = requested,
+                targetSteam = requested * (1 + reserve),
+                activeTurbines = activeTurbines or 0,
+            }
+        else
+            result = hold("OFFLINE", "No turbine demand requires this reactor")
+            result.managed = true
+        end
+    elseif reactor.active ~= true then
+        result = hold("NO STATE DATA", "Reactor active-state telemetry is unavailable", false)
+    elseif tonumber(reactor.steamProduction) == nil then
+        result = hold("NO STEAM DATA", "Steam-production telemetry is unavailable", false)
     else
         local exposure, rodCount = rodExposure(reactor)
         if exposure == nil then
@@ -377,6 +464,7 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
                 action = action,
                 reason = reason,
                 trusted = true,
+                managed = true,
                 activeTurbines = activeTurbines or 0,
                 requestedSteam = requestedSteam,
                 targetSteam = target,
@@ -407,16 +495,16 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
 end
 
 function governor.evaluateAll(memory, reactors, turbines, control, context)
-    local demand, activeTurbines, demandError = governor.steamDemand(turbines)
-    local activeReactors = 0
+    local demand, activeTurbines, demandError = governor.steamDemand(turbines, control)
+    local steamReactors = 0
     for _, reactor in ipairs(reactors or {}) do
-        if reactor.active == true and reactor.mode == "steam" and not reactor.error then
-            activeReactors = activeReactors + 1
+        if reactor.mode == "steam" and not reactor.error then
+            steamReactors = steamReactors + 1
         end
     end
-    if activeReactors > 1 then
+    if steamReactors > 1 then
         demand = nil
-        demandError = "Multiple active steam reactors require routing assignments"
+        demandError = "Multiple steam reactors require routing assignments"
     end
     local present = {}
     for _, reactor in ipairs(reactors or {}) do
@@ -430,7 +518,7 @@ function governor.evaluateAll(memory, reactors, turbines, control, context)
     for name in pairs(memory.reactors or {}) do
         if not present[name] then memory.reactors[name] = nil end
     end
-    return reactors
+    return reactors, demand, activeTurbines, demandError
 end
 
 function governor.apply(memory, reactor, control, context, writers)
@@ -447,6 +535,8 @@ function governor.apply(memory, reactor, control, context, writers)
         tonumber(plan.recommendedRodExposure)
     local needsWrite = current ~= nil and proposed ~= nil and
         math.abs(current - proposed) >= 0.005
+    local needsActive = type(plan.recommendedActive) == "boolean" and
+        plan.recommendedActive ~= reactor.active
 
     if control.actuatorsEnabled ~= true then
         plan.actuatorState = "DISABLED"
@@ -454,36 +544,57 @@ function governor.apply(memory, reactor, control, context, writers)
     elseif context.maintenance then
         plan.actuatorState = "PAUSED"
         previous.actionSamples, previous.action = 0, nil
+    elseif plan.managed == false then
+        plan.actuatorState = "MONITOR"
     elseif plan.trusted == false then
         plan.actuatorState = "UNTRUSTED"
         previous.actionSamples, previous.action = 0, nil
-    elseif not needsWrite then
+    elseif not needsWrite and not needsActive then
         plan.actuatorState = "HOLD"
-    elseif (tonumber(plan.actionSamples) or 0) < samples then
+    elseif not needsActive and (tonumber(plan.actionSamples) or 0) < samples then
         plan.actuatorState = "VERIFYING"
     elseif type(writers) ~= "table" or
-           type(writers.setControlRodExposure) ~= "function" then
+           (needsActive and type(writers.setActive) ~= "function") or
+           (needsWrite and type(writers.setControlRodExposure) ~= "function") then
         plan.actuatorState = "FAULT"
-        plan.actuatorError = "Required individual control-rod adapter is unavailable"
+        plan.actuatorError = needsActive and
+            "Required reactor activation adapter is unavailable" or
+            "Required individual control-rod adapter is unavailable"
     elseif previous.lastAttemptAt and now - previous.lastAttemptAt < interval then
         plan.actuatorState = previous.lastError and "FAULT" or "WAITING"
         plan.actuatorError = previous.lastError
         plan.nextAdjustmentIn = interval - (now - previous.lastAttemptAt)
     else
         previous.lastAttemptAt = now
-        local ok, applied, reason = writers.setControlRodExposure(reactor, proposed)
+        local ok, applied, reason
+        if needsActive then
+            ok, applied, reason = writers.setActive(reactor, plan.recommendedActive)
+        else
+            ok, applied, reason = writers.setControlRodExposure(reactor, proposed)
+        end
         if ok then
             previous.lastAppliedAt = now
-            previous.lastAppliedRodExposure = tonumber(applied) or proposed
+            if needsActive then
+                previous.lastAppliedActive = applied == true
+                plan.appliedActive = previous.lastAppliedActive
+            else
+                previous.lastAppliedRodExposure = tonumber(applied) or proposed
+                plan.appliedRodExposure = previous.lastAppliedRodExposure
+            end
             previous.lastError = nil
             previous.stableSamples = 0
             previous.productionSamples = {}
             previous.observation = nil
-            plan.appliedRodExposure = previous.lastAppliedRodExposure
             plan.actuatorState = "APPLIED"
         else
-            previous.lastError = tostring(reason or "Reactor rejected the rod command")
-            plan.reportedRodExposure = tonumber(applied)
+            previous.lastError = tostring(reason or (needsActive and
+                "Reactor rejected the activation command" or
+                "Reactor rejected the rod command"))
+            if needsActive then
+                plan.reportedActive = type(applied) == "boolean" and applied or nil
+            else
+                plan.reportedRodExposure = tonumber(applied)
+            end
             plan.actuatorError = previous.lastError
             plan.actuatorState = "FAULT"
         end
@@ -491,6 +602,7 @@ function governor.apply(memory, reactor, control, context, writers)
 
     plan.lastAppliedAt = previous.lastAppliedAt
     plan.lastAppliedRodExposure = previous.lastAppliedRodExposure
+    plan.lastAppliedActive = previous.lastAppliedActive
     memory.reactors[name] = previous
     return plan
 end

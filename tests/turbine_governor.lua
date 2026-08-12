@@ -58,6 +58,36 @@ local function setProfile(name, target, learned, flow)
     }
 end
 
+do
+    local memory = governor.new()
+    local unit = turbine("coordinated", 0, 2000, {
+        flowRate = 1773,
+        inductorEngaged = true,
+    })
+    local plan
+    for now = 1, 20 do
+        plan = governor.evaluate(memory, unit, control, {
+            now = now,
+            steamSourceManaged = true,
+            steamSourceReady = false,
+            steamSourceReason = "Reactor supplying 1773 of 2000 mB/t",
+        })
+    end
+    equal(plan.state, "WAITING FOR STEAM SOURCE",
+        "managed steam shortage pauses calibration")
+    assert(plan.state ~= "CALIBRATION FAILED",
+        "reactor preparation must not consume turbine failure samples")
+
+    unit.flowRate = 2000
+    plan = governor.evaluate(memory, unit, control, {
+        now = 21,
+        steamSourceManaged = true,
+        steamSourceReady = true,
+    })
+    equal(plan.state, "CALIBRATION PREFLIGHT",
+        "ready steam source releases turbine preflight")
+end
+
 local function preflight(memory, name, startAt)
     local plan
     startAt = startAt or 1
