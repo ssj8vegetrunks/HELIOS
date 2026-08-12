@@ -32,16 +32,23 @@ end
 
 local function rodLevels(name, methods, count)
     local levels
-    if methods.getControlRodsLevels then
-        local ok, values = pcall(peripheral.call, name, "getControlRodsLevels")
-        if ok and type(values) == "table" then levels = values end
-    end
-    if not levels and methods.getControlRodLevel and count and count > 0 then
+    if methods.getControlRodLevel and count and count > 0 then
         levels = {}
         for index = 0, count - 1 do
             local ok, value = pcall(peripheral.call, name, "getControlRodLevel", index)
             if not ok or tonumber(value) == nil then return nil end
             levels[index] = tonumber(value)
+        end
+    end
+    if not levels and methods.getControlRodsLevels then
+        local ok, values = pcall(peripheral.call, name, "getControlRodsLevels")
+        if ok and type(values) == "table" then
+            levels = {}
+            local zeroBased = values[0] ~= nil
+            for index = 0, (count or #values) - 1 do
+                levels[index] = tonumber(values[zeroBased and index or (index + 1)])
+                if levels[index] == nil then return nil end
+            end
         end
     end
     return levels
@@ -93,6 +100,10 @@ function adapter.read(device)
     reactor.controlRodLevels = rodLevels(name, availableMethods, reactor.controlRods)
     reactor.controlRodLevel, reactor.controlRodMinimum, reactor.controlRodMaximum =
         rodSummary(reactor.controlRodLevels)
+    if reactor.controlRodLevel and reactor.controlRods then
+        reactor.controlRodExposure = reactor.controlRods *
+            (100 - reactor.controlRodLevel) / 100
+    end
 
     reactor.fuelPercent = percent(reactor.fuel, reactor.fuelMax)
     reactor.energyPercent = percent(reactor.energy, reactor.energyMax)
@@ -160,6 +171,84 @@ function adapter.setAllControlRodLevels(reactor, requested)
     return true, average
 end
 
+local function exposureLevels(count, exposure)
+    count = math.max(0, math.floor(tonumber(count) or 0))
+    exposure = math.max(0, math.min(count, tonumber(exposure) or 0))
+    local full = math.floor(exposure)
+    local fraction = exposure - full
+    local levels = {}
+    for index = 0, count - 1 do
+        if index < full then
+            levels[index] = 0
+        elseif index == full and fraction > 0.0001 then
+            levels[index] = math.max(0, math.min(100,
+                math.floor(100 - fraction * 100 + 0.5)))
+        else
+            levels[index] = 100
+        end
+    end
+    return levels
+end
+
+local function exposureFromLevels(levels, count)
+    local exposure = 0
+    for index = 0, count - 1 do
+        local level = tonumber(levels and levels[index])
+        if level == nil then return nil end
+        exposure = exposure + (100 - math.max(0, math.min(100, level))) / 100
+    end
+    return exposure
+end
+
+function adapter.setControlRodExposure(reactor, requestedExposure)
+    if type(reactor) ~= "table" or type(reactor.name) ~= "string" then
+        return false, nil, "Invalid reactor identity"
+    end
+    if not peripheral.isPresent(reactor.name) then
+        return false, nil, "Peripheral unavailable"
+    end
+
+    local methods = availableMethods(reactor.name)
+    if not methods.setControlRodLevel or not methods.getControlRodLevel then
+        return false, nil, "Verified individual control-rod control is unavailable"
+    end
+    local count = math.floor(tonumber(reactor.controlRods) or 0)
+    if count < 1 then return false, nil, "Control-rod count is unavailable" end
+
+    local current = rodLevels(reactor.name, methods, count)
+    if not current then return false, nil, "Control-rod read failed" end
+    local wanted = exposureLevels(count, requestedExposure)
+
+    -- Insert rods first, then withdraw rods. A partial failure therefore reduces
+    -- reactor output instead of briefly exposing more fuel than requested.
+    for pass = 1, 2 do
+        for index = 0, count - 1 do
+            local before, after = tonumber(current[index]), wanted[index]
+            local safer = pass == 1 and after > before
+            local stronger = pass == 2 and after < before
+            if safer or stronger then
+                local ok, reason = pcall(peripheral.call, reactor.name,
+                    "setControlRodLevel", index, after)
+                if not ok then
+                    return false, exposureFromLevels(current, count), tostring(reason)
+                end
+                current[index] = after
+            end
+        end
+    end
+
+    local reported = rodLevels(reactor.name, methods, count)
+    if not reported then return false, nil, "Control-rod verification failed" end
+    for index = 0, count - 1 do
+        if tonumber(reported[index]) ~= wanted[index] then
+            return false, exposureFromLevels(reported, count),
+                ("Rod %d requested %d%%; reactor reports %s%%"):format(
+                    index, wanted[index], tostring(reported[index]))
+        end
+    end
+    return true, exposureFromLevels(reported, count), wanted
+end
+
 function adapter.readAll(devices)
     local reactors = {}
     for _, device in ipairs(devices or {}) do
@@ -197,6 +286,7 @@ function adapter.printReport(reactors, config, formatter)
                 print("  Coolant: " .. value(reactor.coolantPercent, "%"))
                 print("  Hot fluid: " .. value(reactor.hotFluidPercent, "%"))
                 print("  Rod insertion: " .. value(reactor.controlRodLevel, "%"))
+                print("  Rod exposure: " .. value(reactor.controlRodExposure, " equivalents"))
             else
                 print("  Power: " .. formatter.power(reactor.energyProduction, config.power, true))
                 print("  Buffer: " .. value(reactor.energyPercent, "%"))

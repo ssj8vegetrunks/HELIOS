@@ -32,6 +32,9 @@ HELIOS Architecture v0.1
    - Capability detection
    - Extreme Reactors driver
    - Mekanism driver
+   - Steam sources publish capacity and output behind one interface
+   - Current source: directly water-cooled reactor
+   - Future source: liquid-salt reactor plus heat exchanger
 
 6. Remote terminals
    - Reactor / Turbine / Battery / All

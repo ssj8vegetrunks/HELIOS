@@ -253,11 +253,14 @@ function mainframe.run(config)
                 idConflicts = idConflicts,
                 now = os.epoch("utc") / 1000,
             })
+        if reactorGovernor.consumeProfileChanges(reactorGovernorMemory) then
+            configStore.save(config)
+        end
         reactorGovernor.applyAll(reactorGovernorMemory, reactors, config.control, {
             maintenance = maintenance,
             now = os.epoch("utc") / 1000,
         }, {
-            setAllControlRodLevels = reactorAdapter.setAllControlRodLevels,
+            setControlRodExposure = reactorAdapter.setControlRodExposure,
         })
         updateAlarm()
         local conflictsChanged = refreshIdConflicts()
@@ -952,7 +955,9 @@ function mainframe.run(config)
                     ui.status("Coolant / hot", ("%s / %s"):format(
                         formatValue(reactor.coolantPercent, "%"),
                         formatValue(reactor.hotFluidPercent, "%")))
-                    ui.status("Rod insertion", formatValue(reactor.controlRodLevel, "%"))
+                    ui.status("Rods avg / exposed", ("%s / %s eq"):format(
+                        formatValue(reactor.controlRodLevel, "%"),
+                        formatValue(plan.currentRodExposure, "")))
                     ui.status("Governor", (plan.state or "WAITING") .. " / " ..
                         (plan.actuatorState or "WAITING"),
                         (plan.trusted == false or plan.actuatorState == "FAULT") and

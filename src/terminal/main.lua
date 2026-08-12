@@ -156,7 +156,9 @@ function terminal.run(config)
                 ui.status("Coolant / hot", ("%s / %s"):format(
                     formatValue(item.coolantPercent, "%"),
                     formatValue(item.hotFluidPercent, "%")))
-                ui.status("Rod insertion", formatValue(item.controlRodLevel, "%"))
+                ui.status("Rods avg / exposed", ("%s / %s eq"):format(
+                    formatValue(item.controlRodLevel, "%"),
+                    formatValue(plan.currentRodExposure, "")))
                 ui.status("Governor", (plan.state or "WAITING") .. " / " ..
                     (plan.actuatorState or "WAITING"),
                     (plan.trusted == false or plan.actuatorState == "FAULT") and

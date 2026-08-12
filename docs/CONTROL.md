@@ -1,6 +1,6 @@
 # HELIOS Control Boundary
 
-## v1.4.0-alpha.6
+## v1.4.0-alpha.8
 
 The Power Control screen now runs a guarded automatic turbine governor.
 
@@ -37,9 +37,12 @@ The mainframe also runs a guarded steam-demand governor for one active,
 actively cooled reactor:
 
 - Trusted demand is the sum of configured intake limits for all active turbines.
-- Production below demand withdraws rods; production above demand inserts rods.
-- Rod changes require three matching samples, are capped at 5%, and are spaced five seconds apart.
-- Every `setAllControlRodLevels` command is verified by reading every rod level back.
+- HELIOS converts all rods to exposed rod-equivalents and uses full rods plus one fractional trim rod.
+- A stable measurement provides a proportional estimate; two stable measurements allow interpolation toward the target.
+- Formula estimates are bounded to 0.25 rod-equivalent per change and corrected by feedback.
+- Steam, hot-fluid-buffer, and casing-temperature motion pauses further changes and invalidates learning samples.
+- Learned exposure is saved per reactor only at a stable, unsaturated operating point.
+- Every `setControlRodLevel` command is verified by reading that physical rod back.
 - An 85% hot-fluid buffer forces rod insertion to reduce backed-up production.
 - Zero active turbine demand gradually inserts all rods to 100%.
 - Missing or untrusted turbine demand, maintenance, ID conflict, unsupported telemetry, and inactive reactors hold.
@@ -53,7 +56,8 @@ actively cooled reactor:
 - Turbine deadband: 25 RPM
 - Overspeed threshold: 2000 RPM for 3 readings
 - Storage demand band: 25% to 85%
-- Maximum reactor rod step: 5% every 5 seconds after 3 matching readings
+- Maximum reactor exposure step: 0.25 rod-equivalent after 3 matching decisions
+- Minimum post-command response wait: 15 seconds, extended while plant telemetry is moving
 - Maximum turbine flow step: 100 mB/t
 - Adjustment interval: 2 seconds
 - First calibration target: 900 RPM
@@ -70,7 +74,7 @@ interface until user tuning controls and their validation limits are implemented
 
 ## Next implementation order
 
-1. Validate reactor steam matching and fuel use on the live plant
+1. Validate rod-equivalent learning and fuel use on the live plant
 2. Explicit reactor-to-turbine routing for multiple steam loops
 3. Storage-based plant demand coordinator
 4. Action history and user-defined tuning controls

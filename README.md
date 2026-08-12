@@ -1,4 +1,4 @@
-# HELIOS — v1.4.0 Alpha 6 Reactor Steam Governor
+# HELIOS — v1.4.0 Alpha 8 Rod-Equivalent Reactor Governor
 
 Industrial power management for **CC:Tweaked** and **Extreme Reactors**.
 
@@ -45,7 +45,10 @@ The existing touch interface and network-ID protection remain online:
 - rejected or unverifiable actuator commands become system-wide control-fault warnings;
 - the dashboard reports live automatic, calibration, maintenance, and fault state instead of the obsolete observe-only banner;
 - one active steam reactor follows the summed configured intake of all active turbines;
-- reactor output changes use verified all-rod insertion commands, capped at 5% every five seconds after three matching readings;
+- reactor output is controlled as exposed rod-equivalents: full rods plus one fractional trim rod;
+- formula-assisted learning estimates the needed exposure, then bounded feedback corrects it;
+- reactor commands wait for steam, buffer, and casing-temperature response before another change;
+- stable learned exposure is saved per reactor and every individual rod command is verified;
 - high hot-fluid buffer pressure and zero turbine demand insert rods to reduce fuel use;
 - missing turbine demand, duplicate IDs, maintenance, unsupported rod telemetry, and ambiguous multiple-reactor routing hold reactor output unchanged;
 - settings and telemetry navigation use stable touch targets that fit the mirrored terminal canvas;
@@ -164,11 +167,13 @@ threshold is 20% and the critical threshold is 5%. Clicking
 severe alarm can still sound, and silence resets after the condition clears.
 
 For one active steam reactor, HELIOS totals the configured intake requested by
-all active turbines and adjusts every control rod together until reactor steam
-production matches that demand. More rod insertion means less output. Changes
-are deliberately slow, require repeated confirmation, and are read back across
-every rod. Zero active turbine demand gradually inserts the rods fully, while a
-hot-fluid buffer at or above 85% forces output downward.
+all active turbines and regulates exposed rod-equivalents until reactor steam
+production matches that demand. It uses full exposed rods plus one fractional
+trim rod, giving 0.01-equivalent resolution regardless of reactor size. Stable
+measurements feed a proportional/interpolated estimate; live feedback corrects
+for temperature, fuel, moderator layout, and other nonlinear effects. Samples
+are not learned while steam, the hot-fluid buffer, or casing temperature is
+still moving. Each individual rod write is read back and verified.
 
 The reactor governor holds during maintenance, ID conflict, missing or
 untrusted turbine telemetry, unsupported rod control, or when more than one
@@ -277,7 +282,7 @@ overspeed readings engage the inductor, cut steam, and raise a global alarm.
 Missing or untrusted telemetry always produces HOLD.
 
 `AUTOMATIC` remains selected and tuning controls remain locked. HELIOS may
-change a turbine's configured flow limit and inductor state, plus the uniform
+change a turbine's configured flow limit and inductor state, plus the individual
 control-rod insertion of one active steam reactor. It still cannot toggle a
 reactor, start or stop a turbine, change venting, eject fuel, or eject waste.
 
@@ -296,6 +301,6 @@ trusting directed telemetry.
 ## Scope boundary
 
 Remote terminals remain read-only. The mainframe may control only turbine flow
-limits, turbine inductors, and verified all-rod insertion on one active steam
+limits, turbine inductors, and verified individual rods on one active steam
 reactor. Multi-reactor routing, storage coordination, graphs, and additional
 specialized storage adapters come later.

@@ -6,18 +6,18 @@ peripheral = {
     isPresent = function(name) return name == "reactor_0" end,
     getMethods = function(name)
         if name ~= "reactor_0" then return {} end
-        return { "setAllControlRodLevels", "getControlRodsLevels",
+        return { "setControlRodLevel", "getControlRodLevel",
             "getNumberOfControlRods" }
     end,
-    call = function(name, method, value)
-        calls[#calls + 1] = { name = name, method = method, value = value }
-        if method == "setAllControlRodLevels" then
-            for index = 0, 2 do
-                if not stuck or index ~= 2 then levels[index] = value end
-            end
+    call = function(name, method, first, second)
+        calls[#calls + 1] = {
+            name = name, method = method, first = first, second = second,
+        }
+        if method == "setControlRodLevel" then
+            if not stuck or first ~= 1 then levels[first] = second end
             return
         end
-        if method == "getControlRodsLevels" then return levels end
+        if method == "getControlRodLevel" then return levels[first] end
         if method == "getNumberOfControlRods" then return 3 end
         error("unexpected method")
     end,
@@ -26,24 +26,26 @@ peripheral = {
 local adapter = dofile("src/mainframe/reactor_adapter.lua")
 local reactor = { name = "reactor_0", controlRods = 3 }
 
-local ok, applied, reason = adapter.setAllControlRodLevels(reactor, 35)
+local ok, applied, reason = adapter.setControlRodExposure(reactor, 1.35)
 assert(ok, tostring(reason))
-assert(applied == 35, "rod level was not verified")
-assert(calls[1].method == "setAllControlRodLevels", "wrong actuator method")
-assert(calls[2].method == "getControlRodsLevels", "missing read-back verification")
+assert(math.abs(applied - 1.35) < 0.001, "exposure was not verified")
+assert(levels[0] == 0 and levels[1] == 65 and levels[2] == 100,
+    "rod-equivalent layout is incorrect")
+assert(calls[4].method == "setControlRodLevel" and calls[4].first == 1,
+    "safer insertions should be issued before withdrawals")
 
-ok, applied, reason = adapter.setAllControlRodLevels(reactor, 150)
+ok, applied, reason = adapter.setControlRodExposure(reactor, 99)
 assert(ok, tostring(reason))
-assert(applied == 100, "rod level was not clamped")
+assert(applied == 3, "exposure should be clamped to the rod count")
 
 stuck = true
-ok, applied, reason = adapter.setAllControlRodLevels(reactor, 60)
+ok, applied, reason = adapter.setControlRodExposure(reactor, 0.5)
 assert(ok == false, "mismatched rods should fail verification")
-assert(reason and reason:find("reactor reports", 1, true),
-    "mismatch reason was not reported")
+assert(reason and reason:find("Rod 1", 1, true),
+    "mismatched rod index was not reported")
 stuck = false
 
-local missing = adapter.setAllControlRodLevels({ name = "missing" }, 50)
+local missing = adapter.setControlRodExposure({ name = "missing", controlRods = 3 }, 1)
 assert(missing == false, "missing reactor write should fail")
 
 print("reactor actuator tests passed")

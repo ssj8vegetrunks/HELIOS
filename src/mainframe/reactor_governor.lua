@@ -4,8 +4,9 @@ local function clamp(value, minimum, maximum)
     return math.max(minimum, math.min(maximum, value))
 end
 
-local function round(value)
-    return math.floor(value + 0.5)
+local function round(value, places)
+    local scale = 10 ^ (places or 0)
+    return math.floor(value * scale + 0.5) / scale
 end
 
 local function hasConflict(context)
@@ -27,8 +28,48 @@ local function hold(state, reason, trusted)
     }
 end
 
+local function rodExposure(reactor)
+    local count = math.floor(tonumber(reactor and reactor.controlRods) or 0)
+    local levels = reactor and reactor.controlRodLevels
+    if count < 1 or type(levels) ~= "table" then return nil, count end
+    local exposure = 0
+    for index = 0, count - 1 do
+        local level = tonumber(levels[index])
+        if level == nil then return nil, count end
+        exposure = exposure + (100 - clamp(level, 0, 100)) / 100
+    end
+    return exposure, count
+end
+
+local function wantedRodLevel(index, exposure)
+    local full = math.floor(exposure)
+    local fraction = exposure - full
+    if index < full then return 0 end
+    if index == full and fraction > 0.0001 then
+        return round(100 - fraction * 100)
+    end
+    return 100
+end
+
+local function layoutIsSequential(reactor, exposure, count)
+    local levels = reactor.controlRodLevels or {}
+    for index = 0, count - 1 do
+        local actual = tonumber(levels[index])
+        if actual == nil or math.abs(actual - wantedRodLevel(index, exposure)) > 0.5 then
+            return false
+        end
+    end
+    return true
+end
+
 function governor.new()
-    return { reactors = {} }
+    return { reactors = {}, profileDirty = false }
+end
+
+function governor.consumeProfileChanges(memory)
+    local dirty = memory and memory.profileDirty == true
+    if memory then memory.profileDirty = false end
+    return dirty
 end
 
 function governor.steamDemand(turbines)
@@ -66,10 +107,8 @@ local function observeCooldown(previous, reactor, control, context, production)
     local now = tonumber(context and context.now) or 0
     local casingTemperature = tonumber(reactor and reactor.casingTemperature)
     local window = math.max(5, tonumber(control.reactorCooldownWindow) or 10)
-    local timeout = math.max(60,
-        tonumber(control.reactorCooldownStallTimeout) or 180)
-    local steamDelta = math.max(0.1,
-        tonumber(control.reactorCooldownSteamDelta) or 2)
+    local timeout = math.max(60, tonumber(control.reactorCooldownStallTimeout) or 180)
+    local steamDelta = math.max(0.1, tonumber(control.reactorCooldownSteamDelta) or 2)
     local temperatureDelta = math.max(0.01,
         tonumber(control.reactorCooldownTemperatureDelta) or 0.05)
 
@@ -84,19 +123,101 @@ local function observeCooldown(previous, reactor, control, context, production)
             production <= previous.cooldownReferenceSteam - steamDelta
         local temperatureFalling = casingTemperature ~= nil and
             previous.cooldownReferenceTemperature ~= nil and
-            casingTemperature <= previous.cooldownReferenceTemperature -
-                temperatureDelta
-        if steamFalling or temperatureFalling then
-            previous.cooldownLastProgressAt = now
-        end
+            casingTemperature <= previous.cooldownReferenceTemperature - temperatureDelta
+        if steamFalling or temperatureFalling then previous.cooldownLastProgressAt = now end
         previous.cooldownReferenceAt = now
         previous.cooldownReferenceSteam = production
         previous.cooldownReferenceTemperature = casingTemperature
     end
-
-    local stalledFor = math.max(0,
-        now - (previous.cooldownLastProgressAt or now))
+    local stalledFor = math.max(0, now - (previous.cooldownLastProgressAt or now))
     return stalledFor < timeout, stalledFor, casingTemperature
+end
+
+local function observeResponse(previous, reactor, control, context, production)
+    local now = tonumber(context and context.now) or 0
+    local temperature = tonumber(reactor.casingTemperature)
+    local buffer = tonumber(reactor.hotFluidPercent)
+    local prior = previous.observation
+    local steamDelta = math.max(1, tonumber(control.reactorLearningSteamDelta) or 10)
+    local temperatureDelta = math.max(0.01,
+        tonumber(control.reactorLearningTemperatureDelta) or 0.1)
+    local bufferDelta = math.max(0.01,
+        tonumber(control.reactorLearningBufferDelta) or 0.1)
+    local minimumResponse = math.max(5,
+        tonumber(control.reactorMinimumResponseTime) or 15)
+    local moving = false
+
+    if prior then
+        moving = math.abs(production - prior.production) > steamDelta
+        if temperature and prior.temperature then
+            moving = moving or math.abs(temperature - prior.temperature) > temperatureDelta
+        end
+        if buffer and prior.buffer then
+            moving = moving or math.abs(buffer - prior.buffer) > bufferDelta
+        end
+    end
+    local waiting = previous.lastAppliedAt and now - previous.lastAppliedAt < minimumResponse
+    if not prior or moving or waiting then
+        previous.stableSamples = 0
+    else
+        previous.stableSamples = (previous.stableSamples or 0) + 1
+    end
+    previous.observation = {
+        at = now,
+        production = production,
+        temperature = temperature,
+        buffer = buffer,
+    }
+    return not moving and not waiting, moving or waiting
+end
+
+local function addLearningPoint(previous, exposure, production)
+    previous.points = previous.points or {}
+    for _, point in ipairs(previous.points) do
+        if math.abs(point.exposure - exposure) < 0.05 then
+            point.exposure, point.steam = exposure, production
+            return
+        end
+    end
+    previous.points[#previous.points + 1] = { exposure = exposure, steam = production }
+    while #previous.points > 4 do table.remove(previous.points, 1) end
+end
+
+local function learnedExposure(previous, profile, current, production, target, count)
+    local points = previous.points or {}
+    if #points >= 2 then
+        local first, second = points[#points - 1], points[#points]
+        local steamChange = second.steam - first.steam
+        if math.abs(steamChange) >= math.max(10, target * 0.01) then
+            return clamp(first.exposure +
+                (target - first.steam) * (second.exposure - first.exposure) /
+                    steamChange, 0, count)
+        end
+    end
+    if production > 1 and current > 0 then
+        return clamp(current * target / production, 0, count)
+    end
+    if type(profile) == "table" and tonumber(profile.exposure) and
+       tonumber(profile.targetSteam) and tonumber(profile.targetSteam) > 0 then
+        return clamp(tonumber(profile.exposure) * target /
+            tonumber(profile.targetSteam), 0, count)
+    end
+    return clamp(current + 0.25, 0, count)
+end
+
+local function saveProfile(memory, control, name, exposure, production, target, context)
+    control.reactorProfiles = control.reactorProfiles or {}
+    local old = control.reactorProfiles[name]
+    if not old or math.abs((tonumber(old.exposure) or -1) - exposure) >= 0.01 or
+       math.abs((tonumber(old.targetSteam) or -1) - target) >= 1 then
+        control.reactorProfiles[name] = {
+            exposure = round(exposure, 2),
+            steam = round(production, 1),
+            targetSteam = round(target, 1),
+            updatedAt = tonumber(context and context.now) or 0,
+        }
+        memory.profileDirty = true
+    end
 end
 
 function governor.evaluate(memory, reactor, control, context, targetSteam, activeTurbines)
@@ -118,122 +239,137 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
         result = hold("NOT STEAM MODE", "Only actively cooled reactors are managed", false)
     elseif tonumber(reactor.steamProduction) == nil then
         result = hold("NO STEAM DATA", "Steam-production telemetry is unavailable", false)
-    elseif tonumber(reactor.controlRodLevel) == nil then
-        result = hold("NO ROD DATA", "Control-rod telemetry is unavailable", false)
-    elseif tonumber(reactor.controlRodMinimum) and tonumber(reactor.controlRodMaximum) and
-           tonumber(reactor.controlRodMinimum) ~= tonumber(reactor.controlRodMaximum) then
-        result = hold("RODS NOT UNIFORM",
-            "Automatic all-rod control requires equal starting levels", false)
     elseif tonumber(targetSteam) == nil then
         result = hold("NO TRUSTED DEMAND", tostring(context.demandError or
             "Turbine steam demand is unavailable"), false)
     else
-        local production = math.max(0, tonumber(reactor.steamProduction))
-        local target = math.max(0, tonumber(targetSteam))
-        local current = clamp(tonumber(reactor.controlRodLevel), 0, 100)
-        local maxStep = math.max(1, math.min(10,
-            tonumber(control.maxRodStep) or 5))
-        local deadband = math.max(tonumber(control.reactorSteamDeadbandMin) or 25,
-            target * (tonumber(control.reactorSteamDeadband) or 0.03))
-        local highBuffer = tonumber(control.reactorHotFluidHigh) or 85
-        local hotFluid = tonumber(reactor.hotFluidPercent)
-        local proposed, state, action, reason = current, "STABLE", "HOLD",
-            "Steam production matches trusted turbine demand"
-
-        if hotFluid and hotFluid >= highBuffer then
-            if current >= 100 then
-                state, action = "STEAM SURPLUS", "HOLD"
-                reason = ("Hot-fluid buffer is %.1f%% with rods fully inserted"):format(
-                    hotFluid)
-            else
-                proposed = current + maxStep
-                state, action = "BUFFER HIGH", "INSERT RODS"
-                reason = ("Hot-fluid buffer is %.1f%%; reduce steam production"):format(
-                    hotFluid)
-            end
-        elseif target <= 0 then
-            if current < 100 then
-                proposed = current + maxStep
-                state, action = "NO DEMAND", "INSERT RODS"
-                reason = "No active turbine is requesting steam"
-            else
-                state, reason = "IDLE", "No active turbine demand; rods fully inserted"
-            end
+        local exposure, rodCount = rodExposure(reactor)
+        if exposure == nil then
+            result = hold("NO ROD DATA",
+                "Individual control-rod telemetry is unavailable", false)
         else
-            local errorAmount = target - production
-            if math.abs(errorAmount) > deadband then
-                local scale = clamp(math.abs(errorAmount) / math.max(target, 1),
-                    1 / maxStep, 1)
-                local step = math.max(1, round(maxStep * scale))
-                if errorAmount > 0 then
-                    if current <= 0 then
-                        state, action = "STEAM DEFICIT", "HOLD"
-                        reason = "Reactor cannot meet turbine demand with rods fully withdrawn"
-                    else
-                        proposed = current - step
-                        state, action = "STEAM LOW", "WITHDRAW RODS"
-                        reason = "Steam production is below trusted turbine demand"
-                    end
+            local production = math.max(0, tonumber(reactor.steamProduction))
+            local target = math.max(0, tonumber(targetSteam))
+            local hotFluid = tonumber(reactor.hotFluidPercent)
+            local highBuffer = tonumber(control.reactorHotFluidHigh) or 85
+            local lowBuffer = tonumber(control.reactorHotFluidLow) or 15
+            local deadband = math.max(tonumber(control.reactorSteamDeadbandMin) or 25,
+                target * (tonumber(control.reactorSteamDeadband) or 0.03))
+            local maxStep = math.max(0.01, math.min(1,
+                tonumber(control.maxRodEquivalentStep) or 0.25))
+            local stableRequired = math.max(3,
+                math.floor(tonumber(control.reactorLearningSamples) or 8))
+            local profile = (control.reactorProfiles or {})[name]
+            local _, responding = observeResponse(previous, reactor, control,
+                context, production)
+            local stable = (previous.stableSamples or 0) >= stableRequired
+            local proposed, state, action, reason = exposure, "STABLE", "HOLD",
+                "Steam production matches trusted turbine demand"
+            local sequential = layoutIsSequential(reactor, exposure, rodCount)
+
+            if not sequential then
+                state, action = "NORMALIZING", "NORMALIZE RODS"
+                reason = ("Convert %.2f exposed rod-equivalents to sequential control"):
+                    format(exposure)
+            elseif target <= 0 then
+                if exposure > 0.005 then
+                    proposed, state, action = 0, "NO DEMAND", "REDUCE EXPOSURE"
+                    reason = "No active turbine is requesting steam"
                 else
-                    if current >= 100 then
-                        state, action = "STEAM SURPLUS", "HOLD"
-                        reason = "Reactor exceeds demand with rods fully inserted"
+                    state, reason = "IDLE", "No active turbine demand; all rods inserted"
+                end
+            elseif exposure <= 0.005 and production > target + deadband then
+                local cooling, stalledFor, temperature = observeCooldown(previous,
+                    reactor, control, context, production)
+                if cooling then
+                    state = "COOLING"
+                    reason = temperature and
+                        ("All rods inserted; residual heat is cooling (case %.1f C)"):
+                            format(temperature) or
+                        "All rods inserted; observing residual steam decay"
+                else
+                    state = "STEAM SURPLUS"
+                    reason = ("Steam and casing temperature have not declined for %.0f seconds"):
+                        format(stalledFor)
+                end
+            elseif responding or not stable then
+                state = "RESPONDING"
+                reason = "Waiting for steam, buffer, and casing temperature to settle"
+            else
+                clearCooldown(previous)
+                local bufferUsable = hotFluid == nil or
+                    (hotFluid > lowBuffer and hotFluid < highBuffer)
+                if bufferUsable then addLearningPoint(previous, exposure, production) end
+
+                if hotFluid and hotFluid >= highBuffer then
+                    proposed = math.max(0, exposure - maxStep)
+                    state, action = "BUFFER HIGH", "REDUCE EXPOSURE"
+                    reason = ("Hot-fluid buffer is %.1f%%; reduce exposed fuel"):
+                        format(hotFluid)
+                elseif production < target - deadband then
+                    if exposure >= rodCount - 0.005 then
+                        state = "STEAM DEFICIT"
+                        reason = "Reactor cannot meet turbine demand with every rod exposed"
                     else
-                        proposed = current + step
-                        state, action = "STEAM HIGH", "INSERT RODS"
-                        reason = "Steam production exceeds trusted turbine demand"
+                        local estimate = learnedExposure(previous, profile, exposure,
+                            production, target, rodCount)
+                        proposed = math.min(exposure + maxStep,
+                            math.max(exposure + 0.01, estimate))
+                        state, action = "STEAM LOW", "INCREASE EXPOSURE"
+                        reason = ("Formula estimate %.2f rod-equivalents; increase gradually"):
+                            format(estimate)
                     end
+                elseif production > target + deadband then
+                    local estimate = learnedExposure(previous, profile, exposure,
+                        production, target, rodCount)
+                    proposed = math.max(exposure - maxStep,
+                        math.min(exposure - 0.01, estimate))
+                    state, action = "STEAM HIGH", "REDUCE EXPOSURE"
+                    reason = ("Formula estimate %.2f rod-equivalents; reduce gradually"):
+                        format(estimate)
+                elseif bufferUsable then
+                    saveProfile(memory, control, name, exposure, production, target,
+                        context)
+                    state = "LEARNED"
+                    reason = ("Holding %.2f exposed rod-equivalents for %.0f mB/t"):
+                        format(exposure, target)
                 end
             end
-        end
 
-        proposed = round(clamp(proposed, 0, 100))
-
-        if state == "STEAM SURPLUS" and current >= 100 then
-            local cooling, stalledFor, casingTemperature = observeCooldown(
-                previous, reactor, control, context, production)
-            if cooling then
-                state = "COOLING"
-                reason = casingTemperature and
-                    ("Rods fully inserted; residual heat is cooling (case %.1f C)"):
-                        format(casingTemperature) or
-                    "Rods fully inserted; observing residual steam decay"
+            proposed = round(clamp(proposed, 0, rodCount), 2)
+            local changing = action ~= "HOLD" and
+                (math.abs(proposed - exposure) >= 0.005 or not sequential)
+            if changing then
+                previous.actionSamples = previous.action == action and
+                    ((previous.actionSamples or 0) + 1) or 1
+                previous.action = action
             else
-                reason = ("Steam and casing temperature have not declined for %.0f seconds"):
-                    format(stalledFor)
+                previous.actionSamples, previous.action = 0, nil
             end
-        else
-            clearCooldown(previous)
-        end
 
-        local changing = proposed ~= round(current)
-        if changing then
-            previous.actionSamples = previous.action == action and
-                ((previous.actionSamples or 0) + 1) or 1
-            previous.action = action
-        else
-            previous.actionSamples, previous.action = 0, nil
+            result = {
+                mode = "automatic",
+                state = state,
+                action = action,
+                reason = reason,
+                trusted = true,
+                activeTurbines = activeTurbines or 0,
+                targetSteam = target,
+                steamProduction = production,
+                steamError = target - production,
+                steamDeadband = deadband,
+                rodCount = rodCount,
+                currentRodExposure = round(exposure, 2),
+                recommendedRodExposure = proposed,
+                rodExposureChange = round(proposed - exposure, 2),
+                actionSamples = previous.actionSamples,
+                stableSamples = previous.stableSamples or 0,
+                hotFluidPercent = hotFluid,
+                learnedProfile = profile,
+                coolingSince = previous.cooldownStartedAt,
+                coolingLastProgressAt = previous.cooldownLastProgressAt,
+            }
         end
-
-        result = {
-            mode = "automatic",
-            state = state,
-            action = action,
-            reason = reason,
-            trusted = true,
-            activeTurbines = activeTurbines or 0,
-            targetSteam = target,
-            steamProduction = production,
-            steamError = target - production,
-            steamDeadband = deadband,
-            currentRodLevel = current,
-            recommendedRodLevel = proposed,
-            rodChange = proposed - current,
-            actionSamples = previous.actionSamples,
-            hotFluidPercent = hotFluid,
-            coolingSince = previous.cooldownStartedAt,
-            coolingLastProgressAt = previous.cooldownLastProgressAt,
-        }
     end
 
     if result.trusted == false or result.action == "HOLD" then
@@ -255,7 +391,6 @@ function governor.evaluateAll(memory, reactors, turbines, control, context)
         demand = nil
         demandError = "Multiple active steam reactors require routing assignments"
     end
-    local target = demand
     local present = {}
     for _, reactor in ipairs(reactors or {}) do
         present[tostring(reactor.name)] = true
@@ -263,7 +398,7 @@ function governor.evaluateAll(memory, reactors, turbines, control, context)
         for key, value in pairs(context or {}) do reactorContext[key] = value end
         reactorContext.demandError = demandError
         reactor.governor = governor.evaluate(memory, reactor, control, reactorContext,
-            target, activeTurbines)
+            demand, activeTurbines)
     end
     for name in pairs(memory.reactors or {}) do
         if not present[name] then memory.reactors[name] = nil end
@@ -279,11 +414,12 @@ function governor.apply(memory, reactor, control, context, writers)
     local previous = memory.reactors[name] or {}
     local now = tonumber(context.now) or 0
     local interval = math.max(2, tonumber(control.reactorAdjustmentInterval) or 5)
-    local samples = math.max(2, math.floor(tonumber(control.reactorCommandSamples) or 3))
-    local current, proposed = tonumber(plan.currentRodLevel),
-        tonumber(plan.recommendedRodLevel)
+    local samples = math.max(2,
+        math.floor(tonumber(control.reactorCommandSamples) or 3))
+    local current, proposed = tonumber(plan.currentRodExposure),
+        tonumber(plan.recommendedRodExposure)
     local needsWrite = current ~= nil and proposed ~= nil and
-        round(current) ~= round(proposed)
+        (math.abs(current - proposed) >= 0.005 or plan.action == "NORMALIZE RODS")
 
     if control.actuatorsEnabled ~= true then
         plan.actuatorState = "DISABLED"
@@ -299,32 +435,33 @@ function governor.apply(memory, reactor, control, context, writers)
     elseif (tonumber(plan.actionSamples) or 0) < samples then
         plan.actuatorState = "VERIFYING"
     elseif type(writers) ~= "table" or
-           type(writers.setAllControlRodLevels) ~= "function" then
+           type(writers.setControlRodExposure) ~= "function" then
         plan.actuatorState = "FAULT"
-        plan.actuatorError = "Required reactor write adapter is unavailable"
+        plan.actuatorError = "Required individual control-rod adapter is unavailable"
     elseif previous.lastAttemptAt and now - previous.lastAttemptAt < interval then
         plan.actuatorState = previous.lastError and "FAULT" or "WAITING"
         plan.actuatorError = previous.lastError
         plan.nextAdjustmentIn = interval - (now - previous.lastAttemptAt)
     else
         previous.lastAttemptAt = now
-        local ok, applied, reason = writers.setAllControlRodLevels(reactor, proposed)
+        local ok, applied, reason = writers.setControlRodExposure(reactor, proposed)
         if ok then
             previous.lastAppliedAt = now
-            previous.lastAppliedRodLevel = tonumber(applied) or proposed
+            previous.lastAppliedRodExposure = tonumber(applied) or proposed
             previous.lastError = nil
-            plan.appliedRodLevel = previous.lastAppliedRodLevel
+            previous.stableSamples = 0
+            plan.appliedRodExposure = previous.lastAppliedRodExposure
             plan.actuatorState = "APPLIED"
         else
             previous.lastError = tostring(reason or "Reactor rejected the rod command")
-            plan.reportedRodLevel = tonumber(applied)
+            plan.reportedRodExposure = tonumber(applied)
             plan.actuatorError = previous.lastError
             plan.actuatorState = "FAULT"
         end
     end
 
     plan.lastAppliedAt = previous.lastAppliedAt
-    plan.lastAppliedRodLevel = previous.lastAppliedRodLevel
+    plan.lastAppliedRodExposure = previous.lastAppliedRodExposure
     memory.reactors[name] = previous
     return plan
 end
