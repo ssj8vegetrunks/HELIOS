@@ -54,6 +54,51 @@ function governor.steamDemand(turbines)
     return total, active
 end
 
+local function clearCooldown(previous)
+    previous.cooldownStartedAt = nil
+    previous.cooldownReferenceAt = nil
+    previous.cooldownReferenceSteam = nil
+    previous.cooldownReferenceTemperature = nil
+    previous.cooldownLastProgressAt = nil
+end
+
+local function observeCooldown(previous, reactor, control, context, production)
+    local now = tonumber(context and context.now) or 0
+    local casingTemperature = tonumber(reactor and reactor.casingTemperature)
+    local window = math.max(5, tonumber(control.reactorCooldownWindow) or 10)
+    local timeout = math.max(60,
+        tonumber(control.reactorCooldownStallTimeout) or 180)
+    local steamDelta = math.max(0.1,
+        tonumber(control.reactorCooldownSteamDelta) or 2)
+    local temperatureDelta = math.max(0.01,
+        tonumber(control.reactorCooldownTemperatureDelta) or 0.05)
+
+    if previous.cooldownStartedAt == nil then
+        previous.cooldownStartedAt = now
+        previous.cooldownReferenceAt = now
+        previous.cooldownReferenceSteam = production
+        previous.cooldownReferenceTemperature = casingTemperature
+        previous.cooldownLastProgressAt = now
+    elseif now - (previous.cooldownReferenceAt or now) >= window then
+        local steamFalling = previous.cooldownReferenceSteam ~= nil and
+            production <= previous.cooldownReferenceSteam - steamDelta
+        local temperatureFalling = casingTemperature ~= nil and
+            previous.cooldownReferenceTemperature ~= nil and
+            casingTemperature <= previous.cooldownReferenceTemperature -
+                temperatureDelta
+        if steamFalling or temperatureFalling then
+            previous.cooldownLastProgressAt = now
+        end
+        previous.cooldownReferenceAt = now
+        previous.cooldownReferenceSteam = production
+        previous.cooldownReferenceTemperature = casingTemperature
+    end
+
+    local stalledFor = math.max(0,
+        now - (previous.cooldownLastProgressAt or now))
+    return stalledFor < timeout, stalledFor, casingTemperature
+end
+
 function governor.evaluate(memory, reactor, control, context, targetSteam, activeTurbines)
     memory.reactors = memory.reactors or {}
     control, context = control or {}, context or {}
@@ -143,6 +188,24 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
         end
 
         proposed = round(clamp(proposed, 0, 100))
+
+        if state == "STEAM SURPLUS" and current >= 100 then
+            local cooling, stalledFor, casingTemperature = observeCooldown(
+                previous, reactor, control, context, production)
+            if cooling then
+                state = "COOLING"
+                reason = casingTemperature and
+                    ("Rods fully inserted; residual heat is cooling (case %.1f C)"):
+                        format(casingTemperature) or
+                    "Rods fully inserted; observing residual steam decay"
+            else
+                reason = ("Steam and casing temperature have not declined for %.0f seconds"):
+                    format(stalledFor)
+            end
+        else
+            clearCooldown(previous)
+        end
+
         local changing = proposed ~= round(current)
         if changing then
             previous.actionSamples = previous.action == action and
@@ -168,6 +231,8 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
             rodChange = proposed - current,
             actionSamples = previous.actionSamples,
             hotFluidPercent = hotFluid,
+            coolingSince = previous.cooldownStartedAt,
+            coolingLastProgressAt = previous.cooldownLastProgressAt,
         }
     end
 
