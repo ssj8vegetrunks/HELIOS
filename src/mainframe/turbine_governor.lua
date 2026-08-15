@@ -66,6 +66,20 @@ function governor.requestSteamPrime(memory)
     end
 end
 
+function governor.needsSteamPrime(memory, turbines)
+    memory.turbines = memory.turbines or {}
+    for _, turbine in ipairs(turbines or {}) do
+        if turbine.active == true then
+            local previous = memory.turbines[tostring(turbine.name or "unknown")]
+            if previous == nil or previous.primeRequested == true or
+               previous.phase == "CHARGE_STEAM" then
+                return true
+            end
+        end
+    end
+    return false
+end
+
 function governor.consumeProfileChanges(memory)
     local changed = memory.profileDirty == true
     memory.profileDirty = false
@@ -320,15 +334,16 @@ function governor.evaluate(memory, turbine, control, context)
                     "Preparing managed steam before buffer priming")
             else
                 state = "CHARGING STEAM"
-                recommendedFlow = 0
+                recommendedFlow = profile and tonumber(profile.flowLimit) or flowMaximum
+                recommendedFlow = recommendedFlow or currentFlow
                 if turbine.inductorEngaged == false then
                     action = "ENGAGE INDUCTOR"
-                elseif currentFlow > 0 then
-                    action = "CLOSE FLOW"
+                elseif currentFlow ~= recommendedFlow then
+                    action = "RESTORE FLOW"
                 else
-                    action = "CHARGE BUFFERS"
+                    action = "PRIME BUFFERS"
                 end
-                reason = ("Priming steam buffers to %.0f%%: reactor %.0f%% / turbine %.0f%%"):
+                reason = ("Reactor overproducing to prime buffers to %.0f%%: reactor %.0f%% / turbine %.0f%%"):
                     format(bufferReady, sourceBuffer, turbineBuffer)
             end
         elseif profile and previous.phase == "RESTORE_PROFILE" then

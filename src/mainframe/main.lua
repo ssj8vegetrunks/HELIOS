@@ -232,13 +232,21 @@ function mainframe.run(config)
         turbines = turbineAdapter.readAll(devices)
         storages = storageAdapter.readAll(devices, config.power)
         local now = os.epoch("utc") / 1000
+        local steamPrimeRequested = turbineGovernor.needsSteamPrime(
+            governorMemory, turbines)
         local _, steamDemand = reactorGovernor.evaluateAll(reactorGovernorMemory,
             reactors, turbines, config.control, {
                 maintenance = maintenance,
                 mainframeId = os.getComputerID(),
                 idConflicts = idConflicts,
                 now = now,
+                steamPrimeRequested = steamPrimeRequested,
             })
+        for _, reactor in ipairs(reactors) do
+            if reactor.governor and reactor.governor.calibrationCompleted == true then
+                turbineGovernor.requestSteamPrime(governorMemory)
+            end
+        end
         if reactorGovernor.consumeProfileChanges(reactorGovernorMemory) then
             configStore.save(config)
         end
@@ -1145,7 +1153,6 @@ function mainframe.run(config)
                         if prepared then
                             reactorGovernor.beginRecalibration(reactorGovernorMemory,
                                 config.control, reactorName)
-                            turbineGovernor.requestSteamPrime(governorMemory)
                             saveConfig()
                             if maintenance then stopMaintenance() end
                             maintenanceEnabledHere = false
@@ -1171,6 +1178,7 @@ function mainframe.run(config)
                             reactorGovernorMemory, config.control, reactor,
                             { now = os.epoch("utc") / 1000 })
                         if ok then
+                            turbineGovernor.requestSteamPrime(governorMemory)
                             saveConfig()
                             calibrationNotice = { text = "CURRENT SETUP SAVED", colour = colors.lime }
                         else

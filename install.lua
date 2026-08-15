@@ -1,7 +1,7 @@
 -- HELIOS single-file installer
 -- Milestone 8.5: coordinated reactor-first steam startup.
 
-local VERSION = "1.4.0-alpha.17"
+local VERSION = "1.4.0-alpha.18"
 local INSTALL_DIR = "/helios"
 local STAGE_DIR = "/.helios-install"
 
@@ -125,6 +125,9 @@ function config.load()
         tonumber(loaded.control.reactorSteamDeadbandMin) or 25)
     loaded.control.reactorSteamReserveMargin = math.max(0, math.min(0.25,
         tonumber(loaded.control.reactorSteamReserveMargin) or 0.15))
+    loaded.control.reactorSteamPrimeMargin = math.max(
+        loaded.control.reactorSteamReserveMargin, math.min(2,
+            tonumber(loaded.control.reactorSteamPrimeMargin) or 0.90))
     loaded.control.reactorSteamAverageSamples = math.max(3,
         math.floor(tonumber(loaded.control.reactorSteamAverageSamples) or 10))
     loaded.control.reactorHotFluidHigh = math.max(50, math.min(99,
@@ -1002,13 +1005,21 @@ function mainframe.run(config)
         turbines = turbineAdapter.readAll(devices)
         storages = storageAdapter.readAll(devices, config.power)
         local now = os.epoch("utc") / 1000
+        local steamPrimeRequested = turbineGovernor.needsSteamPrime(
+            governorMemory, turbines)
         local _, steamDemand = reactorGovernor.evaluateAll(reactorGovernorMemory,
             reactors, turbines, config.control, {
                 maintenance = maintenance,
                 mainframeId = os.getComputerID(),
                 idConflicts = idConflicts,
                 now = now,
+                steamPrimeRequested = steamPrimeRequested,
             })
+        for _, reactor in ipairs(reactors) do
+            if reactor.governor and reactor.governor.calibrationCompleted == true then
+                turbineGovernor.requestSteamPrime(governorMemory)
+            end
+        end
         if reactorGovernor.consumeProfileChanges(reactorGovernorMemory) then
             configStore.save(config)
         end
@@ -1915,7 +1926,6 @@ function mainframe.run(config)
                         if prepared then
                             reactorGovernor.beginRecalibration(reactorGovernorMemory,
                                 config.control, reactorName)
-                            turbineGovernor.requestSteamPrime(governorMemory)
                             saveConfig()
                             if maintenance then stopMaintenance() end
                             maintenanceEnabledHere = false
@@ -1941,6 +1951,7 @@ function mainframe.run(config)
                             reactorGovernorMemory, config.control, reactor,
                             { now = os.epoch("utc") / 1000 })
                         if ok then
+                            turbineGovernor.requestSteamPrime(governorMemory)
                             saveConfig()
                             calibrationNotice = { text = "CURRENT SETUP SAVED", colour = colors.lime }
                         else
@@ -3136,8 +3147,16 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
             local requestedSteam = math.max(0, tonumber(targetSteam))
             local reserveMargin = math.max(0, math.min(0.25,
                 tonumber(control.reactorSteamReserveMargin) or 0.15))
-            local target = requestedSteam > 0 and
+            local normalTarget = requestedSteam > 0 and
                 requestedSteam * (1 + reserveMargin) or 0
+            local profile = (control.reactorProfiles or {})[name]
+            local primeRequested = context.steamPrimeRequested == true and
+                type(profile) == "table" and previous.recalibrating ~= true
+            local primeMargin = math.max(reserveMargin, math.min(2,
+                tonumber(control.reactorSteamPrimeMargin) or 0.90))
+            local target = primeRequested and
+                math.max(normalTarget, requestedSteam * (1 + primeMargin)) or
+                normalTarget
             local hotFluid = tonumber(reactor.hotFluidPercent)
             local lowBuffer = tonumber(control.reactorHotFluidLow) or 15
             local deadband = math.max(tonumber(control.reactorSteamDeadbandMin) or 25,
@@ -3146,7 +3165,6 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
                 tonumber(control.maxRodEquivalentStep) or 0.25))
             local stableRequired = math.max(3,
                 math.floor(tonumber(control.reactorLearningSamples) or 8))
-            local profile = (control.reactorProfiles or {})[name]
             -- Calibration advances through a durable, forward-only phase. The
             -- old recalibrating boolean could not distinguish a completed
             -- baseline from one still being collected, so every positive test
@@ -3173,6 +3191,7 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
             local calibrationStable = calibrationPhase == "ADJUSTING" and
                 averageReady and not response.waiting and
                 (previous.processStableSamples or 0) >= stableRequired
+            local calibrationCompleted = false
             local proposed, state, action, reason = exposure, "STABLE", "HOLD",
                 "Steam production matches trusted turbine demand"
             local balanced = layoutIsBalanced(reactor, exposure, rodCount)
@@ -3286,7 +3305,12 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
                     state, action = "STEAM HIGH", "REDUCE EXPOSURE"
                     reason = ("Formula estimate %.2f rod-equivalents; reduce gradually"):
                         format(estimate)
+                elseif primeRequested then
+                    state = "PRIMING STEAM"
+                    reason = ("Holding elevated %.0f mB/t output until steam buffers are ready"):
+                        format(target)
                 else
+                    calibrationCompleted = previous.recalibrating == true
                     -- A drained hot-fluid buffer is normal when reactor output
                     -- closely matches live turbine demand. Stable production is
                     -- sufficient to learn the operating point; only the high
@@ -3323,6 +3347,8 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
                 activeTurbines = activeTurbines or 0,
                 requestedSteam = requestedSteam,
                 targetSteam = target,
+                normalTargetSteam = normalTarget,
+                steamPriming = primeRequested,
                 steamProduction = rawProduction,
                 averageSteamProduction = round(production, 1),
                 averageSteamSamples = averageSamples,
@@ -3340,6 +3366,7 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
                 learnedProfile = profile,
                 recalibrating = previous.recalibrating == true,
                 calibrationPhase = previous.calibrationPhase,
+                calibrationCompleted = calibrationCompleted,
                 coolingSince = previous.cooldownStartedAt,
                 coolingLastProgressAt = previous.cooldownLastProgressAt,
             }
@@ -4014,6 +4041,20 @@ function governor.requestSteamPrime(memory)
     end
 end
 
+function governor.needsSteamPrime(memory, turbines)
+    memory.turbines = memory.turbines or {}
+    for _, turbine in ipairs(turbines or {}) do
+        if turbine.active == true then
+            local previous = memory.turbines[tostring(turbine.name or "unknown")]
+            if previous == nil or previous.primeRequested == true or
+               previous.phase == "CHARGE_STEAM" then
+                return true
+            end
+        end
+    end
+    return false
+end
+
 function governor.consumeProfileChanges(memory)
     local changed = memory.profileDirty == true
     memory.profileDirty = false
@@ -4268,15 +4309,16 @@ function governor.evaluate(memory, turbine, control, context)
                     "Preparing managed steam before buffer priming")
             else
                 state = "CHARGING STEAM"
-                recommendedFlow = 0
+                recommendedFlow = profile and tonumber(profile.flowLimit) or flowMaximum
+                recommendedFlow = recommendedFlow or currentFlow
                 if turbine.inductorEngaged == false then
                     action = "ENGAGE INDUCTOR"
-                elseif currentFlow > 0 then
-                    action = "CLOSE FLOW"
+                elseif currentFlow ~= recommendedFlow then
+                    action = "RESTORE FLOW"
                 else
-                    action = "CHARGE BUFFERS"
+                    action = "PRIME BUFFERS"
                 end
-                reason = ("Priming steam buffers to %.0f%%: reactor %.0f%% / turbine %.0f%%"):
+                reason = ("Reactor overproducing to prime buffers to %.0f%%: reactor %.0f%% / turbine %.0f%%"):
                     format(bufferReady, sourceBuffer, turbineBuffer)
             end
         elseif profile and previous.phase == "RESTORE_PROFILE" then
@@ -5233,6 +5275,8 @@ local function buildConfig(role, display, existing)
             reactorSteamDeadbandMin = math.max(1,
                 tonumber(control.reactorSteamDeadbandMin) or 25),
             reactorSteamReserveMargin = 0.15,
+            reactorSteamPrimeMargin = math.max(0.15, math.min(2,
+                tonumber(control.reactorSteamPrimeMargin) or 0.90)),
             reactorSteamAverageSamples = math.max(3,
                 math.floor(tonumber(control.reactorSteamAverageSamples) or 10)),
             reactorHotFluidHigh = math.max(50, math.min(99,

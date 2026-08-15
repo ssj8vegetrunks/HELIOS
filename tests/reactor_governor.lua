@@ -7,6 +7,7 @@ local control = {
     reactorSteamDeadband = 0.01,
     reactorSteamDeadbandMin = 10,
     reactorSteamReserveMargin = 0.025,
+    reactorSteamPrimeMargin = 0.90,
     reactorSteamAverageSamples = 4,
     reactorHotFluidHigh = 85,
     reactorHotFluidLow = 15,
@@ -119,6 +120,60 @@ do
     })
     equal(calls, 1, "verified steam reactor startup write")
     equal(plan.actuatorState, "APPLIED", "steam reactor startup state")
+end
+
+do
+    local primeControl = {}
+    for key, value in pairs(control) do primeControl[key] = value end
+    primeControl.reactorSteamReserveMargin = 0.15
+    primeControl.reactorSteamPrimeMargin = 0.90
+    primeControl.reactorProfiles = {
+        prime_source = {
+            exposure = 0.29,
+            steam = 2300,
+            targetSteam = 2300,
+            updatedAt = 1,
+        },
+    }
+    local memory = governor.new()
+    local unit = reactor(2300, 0.29, { name = "prime_source" })
+    local plan
+    for now = 1, 8 do
+        plan = governor.evaluate(memory, unit, primeControl, {
+            now = now,
+            steamPrimeRequested = true,
+        }, 2000, 1)
+    end
+    equal(plan.targetSteam, 3800,
+        "buffer priming temporarily targets ninety-percent surplus")
+    equal(plan.action, "INCREASE EXPOSURE",
+        "reactor opens further while priming buffers")
+
+    memory = governor.new()
+    unit = reactor(3800, 0.48, { name = "prime_source" })
+    for now = 20, 27 do
+        plan = governor.evaluate(memory, unit, primeControl, {
+            now = now,
+            steamPrimeRequested = true,
+        }, 2000, 1)
+    end
+    equal(plan.state, "PRIMING STEAM",
+        "elevated output is held until both buffers report ready")
+    equal(primeControl.reactorProfiles.prime_source.targetSteam, 2300,
+        "temporary prime does not overwrite the learned reactor profile")
+
+    memory = governor.new()
+    unit = reactor(2300, 0.29, { name = "prime_source" })
+    for now = 30, 37 do
+        plan = governor.evaluate(memory, unit, primeControl, {
+            now = now,
+            steamPrimeRequested = false,
+        }, 2000, 1)
+    end
+    equal(plan.targetSteam, 2300,
+        "completed prime returns to the fifteen-percent reserve target")
+    equal(plan.state, "LEARNED",
+        "normal reactor profile resumes after buffer priming")
 end
 
 do
@@ -407,13 +462,21 @@ do
         end,
     })
     equal(applied, 0.26, "fine calibration adjustment reaches the actuator")
-    local learned = settle(memory, reactor(2050, 0.26, {
+    local learnedUnit = reactor(2050, 0.26, {
         casingTemperature = 90,
         hotFluidPercent = 40,
-    }), 2000, 70, control.reactorSteamAverageSamples +
-        control.reactorLearningSamples + 2)
+    })
+    local learned, completed = nil, false
+    for now = 70, 70 + control.reactorSteamAverageSamples +
+            control.reactorLearningSamples + 1 do
+        learned = governor.evaluate(memory, learnedUnit, control,
+            { now = now }, 2000, 1)
+        completed = completed or learned.calibrationCompleted == true
+    end
     equal(learned.state, "LEARNED",
         "forward calibration finishes at the measured operating point")
+    equal(completed, true,
+        "completed recalibration requests post-learning buffer priming")
     equal(learned.calibrationPhase, nil,
         "completed calibration clears its transient phase")
     equal(control.reactorProfiles.reactor_0.exposure, 0.26,

@@ -1,4 +1,4 @@
-# HELIOS - v1.4.0 Alpha 17 Live Reactor Calibration Progress
+# HELIOS - v1.4.0 Alpha 18 Live Reactor Calibration Progress
 
 Industrial power management for **CC:Tweaked** and **Extreme Reactors**.
 
@@ -198,9 +198,10 @@ still corrects for temperature, fuel, moderator layout, and other nonlinear
 effects. Each individual rod write is read back and verified.
 
 For an uncalibrated turbine, the reactor target is based on the turbine's hard
-intake limit. HELIOS starts an offline steam reactor, closes turbine intake,
-and charges both steam buffers to the 85% safety threshold before opening full
-flow. It then verifies sustained steam and begins its 900/1800-RPM calibration.
+intake limit. HELIOS starts an offline steam reactor and keeps the turbine
+intake open while temporarily targeting 90% extra reactor output. Once both
+steam buffers reach the 85% safety threshold, the reactor returns to its normal
+15% reserve and turbine calibration begins at full flow.
 Peripherals without readable buffer capacity retain the full-steam preflight
 fallback. A power-mode reactor is never considered a steam source.
 

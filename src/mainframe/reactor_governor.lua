@@ -447,8 +447,16 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
             local requestedSteam = math.max(0, tonumber(targetSteam))
             local reserveMargin = math.max(0, math.min(0.25,
                 tonumber(control.reactorSteamReserveMargin) or 0.15))
-            local target = requestedSteam > 0 and
+            local normalTarget = requestedSteam > 0 and
                 requestedSteam * (1 + reserveMargin) or 0
+            local profile = (control.reactorProfiles or {})[name]
+            local primeRequested = context.steamPrimeRequested == true and
+                type(profile) == "table" and previous.recalibrating ~= true
+            local primeMargin = math.max(reserveMargin, math.min(2,
+                tonumber(control.reactorSteamPrimeMargin) or 0.90))
+            local target = primeRequested and
+                math.max(normalTarget, requestedSteam * (1 + primeMargin)) or
+                normalTarget
             local hotFluid = tonumber(reactor.hotFluidPercent)
             local lowBuffer = tonumber(control.reactorHotFluidLow) or 15
             local deadband = math.max(tonumber(control.reactorSteamDeadbandMin) or 25,
@@ -457,7 +465,6 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
                 tonumber(control.maxRodEquivalentStep) or 0.25))
             local stableRequired = math.max(3,
                 math.floor(tonumber(control.reactorLearningSamples) or 8))
-            local profile = (control.reactorProfiles or {})[name]
             -- Calibration advances through a durable, forward-only phase. The
             -- old recalibrating boolean could not distinguish a completed
             -- baseline from one still being collected, so every positive test
@@ -484,6 +491,7 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
             local calibrationStable = calibrationPhase == "ADJUSTING" and
                 averageReady and not response.waiting and
                 (previous.processStableSamples or 0) >= stableRequired
+            local calibrationCompleted = false
             local proposed, state, action, reason = exposure, "STABLE", "HOLD",
                 "Steam production matches trusted turbine demand"
             local balanced = layoutIsBalanced(reactor, exposure, rodCount)
@@ -597,7 +605,12 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
                     state, action = "STEAM HIGH", "REDUCE EXPOSURE"
                     reason = ("Formula estimate %.2f rod-equivalents; reduce gradually"):
                         format(estimate)
+                elseif primeRequested then
+                    state = "PRIMING STEAM"
+                    reason = ("Holding elevated %.0f mB/t output until steam buffers are ready"):
+                        format(target)
                 else
+                    calibrationCompleted = previous.recalibrating == true
                     -- A drained hot-fluid buffer is normal when reactor output
                     -- closely matches live turbine demand. Stable production is
                     -- sufficient to learn the operating point; only the high
@@ -634,6 +647,8 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
                 activeTurbines = activeTurbines or 0,
                 requestedSteam = requestedSteam,
                 targetSteam = target,
+                normalTargetSteam = normalTarget,
+                steamPriming = primeRequested,
                 steamProduction = rawProduction,
                 averageSteamProduction = round(production, 1),
                 averageSteamSamples = averageSamples,
@@ -651,6 +666,7 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
                 learnedProfile = profile,
                 recalibrating = previous.recalibrating == true,
                 calibrationPhase = previous.calibrationPhase,
+                calibrationCompleted = calibrationCompleted,
                 coolingSince = previous.cooldownStartedAt,
                 coolingLastProgressAt = previous.cooldownLastProgressAt,
             }

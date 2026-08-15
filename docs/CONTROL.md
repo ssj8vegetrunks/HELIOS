@@ -1,6 +1,6 @@
 # HELIOS Control Boundary
 
-## v1.4.0-alpha.17
+## v1.4.0-alpha.18
 
 The Power Control screen now runs a guarded automatic turbine governor.
 
@@ -15,11 +15,11 @@ The Power Control screen now runs a guarded automatic turbine governor.
 - Normal direction changes require two matching samples.
 - Flow-limit changes are capped at 100 mB/t every two seconds.
 - When a managed steam reactor and compatible buffer telemetry are present,
-  turbine calibration first closes turbine intake and fills both the reactor
-  and turbine steam buffers to the 85% safety threshold.
-- Once both buffers are primed, HELIOS opens the turbine to its full intake,
-  verifies sustained steam, and starts the RPM tests. Older peripherals without
-  buffer-capacity telemetry retain the full-steam preflight fallback.
+  HELIOS keeps turbine intake open and temporarily targets 90% extra reactor
+  output until both reactor and turbine steam buffers reach 85%.
+- Once both buffers are primed, HELIOS returns the reactor to its normal 15%
+  reserve, verifies sustained steam, and starts the RPM tests. Older peripherals
+  without buffer-capacity telemetry retain the full-steam preflight fallback.
 - Turbines with saved profiles also perform one priming cycle when HELIOS starts
   and after reactor recalibration, then return to their learned flow. Priming is
   not repeatedly triggered during ordinary operation.
@@ -101,6 +101,7 @@ cooled reactor:
 - Maximum reactor exposure step: 0.25 rod-equivalent after 3 matching decisions
 - Reactor fine-control resolution: 0.01 rod-equivalent
 - Steam reserve margin: 15%
+- Temporary steam-buffer priming margin: 90%
 - Steam rolling average: 10 one-second samples
 - Minimum post-command response wait: 15 seconds, extended while plant telemetry is moving
 - Maximum casing temperature for a fresh calibration baseline: 150 C
