@@ -74,7 +74,8 @@ ok, reason = adapter.prepareRecalibration(reactor, function()
     pauses = pauses + 1
 end)
 assert(ok, tostring(reason))
-assert(pauses == 2, "recalibration reset should yield between verified stages")
+assert(pauses == 3,
+    "recalibration reset should wait before each hardware readback")
 local prepareCommands = {}
 for index = beforePrepare + 1, #calls do
     local call = calls[index]

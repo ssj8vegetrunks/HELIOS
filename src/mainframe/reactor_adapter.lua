@@ -133,7 +133,7 @@ function adapter.read(device)
     return reactor
 end
 
-function adapter.setAllControlRodLevels(reactor, requested)
+function adapter.setAllControlRodLevels(reactor, requested, pauseBeforeVerify)
     if type(reactor) ~= "table" or type(reactor.name) ~= "string" then
         return false, nil, "Invalid reactor identity"
     end
@@ -154,6 +154,7 @@ function adapter.setAllControlRodLevels(reactor, requested)
     local ok, reason = pcall(peripheral.call, reactor.name,
         "setAllControlRodLevels", requested)
     if not ok then return false, nil, tostring(reason) end
+    if type(pauseBeforeVerify) == "function" then pauseBeforeVerify() end
 
     local count = tonumber(reactor.controlRods)
     if not count and methods.getNumberOfControlRods then
@@ -171,7 +172,7 @@ function adapter.setAllControlRodLevels(reactor, requested)
     return true, average
 end
 
-function adapter.setActive(reactor, requested)
+function adapter.setActive(reactor, requested, pauseBeforeVerify)
     if type(reactor) ~= "table" or type(reactor.name) ~= "string" then
         return false, nil, "Invalid reactor identity"
     end
@@ -194,6 +195,7 @@ function adapter.setActive(reactor, requested)
     requested = requested == true
     local ok, reason = pcall(peripheral.call, reactor.name, "setActive", requested)
     if not ok then return false, nil, tostring(reason) end
+    if type(pauseBeforeVerify) == "function" then pauseBeforeVerify() end
 
     local readOk, actual = pcall(peripheral.call, reactor.name, readMethod)
     if not readOk or type(actual) ~= "boolean" then
@@ -210,21 +212,17 @@ end
 function adapter.prepareRecalibration(reactor, pause)
     pause = type(pause) == "function" and pause or function() end
 
-    local stopped, _, stopError = adapter.setActive(reactor, false)
+    local stopped, _, stopError = adapter.setActive(reactor, false, pause)
     if not stopped then
         return false, "Reactor shutdown failed: " ..
             tostring(stopError or "activation command rejected")
     end
-    pause()
-
-    local inserted, _, rodError = adapter.setAllControlRodLevels(reactor, 100)
+    local inserted, _, rodError = adapter.setAllControlRodLevels(reactor, 100, pause)
     if not inserted then
         return false, "Rod insertion failed: " ..
             tostring(rodError or "bulk rod command rejected")
     end
-    pause()
-
-    local started, _, startError = adapter.setActive(reactor, true)
+    local started, _, startError = adapter.setActive(reactor, true, pause)
     if not started then
         return false, "Reactor restart failed: " ..
             tostring(startError or "activation command rejected")
