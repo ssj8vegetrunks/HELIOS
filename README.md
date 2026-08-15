@@ -1,4 +1,4 @@
-# HELIOS — v1.4.0 Alpha 14 Live Reactor Calibration Progress
+# HELIOS - v1.4.0 Alpha 16 Live Reactor Calibration Progress
 
 Industrial power management for **CC:Tweaked** and **Extreme Reactors**.
 

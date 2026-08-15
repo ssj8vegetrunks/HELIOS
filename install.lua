@@ -1,7 +1,7 @@
 -- HELIOS single-file installer
 -- Milestone 8.5: coordinated reactor-first steam startup.
 
-local VERSION = "1.4.0-alpha.15"
+local VERSION = "1.4.0-alpha.16"
 local INSTALL_DIR = "/helios"
 local STAGE_DIR = "/.helios-install"
 
@@ -1920,7 +1920,7 @@ function mainframe.run(config)
                             maintenanceEnabledHere = false
                             restartReactorPolling()
                             calibrationNotice = {
-                                text = "RECALIBRATION STARTED — RODS INSERTED",
+                                text = "RECALIBRATION STARTED - RODS INSERTED",
                                 colour = colors.orange,
                             }
                         else

@@ -1150,7 +1150,7 @@ function mainframe.run(config)
                             maintenanceEnabledHere = false
                             restartReactorPolling()
                             calibrationNotice = {
-                                text = "RECALIBRATION STARTED — RODS INSERTED",
+                                text = "RECALIBRATION STARTED - RODS INSERTED",
                                 colour = colors.orange,
                             }
                         else
