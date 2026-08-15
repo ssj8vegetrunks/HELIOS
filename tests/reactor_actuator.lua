@@ -7,8 +7,8 @@ peripheral = {
     isPresent = function(name) return name == "reactor_0" end,
     getMethods = function(name)
         if name ~= "reactor_0" then return {} end
-        return { "setActive", "active", "setControlRodLevel", "getControlRodLevel",
-            "getNumberOfControlRods" }
+        return { "setActive", "active", "setAllControlRodLevels",
+            "setControlRodLevel", "getControlRodLevel", "getNumberOfControlRods" }
     end,
     call = function(name, method, first, second)
         calls[#calls + 1] = {
@@ -16,6 +16,10 @@ peripheral = {
         }
         if method == "setControlRodLevel" then
             if not stuck or first ~= 1 then levels[first] = second end
+            return
+        end
+        if method == "setAllControlRodLevels" then
+            for index in pairs(levels) do levels[index] = first end
             return
         end
         if method == "setActive" then active = first return end
@@ -64,9 +68,9 @@ for index = 1, 24 do
     assert(levels[index] == 99, "remaining rods should be 99% inserted")
 end
 
-ok, applied, reason = adapter.setControlRodExposure(reactor, 0)
+ok, applied, reason = adapter.setAllControlRodLevels(reactor, 100)
 assert(ok, tostring(reason))
-assert(applied == 0, "recalibration baseline should report zero exposure")
+assert(applied == 100, "recalibration baseline should report full insertion")
 for index = 0, 24 do
     assert(levels[index] == 100,
         "confirmed recalibration should insert every control rod")

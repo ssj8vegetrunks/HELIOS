@@ -1138,7 +1138,7 @@ function mainframe.run(config)
                         -- immediately, then restart the polling timer so the
                         -- baseline cannot remain at sample 1 after a modal view.
                         local inserted, _, insertError =
-                            reactorAdapter.setControlRodExposure(reactor, 0)
+                            reactorAdapter.setAllControlRodLevels(reactor, 100)
                         if inserted then
                             reactorGovernor.beginRecalibration(reactorGovernorMemory,
                                 config.control, reactorName)
