@@ -1594,7 +1594,6 @@ function lab.run()
         buttons.save = ui.inlineButton("SAVE CURRENT", colors.lime)
         write(" ")
         buttons.quit = ui.inlineButton("QUIT", colors.red)
-        print("")
     end
 
     local function hit(button, x, y)
