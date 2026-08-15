@@ -1137,9 +1137,11 @@ function mainframe.run(config)
                         -- insertion. Apply and verify that conservative command
                         -- immediately, then restart the polling timer so the
                         -- baseline cannot remain at sample 1 after a modal view.
-                        local inserted, _, insertError =
-                            reactorAdapter.setAllControlRodLevels(reactor, 100)
-                        if inserted then
+                        local prepared, prepareError =
+                            reactorAdapter.prepareRecalibration(reactor, function()
+                                sleep(0.1)
+                            end)
+                        if prepared then
                             reactorGovernor.beginRecalibration(reactorGovernorMemory,
                                 config.control, reactorName)
                             saveConfig()
@@ -1153,7 +1155,7 @@ function mainframe.run(config)
                         else
                             calibrationNotice = {
                                 text = "RECALIBRATION BLOCKED: " ..
-                                    tostring(insertError or "ROD INSERTION FAILED"),
+                                    tostring(prepareError or "REACTOR RESET FAILED"),
                                 colour = colors.red,
                             }
                         end

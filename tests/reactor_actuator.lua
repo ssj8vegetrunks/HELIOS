@@ -68,9 +68,30 @@ for index = 1, 24 do
     assert(levels[index] == 99, "remaining rods should be 99% inserted")
 end
 
-ok, applied, reason = adapter.setAllControlRodLevels(reactor, 100)
+local beforePrepare = #calls
+local pauses = 0
+ok, reason = adapter.prepareRecalibration(reactor, function()
+    pauses = pauses + 1
+end)
 assert(ok, tostring(reason))
-assert(applied == 100, "recalibration baseline should report full insertion")
+assert(pauses == 2, "recalibration reset should yield between verified stages")
+local prepareCommands = {}
+for index = beforePrepare + 1, #calls do
+    local call = calls[index]
+    if call.method == "setActive" or call.method == "setAllControlRodLevels" then
+        prepareCommands[#prepareCommands + 1] = call
+    end
+end
+assert(prepareCommands[1].method == "setActive" and
+       prepareCommands[1].first == false,
+    "recalibration should shut down the reactor first")
+assert(prepareCommands[2].method == "setAllControlRodLevels" and
+       prepareCommands[2].first == 100,
+    "recalibration should atomically insert every rod")
+assert(prepareCommands[3].method == "setActive" and
+       prepareCommands[3].first == true,
+    "recalibration should restart the reactor after rod insertion")
+assert(active == true, "recalibration should leave the reactor active")
 for index = 0, 24 do
     assert(levels[index] == 100,
         "confirmed recalibration should insert every control rod")

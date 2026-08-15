@@ -207,6 +207,31 @@ function adapter.setActive(reactor, requested)
     return true, actual
 end
 
+function adapter.prepareRecalibration(reactor, pause)
+    pause = type(pause) == "function" and pause or function() end
+
+    local stopped, _, stopError = adapter.setActive(reactor, false)
+    if not stopped then
+        return false, "Reactor shutdown failed: " ..
+            tostring(stopError or "activation command rejected")
+    end
+    pause()
+
+    local inserted, _, rodError = adapter.setAllControlRodLevels(reactor, 100)
+    if not inserted then
+        return false, "Rod insertion failed: " ..
+            tostring(rodError or "bulk rod command rejected")
+    end
+    pause()
+
+    local started, _, startError = adapter.setActive(reactor, true)
+    if not started then
+        return false, "Reactor restart failed: " ..
+            tostring(startError or "activation command rejected")
+    end
+    return true
+end
+
 local function exposureLevels(count, exposure)
     count = math.max(0, math.floor(tonumber(count) or 0))
     exposure = math.max(0, math.min(count, tonumber(exposure) or 0))
