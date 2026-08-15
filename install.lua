@@ -505,6 +505,19 @@ function ui.line(value, colour)
     term.setTextColor(colors.white)
 end
 
+function ui.block(value, colour, maxRows)
+    local width = select(1, term.getSize())
+    local remaining = tostring(value or "")
+    local rows = 0
+    maxRows = math.max(1, math.floor(tonumber(maxRows) or 1))
+    while #remaining > 0 and rows < maxRows do
+        ui.line(string.sub(remaining, 1, width), colour)
+        remaining = string.sub(remaining, width + 1)
+        rows = rows + 1
+    end
+    return rows
+end
+
 function ui.header(role, subtitle)
     ui.prepare()
     if #idConflicts > 0 then
@@ -1238,8 +1251,9 @@ function mainframe.run(config)
             counts.reactor, counts.turbine, counts.battery, counts.monitor
         ))
 
+        local width, height = term.getSize()
         if currentAlarm then
-            ui.line("!! " .. currentAlarm.message, alarmColour())
+            ui.block("!! " .. currentAlarm.message, alarmColour(), 3)
             local _, row = term.getCursorPos()
             print("[ SILENCE ALARM ]")
             silenceButton = { y = row, x1 = 1, x2 = 17 }
@@ -1249,8 +1263,11 @@ function mainframe.run(config)
                 config.alarms.enabled and colors.lime or colors.gray)
         end
 
-        local width, height = term.getSize()
-        local availableRows = math.max(0, height - 18)
+        -- Keep the controls on fixed bottom rows. Alarm and device text may
+        -- consume only the space above this footer, preserving touch hitboxes.
+        local footerRow = math.max(1, height - 2)
+        local contentRow = select(2, term.getCursorPos())
+        local availableRows = math.max(0, footerRow - contentRow)
         if #devices > availableRows then
             availableRows = math.max(0, availableRows - 1)
         end
@@ -1262,7 +1279,7 @@ function mainframe.run(config)
         if #devices > availableRows then
             print(("+ %d more (run: helios scan)"):format(#devices - availableRows))
         end
-        print("")
+        term.setCursorPos(1, footerRow)
         dashboardButtons = {}
         dashboardButtons.reactors = ui.inlineButton("REACTORS", colors.cyan)
         write(" ")
@@ -1277,7 +1294,8 @@ function mainframe.run(config)
         dashboardButtons.settings = ui.inlineButton("SETTINGS", colors.cyan)
         print("")
         term.setTextColor(colors.gray)
-        print("Keyboard: V/G/E/C/R/S | Q exit")
+        term.setCursorPos(1, height)
+        write(string.sub("Keyboard: V/G/E/C/R/S | Q exit", 1, width))
         term.setTextColor(colors.white)
     end
 
@@ -3957,6 +3975,13 @@ local function profileFor(control, name)
     return profile
 end
 
+local function isSteamSupplyFailure(reason)
+    reason = tostring(reason or "")
+    return string.find(reason, "Cannot maintain calibration steam", 1, true) == 1 or
+        string.find(reason, "Steam supply lost", 1, true) == 1 or
+        string.find(reason, "Actual steam telemetry", 1, true) == 1
+end
+
 local function saveProfile(memory, control, name, learnedRpm, learnedFlow)
     local lowBand = tonumber(control.lowBandRpm) or 900
     local highBand = tonumber(control.highBandRpm) or 1800
@@ -4165,6 +4190,18 @@ function governor.evaluate(memory, turbine, control, context)
             end
             reason = tostring(context.steamSourceReason or
                 "Preparing managed steam supply before turbine calibration")
+        elseif not profile and previous.phase == "FAILED" and
+               context.steamSourceManaged == true and
+               isSteamSupplyFailure(previous.calibrationError) then
+            beginPhase("PREFLIGHT")
+            previous.calibrationError = nil
+            previous.fullSteamCount = 0
+            previous.lowSteamCount = 0
+            state = "CALIBRATION PREFLIGHT"
+            action = turbine.inductorEngaged and "VERIFY STEAM" or "ENGAGE INDUCTOR"
+            reason = "Managed steam restored; retrying turbine calibration"
+            recommendedInductor = true
+            recommendedFlow = flowMaximum
         elseif previous.phase == "FAILED" then
             state = "CALIBRATION FAILED"
             action = turbine.inductorEngaged and "HOLD" or "ENGAGE INDUCTOR"

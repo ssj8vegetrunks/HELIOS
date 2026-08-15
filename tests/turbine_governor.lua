@@ -88,6 +88,31 @@ do
         "ready steam source releases turbine preflight")
 end
 
+do
+    local memory = governor.new()
+    local unit = turbine("retry_supply", 0, 2000, {
+        flowRate = 1799,
+        inductorEngaged = true,
+    })
+    local failed
+    for now = 1, control.calibrationFailureSamples do
+        failed = governor.evaluate(memory, unit, control, { now = now })
+    end
+    equal(failed.state, "CALIBRATION FAILED",
+        "unmanaged steam shortage still reports a real failure")
+
+    unit.flowRate = 2000
+    local retry = governor.evaluate(memory, unit, control, {
+        now = control.calibrationFailureSamples + 1,
+        steamSourceManaged = true,
+        steamSourceReady = true,
+    })
+    equal(retry.state, "CALIBRATION PREFLIGHT",
+        "restored managed steam clears a stale supply failure")
+    assert(retry.reason:find("retrying", 1, true),
+        "automatic retry explains why the old alarm cleared")
+end
+
 local function preflight(memory, name, startAt)
     local plan
     startAt = startAt or 1

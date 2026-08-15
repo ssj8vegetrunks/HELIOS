@@ -484,8 +484,9 @@ function mainframe.run(config)
             counts.reactor, counts.turbine, counts.battery, counts.monitor
         ))
 
+        local width, height = term.getSize()
         if currentAlarm then
-            ui.line("!! " .. currentAlarm.message, alarmColour())
+            ui.block("!! " .. currentAlarm.message, alarmColour(), 3)
             local _, row = term.getCursorPos()
             print("[ SILENCE ALARM ]")
             silenceButton = { y = row, x1 = 1, x2 = 17 }
@@ -495,8 +496,11 @@ function mainframe.run(config)
                 config.alarms.enabled and colors.lime or colors.gray)
         end
 
-        local width, height = term.getSize()
-        local availableRows = math.max(0, height - 18)
+        -- Keep the controls on fixed bottom rows. Alarm and device text may
+        -- consume only the space above this footer, preserving touch hitboxes.
+        local footerRow = math.max(1, height - 2)
+        local contentRow = select(2, term.getCursorPos())
+        local availableRows = math.max(0, footerRow - contentRow)
         if #devices > availableRows then
             availableRows = math.max(0, availableRows - 1)
         end
@@ -508,7 +512,7 @@ function mainframe.run(config)
         if #devices > availableRows then
             print(("+ %d more (run: helios scan)"):format(#devices - availableRows))
         end
-        print("")
+        term.setCursorPos(1, footerRow)
         dashboardButtons = {}
         dashboardButtons.reactors = ui.inlineButton("REACTORS", colors.cyan)
         write(" ")
@@ -523,7 +527,8 @@ function mainframe.run(config)
         dashboardButtons.settings = ui.inlineButton("SETTINGS", colors.cyan)
         print("")
         term.setTextColor(colors.gray)
-        print("Keyboard: V/G/E/C/R/S | Q exit")
+        term.setCursorPos(1, height)
+        write(string.sub("Keyboard: V/G/E/C/R/S | Q exit", 1, width))
         term.setTextColor(colors.white)
     end
 

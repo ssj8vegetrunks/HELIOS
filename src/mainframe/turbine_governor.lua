@@ -32,6 +32,13 @@ local function profileFor(control, name)
     return profile
 end
 
+local function isSteamSupplyFailure(reason)
+    reason = tostring(reason or "")
+    return string.find(reason, "Cannot maintain calibration steam", 1, true) == 1 or
+        string.find(reason, "Steam supply lost", 1, true) == 1 or
+        string.find(reason, "Actual steam telemetry", 1, true) == 1
+end
+
 local function saveProfile(memory, control, name, learnedRpm, learnedFlow)
     local lowBand = tonumber(control.lowBandRpm) or 900
     local highBand = tonumber(control.highBandRpm) or 1800
@@ -240,6 +247,18 @@ function governor.evaluate(memory, turbine, control, context)
             end
             reason = tostring(context.steamSourceReason or
                 "Preparing managed steam supply before turbine calibration")
+        elseif not profile and previous.phase == "FAILED" and
+               context.steamSourceManaged == true and
+               isSteamSupplyFailure(previous.calibrationError) then
+            beginPhase("PREFLIGHT")
+            previous.calibrationError = nil
+            previous.fullSteamCount = 0
+            previous.lowSteamCount = 0
+            state = "CALIBRATION PREFLIGHT"
+            action = turbine.inductorEngaged and "VERIFY STEAM" or "ENGAGE INDUCTOR"
+            reason = "Managed steam restored; retrying turbine calibration"
+            recommendedInductor = true
+            recommendedFlow = flowMaximum
         elseif previous.phase == "FAILED" then
             state = "CALIBRATION FAILED"
             action = turbine.inductorEngaged and "HOLD" or "ENGAGE INDUCTOR"

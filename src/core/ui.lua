@@ -60,6 +60,19 @@ function ui.line(value, colour)
     term.setTextColor(colors.white)
 end
 
+function ui.block(value, colour, maxRows)
+    local width = select(1, term.getSize())
+    local remaining = tostring(value or "")
+    local rows = 0
+    maxRows = math.max(1, math.floor(tonumber(maxRows) or 1))
+    while #remaining > 0 and rows < maxRows do
+        ui.line(string.sub(remaining, 1, width), colour)
+        remaining = string.sub(remaining, width + 1)
+        rows = rows + 1
+    end
+    return rows
+end
+
 function ui.header(role, subtitle)
     ui.prepare()
     if #idConflicts > 0 then

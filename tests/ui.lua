@@ -70,6 +70,25 @@ ui.line("!! " .. string.rep("LONG ALARM ", 10), colors.red)
 assert(cursorY == 7, "long alarm must occupy exactly one display row")
 assert(scrollCount == 0, "clipped UI lines must not scroll the display")
 
+rows, cursorX, cursorY, scrollCount = {}, 1, 12, 0
+local alarmText = "!! BigReactors-Turbine_0 CALIBRATION FAILED: " ..
+    "Cannot maintain calibration steam: 1799 of 2000 mB/t"
+ui.block(alarmText, colors.red, 3)
+local silenceRow = cursorY
+ui.line("[ SILENCE ALARM ]", colors.white)
+term.setCursorPos(1, height - 2)
+local reactorButton = ui.inlineButton("REACTORS", colors.cyan)
+print("")
+ui.inlineButton("CONTROL", colors.cyan)
+term.setCursorPos(1, height)
+write("Keyboard: V/G/E/C/R/S | Q exit")
+assert((rows[12] .. rows[13]):sub(1, #alarmText) == alarmText,
+    "complete two-line alarm must remain visible")
+assert(silenceRow == 14, "alarm block must report its fixed row count")
+assert(scrollCount == 0, "fixed dashboard footer must never scroll")
+assert(ui.hit(reactorButton, reactorButton.x1, height - 2),
+    "fixed dashboard footer must retain its touch target")
+
 -- The calibration page deliberately uses two compact action rows. Advancing
 -- beyond row 19 would scroll the visible buttons away from these hitboxes.
 rows, cursorX, cursorY, scrollCount = {}, 1, 16, 0
