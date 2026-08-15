@@ -53,6 +53,13 @@ function ui.prepare()
     term.setCursorPos(1, 1)
 end
 
+function ui.line(value, colour)
+    local width = select(1, term.getSize())
+    term.setTextColor(colour or colors.white)
+    print(string.sub(tostring(value or ""), 1, width))
+    term.setTextColor(colors.white)
+end
+
 function ui.header(role, subtitle)
     ui.prepare()
     if #idConflicts > 0 then
@@ -86,10 +93,13 @@ function ui.header(role, subtitle)
 end
 
 function ui.status(label, value, colour)
+    local width = select(1, term.getSize())
+    local prefix = tostring(label) .. ": "
     term.setTextColor(colors.lightGray)
-    write(label .. ": ")
+    write(string.sub(prefix, 1, width))
     term.setTextColor(colour or colors.white)
-    print(tostring(value))
+    local x = select(1, term.getCursorPos())
+    print(string.sub(tostring(value), 1, math.max(0, width - x + 1)))
     term.setTextColor(colors.white)
 end
 

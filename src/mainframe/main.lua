@@ -473,13 +473,10 @@ function mainframe.run(config)
         local controlText, controlColour = controlStatus()
         ui.status("Control", controlText, controlColour)
         if registryStale then
-            term.setTextColor(colors.orange)
-            print("Registry may be outdated")
-            term.setTextColor(colors.white)
+            ui.line("Registry may be outdated", colors.orange)
         elseif maintenance then
-            print(("Auto return in %d:%02d"):format(
-                math.floor(remainingMaintenance() / 60), remainingMaintenance() % 60
-            ))
+            ui.line(("Auto return in %d:%02d"):format(
+                math.floor(remainingMaintenance() / 60), remainingMaintenance() % 60))
         end
 
         local counts = registry.countByCategory(devices)
@@ -488,9 +485,7 @@ function mainframe.run(config)
         ))
 
         if currentAlarm then
-            term.setTextColor(alarmColour())
-            print("!! " .. currentAlarm.message)
-            term.setTextColor(colors.white)
+            ui.line("!! " .. currentAlarm.message, alarmColour())
             local _, row = term.getCursorPos()
             print("[ SILENCE ALARM ]")
             silenceButton = { y = row, x1 = 1, x2 = 17 }

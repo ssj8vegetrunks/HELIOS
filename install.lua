@@ -498,6 +498,13 @@ function ui.prepare()
     term.setCursorPos(1, 1)
 end
 
+function ui.line(value, colour)
+    local width = select(1, term.getSize())
+    term.setTextColor(colour or colors.white)
+    print(string.sub(tostring(value or ""), 1, width))
+    term.setTextColor(colors.white)
+end
+
 function ui.header(role, subtitle)
     ui.prepare()
     if #idConflicts > 0 then
@@ -531,10 +538,13 @@ function ui.header(role, subtitle)
 end
 
 function ui.status(label, value, colour)
+    local width = select(1, term.getSize())
+    local prefix = tostring(label) .. ": "
     term.setTextColor(colors.lightGray)
-    write(label .. ": ")
+    write(string.sub(prefix, 1, width))
     term.setTextColor(colour or colors.white)
-    print(tostring(value))
+    local x = select(1, term.getCursorPos())
+    print(string.sub(tostring(value), 1, math.max(0, width - x + 1)))
     term.setTextColor(colors.white)
 end
 
@@ -1217,13 +1227,10 @@ function mainframe.run(config)
         local controlText, controlColour = controlStatus()
         ui.status("Control", controlText, controlColour)
         if registryStale then
-            term.setTextColor(colors.orange)
-            print("Registry may be outdated")
-            term.setTextColor(colors.white)
+            ui.line("Registry may be outdated", colors.orange)
         elseif maintenance then
-            print(("Auto return in %d:%02d"):format(
-                math.floor(remainingMaintenance() / 60), remainingMaintenance() % 60
-            ))
+            ui.line(("Auto return in %d:%02d"):format(
+                math.floor(remainingMaintenance() / 60), remainingMaintenance() % 60))
         end
 
         local counts = registry.countByCategory(devices)
@@ -1232,9 +1239,7 @@ function mainframe.run(config)
         ))
 
         if currentAlarm then
-            term.setTextColor(alarmColour())
-            print("!! " .. currentAlarm.message)
-            term.setTextColor(colors.white)
+            ui.line("!! " .. currentAlarm.message, alarmColour())
             local _, row = term.getCursorPos()
             print("[ SILENCE ALARM ]")
             silenceButton = { y = row, x1 = 1, x2 = 17 }
