@@ -1808,6 +1808,13 @@ function mainframe.run(config)
                     ("%.0f mB/t raw"):format(reactor.steamProduction) or "N/A"
                 ui.status("Output / progress", ("%s [%d/%d; %d/%d]"):format(
                     output, sampleCount, sampleTarget, responseCount, responseTarget))
+                local commandTarget = math.max(2,
+                    math.floor(tonumber(config.control.reactorCommandSamples) or 3))
+                ui.status("Actuator", ("%s / %s [%d/%d]"):format(
+                    tostring(plan.action or "HOLD"),
+                    tostring(plan.actuatorState or "WAITING"),
+                    tonumber(plan.actionSamples) or 0, commandTarget),
+                    plan.actuatorState == "FAULT" and colors.red or colors.lightGray)
                 ui.status("Current setting", formatRodLayout(reactor,
                     plan.currentRodExposure))
                 ui.status("Saved calibration", profile and
@@ -1822,10 +1829,16 @@ function mainframe.run(config)
                     ui.status("Result", calibrationNotice.text, calibrationNotice.colour)
                 end
                 print("")
-                buttons.delete = ui.button("DELETE CALIBRATION DATA", colors.red)
-                buttons.recalibrate = ui.button("RECALIBRATE", colors.orange)
-                buttons.save = ui.button("SAVE CURRENT REACTOR SETUP", colors.lime)
-                buttons.close = ui.button("CLOSE", colors.cyan)
+                -- Keep the four actions on two rows. A fourth full-width print
+                -- could advance past the mirrored 19-row terminal, scroll the
+                -- display, and leave every recorded touch target one row low.
+                buttons.delete = ui.inlineButton("DELETE CALIBRATION DATA", colors.red)
+                write(" ")
+                buttons.recalibrate = ui.inlineButton("RECALIBRATE", colors.orange)
+                print("")
+                buttons.save = ui.inlineButton("SAVE CURRENT REACTOR SETUP", colors.lime)
+                write(" ")
+                buttons.close = ui.inlineButton("CLOSE", colors.cyan)
             end
 
             pollReactors()

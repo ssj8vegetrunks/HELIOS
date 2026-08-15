@@ -296,6 +296,35 @@ end
 do
     local memory = governor.new()
     governor.beginRecalibration(memory, control, "reactor_0")
+    local exposed = reactor(2028, 0.29, {
+        casingTemperature = 120,
+        hotFluidPercent = 0,
+    })
+    local applied
+    for now = 1, control.reactorCommandSamples do
+        local plan = governor.evaluate(memory, exposed, control,
+            { now = now }, 2000, 1)
+        exposed.governor = plan
+        governor.apply(memory, exposed, control, { now = now }, {
+            setControlRodExposure = function(_, exposure)
+                applied = exposure
+                return true, exposure
+            end,
+        })
+        if now < control.reactorCommandSamples then
+            equal(applied, nil,
+                "recalibration waits for its guarded command samples")
+            equal(plan.actuatorState, "VERIFYING",
+                "recalibration exposes its actuator verification delay")
+        end
+    end
+    equal(applied, 0,
+        "third recalibration command sample inserts every control rod")
+end
+
+do
+    local memory = governor.new()
+    governor.beginRecalibration(memory, control, "reactor_0")
     local unit = reactor(1, 0, {
         casingTemperature = 73,
         hotFluidPercent = 0,
