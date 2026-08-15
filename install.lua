@@ -1,7 +1,7 @@
 -- HELIOS single-file installer
 -- Milestone 8.5: coordinated reactor-first steam startup.
 
-local VERSION = "1.4.0-alpha.14"
+local VERSION = "1.4.0-alpha.15"
 local INSTALL_DIR = "/helios"
 local STAGE_DIR = "/.helios-install"
 
@@ -124,11 +124,14 @@ function config.load()
     loaded.control.reactorSteamDeadbandMin = math.max(1,
         tonumber(loaded.control.reactorSteamDeadbandMin) or 25)
     loaded.control.reactorSteamReserveMargin = math.max(0, math.min(0.25,
-        tonumber(loaded.control.reactorSteamReserveMargin) or 0.025))
+        tonumber(loaded.control.reactorSteamReserveMargin) or 0.15))
     loaded.control.reactorSteamAverageSamples = math.max(3,
         math.floor(tonumber(loaded.control.reactorSteamAverageSamples) or 10))
     loaded.control.reactorHotFluidHigh = math.max(50, math.min(99,
         tonumber(loaded.control.reactorHotFluidHigh) or 85))
+    loaded.control.calibrationBufferReady = math.max(50, math.min(
+        loaded.control.reactorHotFluidHigh,
+        tonumber(loaded.control.calibrationBufferReady) or 85))
     loaded.control.reactorHotFluidLow = math.max(1, math.min(
         loaded.control.reactorHotFluidHigh - 1,
         tonumber(loaded.control.reactorHotFluidLow) or 15))
@@ -1027,6 +1030,7 @@ function mainframe.run(config)
             steamSourceManaged = steamSource.managed,
             steamSourceReady = steamSource.ready,
             steamSourceReason = steamSource.reason,
+            steamSourceBufferPercent = steamSource.bufferPercent,
         })
         if turbineGovernor.consumeProfileChanges(governorMemory) then
             configStore.save(config)
@@ -2917,6 +2921,7 @@ function governor.steamSourceStatus(reactors, demand, control)
         reactor = reactor.name,
         demand = required,
         production = production,
+        bufferPercent = tonumber(reactor.hotFluidPercent),
     }
 end
 
@@ -3082,7 +3087,7 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
     elseif reactor.active == false then
         local requested = math.max(0, tonumber(targetSteam) or 0)
         local reserve = math.max(0, math.min(0.25,
-            tonumber(control.reactorSteamReserveMargin) or 0.025))
+            tonumber(control.reactorSteamReserveMargin) or 0.15))
         if requested > 0 then
             result = {
                 mode = "automatic",
@@ -3129,11 +3134,10 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
                 rawProduction, control)
             local requestedSteam = math.max(0, tonumber(targetSteam))
             local reserveMargin = math.max(0, math.min(0.25,
-                tonumber(control.reactorSteamReserveMargin) or 0.025))
+                tonumber(control.reactorSteamReserveMargin) or 0.15))
             local target = requestedSteam > 0 and
                 requestedSteam * (1 + reserveMargin) or 0
             local hotFluid = tonumber(reactor.hotFluidPercent)
-            local highBuffer = tonumber(control.reactorHotFluidHigh) or 85
             local lowBuffer = tonumber(control.reactorHotFluidLow) or 15
             local deadband = math.max(tonumber(control.reactorSteamDeadbandMin) or 25,
                 target * (tonumber(control.reactorSteamDeadband) or 0.01))
@@ -3255,16 +3259,12 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
                 reason = "Waiting for steam, buffer, and casing temperature to settle"
             else
                 clearCooldown(previous)
-                local bufferUsable = hotFluid == nil or
-                    (hotFluid > lowBuffer and hotFluid < highBuffer)
-                if bufferUsable then addLearningPoint(previous, exposure, production) end
+                -- Once telemetry has settled, a full buffer is a valid operating
+                -- condition. The steam loop exhausts overflow, so active demand
+                -- must retain its reserve instead of draining the network again.
+                addLearningPoint(previous, exposure, production)
 
-                if hotFluid and hotFluid >= highBuffer then
-                    proposed = math.max(0, exposure - maxStep)
-                    state, action = "BUFFER HIGH", "REDUCE EXPOSURE"
-                    reason = ("Hot-fluid buffer is %.1f%%; reduce exposed fuel"):
-                        format(hotFluid)
-                elseif production < target - deadband then
+                if production < target - deadband then
                     if exposure >= rodCount - 0.005 then
                         state = "STEAM DEFICIT"
                         reason = "Reactor cannot meet turbine demand with every rod exposed"
@@ -3811,9 +3811,13 @@ function adapter.read(device)
     turbine.flowRateMax = number(readAny(name, availableMethods, { "getFluidFlowRateMax", "getMaxFluidFlowRate", "getMaxIntakeRate", "fluidFlowRateMax" }))
     turbine.flowRateLimit = number(readAny(name, availableMethods, { "getFluidFlowRateMaxMax", "getFluidFlowRateLimit", "getMaxPermittedFlow", "flowRateLimit" }))
     turbine.inputAmount = number(readAny(name, availableMethods, { "getInputAmount", "getInputFluidAmount", "inputAmount" }))
-    turbine.inputMax = number(readAny(name, availableMethods, { "getInputAmountMax", "getInputCapacity", "inputAmountMax" }))
+    turbine.inputMax = number(readAny(name, availableMethods, {
+        "getInputAmountMax", "getInputCapacity", "getFluidAmountMax", "inputAmountMax",
+    }))
     turbine.outputAmount = number(readAny(name, availableMethods, { "getOutputAmount", "getOutputFluidAmount", "outputAmount" }))
-    turbine.outputMax = number(readAny(name, availableMethods, { "getOutputAmountMax", "getOutputCapacity", "outputAmountMax" }))
+    turbine.outputMax = number(readAny(name, availableMethods, {
+        "getOutputAmountMax", "getOutputCapacity", "getFluidAmountMax", "outputAmountMax",
+    }))
     turbine.inductorEngaged = readAny(name, availableMethods, { "getInductorEngaged", "isInductorEngaged", "inductorEngaged" })
     turbine.ventMode = readAny(name, availableMethods, { "getVentMode", "ventMode" })
     turbine.bladeCount = number(readAny(name, availableMethods, { "getBladeCount", "getNumberOfBlades", "bladeCount" }))
@@ -4054,6 +4058,9 @@ function governor.evaluate(memory, turbine, control, context)
         math.floor(tonumber(control.calibrationBandEscapeSamples) or 3))
     local stallTimeout = math.max(30,
         tonumber(control.calibrationStallTimeout) or 180)
+    local bufferReady = math.max(50, math.min(
+        tonumber(control.reactorHotFluidHigh) or 85,
+        tonumber(control.calibrationBufferReady) or 85))
     local now = tonumber(context.now) or 0
 
     local result
@@ -4084,6 +4091,10 @@ function governor.evaluate(memory, turbine, control, context)
         local recommendedFlow = currentFlow
         local recommendedInductor = turbine.inductorEngaged
         local state, action, reason = "STABLE", "HOLD", "Rotor is inside the target deadband"
+        local sourceBuffer = tonumber(context.steamSourceBufferPercent)
+        local turbineBuffer = tonumber(turbine.inputPercent)
+        local canPrimeSteam = context.steamSourceManaged == true and
+            sourceBuffer ~= nil and turbineBuffer ~= nil
 
         local function beginPhase(phase)
             previous.phase = phase
@@ -4096,6 +4107,10 @@ function governor.evaluate(memory, turbine, control, context)
             previous.failureCount = 0
             previous.lowSteamCount = 0
             previous.fallbackTuning = false
+        end
+
+        local function beginInputPhase()
+            beginPhase(canPrimeSteam and "CHARGE_STEAM" or "PREFLIGHT")
         end
 
         local function updateProgress(direction)
@@ -4150,7 +4165,7 @@ function governor.evaluate(memory, turbine, control, context)
         if profile then
             previous.phase = "OPERATING"
         elseif previous.phase == nil then
-            beginPhase("PREFLIGHT")
+            beginInputPhase()
         elseif previous.phase == "ENGAGE_LOW" and turbine.inductorEngaged == true then
             beginPhase("TEST_LOW")
         elseif previous.phase == "RELEASE_HIGH" and turbine.inductorEngaged == false then
@@ -4169,6 +4184,41 @@ function governor.evaluate(memory, turbine, control, context)
                 state = "VERIFYING OVERSPEED"
                 action = turbine.inductorEngaged and "HOLD" or "ENGAGE INDUCTOR"
                 reason = ("Overspeed sample %d/%d"):format(overspeedCount, overspeedSamples)
+            end
+        elseif not profile and previous.phase == "CHARGE_STEAM" then
+            previous.calibrationError = nil
+            previous.fullSteamCount = 0
+            previous.lowSteamCount = 0
+            previous.settleCount = 0
+            previous.settleSum = 0
+            recommendedInductor = true
+            if not canPrimeSteam then
+                beginPhase("PREFLIGHT")
+                state = "CALIBRATION PREFLIGHT"
+                recommendedFlow = flowMaximum
+                action = turbine.inductorEngaged and "MAXIMIZE FLOW" or
+                    "ENGAGE INDUCTOR"
+                reason = "Buffer telemetry unavailable; using full-steam preflight"
+            elseif sourceBuffer >= bufferReady and turbineBuffer >= bufferReady then
+                beginPhase("PREFLIGHT")
+                state = "CALIBRATION PREFLIGHT"
+                recommendedFlow = flowMaximum
+                action = turbine.inductorEngaged and "MAXIMIZE FLOW" or
+                    "ENGAGE INDUCTOR"
+                reason = ("Steam buffers primed at reactor %.0f%% / turbine %.0f%%; open full flow"):
+                    format(sourceBuffer, turbineBuffer)
+            else
+                state = "CHARGING STEAM"
+                recommendedFlow = 0
+                if turbine.inductorEngaged == false then
+                    action = "ENGAGE INDUCTOR"
+                elseif currentFlow > 0 then
+                    action = "CLOSE FLOW"
+                else
+                    action = "CHARGE BUFFERS"
+                end
+                reason = ("Priming steam buffers to %.0f%%: reactor %.0f%% / turbine %.0f%%"):
+                    format(bufferReady, sourceBuffer, turbineBuffer)
             end
         elseif not profile and context.steamSourceManaged == true and
                context.steamSourceReady ~= true then
@@ -4193,15 +4243,22 @@ function governor.evaluate(memory, turbine, control, context)
         elseif not profile and previous.phase == "FAILED" and
                context.steamSourceManaged == true and
                isSteamSupplyFailure(previous.calibrationError) then
-            beginPhase("PREFLIGHT")
+            beginInputPhase()
             previous.calibrationError = nil
             previous.fullSteamCount = 0
             previous.lowSteamCount = 0
-            state = "CALIBRATION PREFLIGHT"
-            action = turbine.inductorEngaged and "VERIFY STEAM" or "ENGAGE INDUCTOR"
-            reason = "Managed steam restored; retrying turbine calibration"
             recommendedInductor = true
-            recommendedFlow = flowMaximum
+            if canPrimeSteam then
+                state = "CHARGING STEAM"
+                action = turbine.inductorEngaged and "CLOSE FLOW" or "ENGAGE INDUCTOR"
+                reason = "Managed steam restored; recharging buffers before retry"
+                recommendedFlow = 0
+            else
+                state = "CALIBRATION PREFLIGHT"
+                action = turbine.inductorEngaged and "VERIFY STEAM" or "ENGAGE INDUCTOR"
+                reason = "Managed steam restored; retrying turbine calibration"
+                recommendedFlow = flowMaximum
+            end
         elseif previous.phase == "FAILED" then
             state = "CALIBRATION FAILED"
             action = turbine.inductorEngaged and "HOLD" or "ENGAGE INDUCTOR"
@@ -5101,12 +5158,15 @@ local function buildConfig(role, display, existing)
                 tonumber(control.reactorSteamDeadband) or 0.01)),
             reactorSteamDeadbandMin = math.max(1,
                 tonumber(control.reactorSteamDeadbandMin) or 25),
-            reactorSteamReserveMargin = math.max(0, math.min(0.25,
-                tonumber(control.reactorSteamReserveMargin) or 0.025)),
+            reactorSteamReserveMargin = 0.15,
             reactorSteamAverageSamples = math.max(3,
                 math.floor(tonumber(control.reactorSteamAverageSamples) or 10)),
             reactorHotFluidHigh = math.max(50, math.min(99,
                 tonumber(control.reactorHotFluidHigh) or 85)),
+            calibrationBufferReady = math.max(50, math.min(
+                math.max(50, math.min(99,
+                    tonumber(control.reactorHotFluidHigh) or 85)),
+                tonumber(control.calibrationBufferReady) or 85)),
             reactorHotFluidLow = math.max(1, math.min(84,
                 tonumber(control.reactorHotFluidLow) or 15)),
             maxRodEquivalentStep = math.max(0.01, math.min(1,

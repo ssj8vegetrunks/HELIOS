@@ -260,6 +260,7 @@ function mainframe.run(config)
             steamSourceManaged = steamSource.managed,
             steamSourceReady = steamSource.ready,
             steamSourceReason = steamSource.reason,
+            steamSourceBufferPercent = steamSource.bufferPercent,
         })
         if turbineGovernor.consumeProfileChanges(governorMemory) then
             configStore.save(config)

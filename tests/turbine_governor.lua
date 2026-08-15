@@ -16,6 +16,7 @@ local control = {
     calibrationSettleDelta = 2,
     calibrationSettleSamples = 8,
     calibrationMinimumRpm = 850,
+    calibrationBufferReady = 85,
     calibrationSteamRatio = 0.98,
     calibrationSteamSamples = 5,
     calibrationFailureSamples = 10,
@@ -56,6 +57,60 @@ local function setProfile(name, target, learned, flow)
         flowLimit = flow,
         calibrated = true,
     }
+end
+
+do
+    local memory = governor.new()
+    local unit = turbine("buffer_prime", 0, 2000, {
+        flowRate = 0,
+        inputPercent = 40,
+        inductorEngaged = true,
+    })
+    local plan = governor.evaluate(memory, unit, control, {
+        now = 1,
+        steamSourceManaged = true,
+        steamSourceReady = false,
+        steamSourceBufferPercent = 55,
+    })
+    equal(plan.state, "CHARGING STEAM", "steam buffers prime before preflight")
+    equal(plan.recommendedFlow, 0, "priming closes turbine flow")
+    equal(plan.recommendedInductor, true, "priming keeps generator load engaged")
+
+    plan = governor.evaluate(memory, unit, control, {
+        now = 2,
+        steamSourceManaged = true,
+        steamSourceReady = false,
+        steamSourceBufferPercent = 55,
+    })
+    unit.governor = plan
+    local appliedFlow
+    governor.apply(memory, unit, control, { now = 2 }, {
+        setFlowLimit = function(_, flow) appliedFlow = flow return true, flow end,
+    })
+    equal(appliedFlow, 0, "confirmed priming command closes turbine intake")
+    unit.flowRateMax = 0
+
+    unit.inputPercent = 90
+    plan = governor.evaluate(memory, unit, control, {
+        now = 3,
+        steamSourceManaged = true,
+        steamSourceReady = true,
+        steamSourceBufferPercent = 90,
+    })
+    equal(plan.state, "CALIBRATION PREFLIGHT", "full buffers release preflight")
+    equal(plan.recommendedFlow, 2000, "primed turbine opens full flow")
+    plan = governor.evaluate(memory, unit, control, {
+        now = 4,
+        steamSourceManaged = true,
+        steamSourceReady = true,
+        steamSourceBufferPercent = 90,
+    })
+    unit.governor = plan
+    appliedFlow = nil
+    governor.apply(memory, unit, control, { now = 4 }, {
+        setFlowLimit = function(_, flow) appliedFlow = flow return true, flow end,
+    })
+    equal(appliedFlow, 2000, "confirmed preflight command opens full intake")
 end
 
 do

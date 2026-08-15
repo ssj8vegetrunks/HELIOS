@@ -50,9 +50,13 @@ function adapter.read(device)
     turbine.flowRateMax = number(readAny(name, availableMethods, { "getFluidFlowRateMax", "getMaxFluidFlowRate", "getMaxIntakeRate", "fluidFlowRateMax" }))
     turbine.flowRateLimit = number(readAny(name, availableMethods, { "getFluidFlowRateMaxMax", "getFluidFlowRateLimit", "getMaxPermittedFlow", "flowRateLimit" }))
     turbine.inputAmount = number(readAny(name, availableMethods, { "getInputAmount", "getInputFluidAmount", "inputAmount" }))
-    turbine.inputMax = number(readAny(name, availableMethods, { "getInputAmountMax", "getInputCapacity", "inputAmountMax" }))
+    turbine.inputMax = number(readAny(name, availableMethods, {
+        "getInputAmountMax", "getInputCapacity", "getFluidAmountMax", "inputAmountMax",
+    }))
     turbine.outputAmount = number(readAny(name, availableMethods, { "getOutputAmount", "getOutputFluidAmount", "outputAmount" }))
-    turbine.outputMax = number(readAny(name, availableMethods, { "getOutputAmountMax", "getOutputCapacity", "outputAmountMax" }))
+    turbine.outputMax = number(readAny(name, availableMethods, {
+        "getOutputAmountMax", "getOutputCapacity", "getFluidAmountMax", "outputAmountMax",
+    }))
     turbine.inductorEngaged = readAny(name, availableMethods, { "getInductorEngaged", "isInductorEngaged", "inductorEngaged" })
     turbine.ventMode = readAny(name, availableMethods, { "getVentMode", "ventMode" })
     turbine.bladeCount = number(readAny(name, availableMethods, { "getBladeCount", "getNumberOfBlades", "bladeCount" }))

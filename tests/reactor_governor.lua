@@ -132,6 +132,7 @@ do
     local source = governor.steamSourceStatus({ power, steam }, 2000, control)
     equal(source.managed, true, "steam source detected beside power reactor")
     equal(source.ready, true, "power reactor does not block ready steam source")
+    equal(source.bufferPercent, 40, "steam source exposes its hot-fluid buffer")
 end
 
 do
@@ -268,11 +269,20 @@ end
 
 do
     local memory = governor.new()
-    local buffered = settle(memory,
-        reactor(2000, 2, { hotFluidPercent = 90 }), 2000)
-    equal(buffered.state, "BUFFER HIGH", "stable high buffer state")
-    equal(buffered.recommendedRodExposure, 1.75,
-        "high buffer reduces one quarter equivalent")
+    local reserveControl = {}
+    for key, value in pairs(control) do reserveControl[key] = value end
+    reserveControl.reactorSteamReserveMargin = 0.15
+    reserveControl.reactorProfiles = {}
+    local buffered
+    for now = 0, 8 do
+        buffered = governor.evaluate(memory,
+            reactor(2300, 2, { hotFluidPercent = 90 }), reserveControl,
+            { now = now }, 2000, 1)
+    end
+    equal(buffered.state, "LEARNED", "stable full buffer is a valid operating point")
+    equal(buffered.targetSteam, 2300, "fifteen-percent steam reserve target")
+    equal(buffered.recommendedRodExposure, 2,
+        "full buffer does not cancel active steam reserve")
 
     memory = governor.new()
     local idle = governor.evaluate(memory, reactor(0, 2), control, {}, 0, 0)

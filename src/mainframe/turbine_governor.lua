@@ -111,6 +111,9 @@ function governor.evaluate(memory, turbine, control, context)
         math.floor(tonumber(control.calibrationBandEscapeSamples) or 3))
     local stallTimeout = math.max(30,
         tonumber(control.calibrationStallTimeout) or 180)
+    local bufferReady = math.max(50, math.min(
+        tonumber(control.reactorHotFluidHigh) or 85,
+        tonumber(control.calibrationBufferReady) or 85))
     local now = tonumber(context.now) or 0
 
     local result
@@ -141,6 +144,10 @@ function governor.evaluate(memory, turbine, control, context)
         local recommendedFlow = currentFlow
         local recommendedInductor = turbine.inductorEngaged
         local state, action, reason = "STABLE", "HOLD", "Rotor is inside the target deadband"
+        local sourceBuffer = tonumber(context.steamSourceBufferPercent)
+        local turbineBuffer = tonumber(turbine.inputPercent)
+        local canPrimeSteam = context.steamSourceManaged == true and
+            sourceBuffer ~= nil and turbineBuffer ~= nil
 
         local function beginPhase(phase)
             previous.phase = phase
@@ -153,6 +160,10 @@ function governor.evaluate(memory, turbine, control, context)
             previous.failureCount = 0
             previous.lowSteamCount = 0
             previous.fallbackTuning = false
+        end
+
+        local function beginInputPhase()
+            beginPhase(canPrimeSteam and "CHARGE_STEAM" or "PREFLIGHT")
         end
 
         local function updateProgress(direction)
@@ -207,7 +218,7 @@ function governor.evaluate(memory, turbine, control, context)
         if profile then
             previous.phase = "OPERATING"
         elseif previous.phase == nil then
-            beginPhase("PREFLIGHT")
+            beginInputPhase()
         elseif previous.phase == "ENGAGE_LOW" and turbine.inductorEngaged == true then
             beginPhase("TEST_LOW")
         elseif previous.phase == "RELEASE_HIGH" and turbine.inductorEngaged == false then
@@ -226,6 +237,41 @@ function governor.evaluate(memory, turbine, control, context)
                 state = "VERIFYING OVERSPEED"
                 action = turbine.inductorEngaged and "HOLD" or "ENGAGE INDUCTOR"
                 reason = ("Overspeed sample %d/%d"):format(overspeedCount, overspeedSamples)
+            end
+        elseif not profile and previous.phase == "CHARGE_STEAM" then
+            previous.calibrationError = nil
+            previous.fullSteamCount = 0
+            previous.lowSteamCount = 0
+            previous.settleCount = 0
+            previous.settleSum = 0
+            recommendedInductor = true
+            if not canPrimeSteam then
+                beginPhase("PREFLIGHT")
+                state = "CALIBRATION PREFLIGHT"
+                recommendedFlow = flowMaximum
+                action = turbine.inductorEngaged and "MAXIMIZE FLOW" or
+                    "ENGAGE INDUCTOR"
+                reason = "Buffer telemetry unavailable; using full-steam preflight"
+            elseif sourceBuffer >= bufferReady and turbineBuffer >= bufferReady then
+                beginPhase("PREFLIGHT")
+                state = "CALIBRATION PREFLIGHT"
+                recommendedFlow = flowMaximum
+                action = turbine.inductorEngaged and "MAXIMIZE FLOW" or
+                    "ENGAGE INDUCTOR"
+                reason = ("Steam buffers primed at reactor %.0f%% / turbine %.0f%%; open full flow"):
+                    format(sourceBuffer, turbineBuffer)
+            else
+                state = "CHARGING STEAM"
+                recommendedFlow = 0
+                if turbine.inductorEngaged == false then
+                    action = "ENGAGE INDUCTOR"
+                elseif currentFlow > 0 then
+                    action = "CLOSE FLOW"
+                else
+                    action = "CHARGE BUFFERS"
+                end
+                reason = ("Priming steam buffers to %.0f%%: reactor %.0f%% / turbine %.0f%%"):
+                    format(bufferReady, sourceBuffer, turbineBuffer)
             end
         elseif not profile and context.steamSourceManaged == true and
                context.steamSourceReady ~= true then
@@ -250,15 +296,22 @@ function governor.evaluate(memory, turbine, control, context)
         elseif not profile and previous.phase == "FAILED" and
                context.steamSourceManaged == true and
                isSteamSupplyFailure(previous.calibrationError) then
-            beginPhase("PREFLIGHT")
+            beginInputPhase()
             previous.calibrationError = nil
             previous.fullSteamCount = 0
             previous.lowSteamCount = 0
-            state = "CALIBRATION PREFLIGHT"
-            action = turbine.inductorEngaged and "VERIFY STEAM" or "ENGAGE INDUCTOR"
-            reason = "Managed steam restored; retrying turbine calibration"
             recommendedInductor = true
-            recommendedFlow = flowMaximum
+            if canPrimeSteam then
+                state = "CHARGING STEAM"
+                action = turbine.inductorEngaged and "CLOSE FLOW" or "ENGAGE INDUCTOR"
+                reason = "Managed steam restored; recharging buffers before retry"
+                recommendedFlow = 0
+            else
+                state = "CALIBRATION PREFLIGHT"
+                action = turbine.inductorEngaged and "VERIFY STEAM" or "ENGAGE INDUCTOR"
+                reason = "Managed steam restored; retrying turbine calibration"
+                recommendedFlow = flowMaximum
+            end
         elseif previous.phase == "FAILED" then
             state = "CALIBRATION FAILED"
             action = turbine.inductorEngaged and "HOLD" or "ENGAGE INDUCTOR"

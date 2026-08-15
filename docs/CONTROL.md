@@ -1,6 +1,6 @@
 # HELIOS Control Boundary
 
-## v1.4.0-alpha.14
+## v1.4.0-alpha.15
 
 The Power Control screen now runs a guarded automatic turbine governor.
 
@@ -14,9 +14,12 @@ The Power Control screen now runs a guarded automatic turbine governor.
 - Each turbine learns and persists its own 900- or 1800-RPM operating band.
 - Normal direction changes require two matching samples.
 - Flow-limit changes are capped at 100 mB/t every two seconds.
-- When a managed steam reactor is present, turbine calibration waits in
-  `WAITING FOR STEAM SOURCE` until that reactor is online and its rolling
-  output can sustain the turbine's full intake.
+- When a managed steam reactor and compatible buffer telemetry are present,
+  turbine calibration first closes turbine intake and fills both the reactor
+  and turbine steam buffers to the 85% safety threshold.
+- Once both buffers are primed, HELIOS opens the turbine to its full intake,
+  verifies sustained steam, and starts the RPM tests. Older peripherals without
+  buffer-capacity telemetry retain the full-steam preflight fallback.
 - Waiting for the reactor never consumes turbine calibration-failure samples.
 - Calibration then verifies full steam with the inductor engaged.
 - It spools unloaded to 900 RPM and tests that band under full load first.
@@ -41,6 +44,9 @@ The mainframe also runs a guarded steam-demand governor for one actively
 cooled reactor:
 
 - Trusted demand is the sum of configured intake limits for all active turbines.
+- Active steam production targets 15% above trusted turbine demand so reactor,
+  pipe, reservoir, and turbine buffers stay charged. Full-buffer overflow is
+  exhausted by the loop rather than causing HELIOS to cancel that reserve.
 - An uncalibrated turbine requests its hard intake limit so the reactor is
   prepared before turbine calibration begins.
 - Trusted turbine demand starts an offline steam reactor through verified
@@ -75,7 +81,8 @@ cooled reactor:
 - `SAVE CURRENT REACTOR SETUP` records the selected reactor's actual balanced rod layout and live steam target as its learned profile.
 - Closing the screen offers to disable Maintenance Mode when that screen enabled it. Power reactors report that calibration is not required and expose no calibration actions.
 - Every `setControlRodLevel` command is verified by reading that physical rod back.
-- An 85% hot-fluid buffer forces rod insertion to reduce backed-up production.
+- The 85% hot-fluid level primes turbine calibration; it does not reduce active
+  reserve output after the loop is stable.
 - Zero active turbine demand gradually inserts all rods to 100%.
 - Missing or untrusted turbine demand, maintenance, ID conflict, and unsupported telemetry hold.
 - More than one steam reactor holds until explicit reactor-to-turbine routing is implemented.
@@ -90,7 +97,7 @@ cooled reactor:
 - Storage demand band: 25% to 85%
 - Maximum reactor exposure step: 0.25 rod-equivalent after 3 matching decisions
 - Reactor fine-control resolution: 0.01 rod-equivalent
-- Steam reserve margin: 2.5%
+- Steam reserve margin: 15%
 - Steam rolling average: 10 one-second samples
 - Minimum post-command response wait: 15 seconds, extended while plant telemetry is moving
 - Maximum casing temperature for a fresh calibration baseline: 150 C
@@ -100,6 +107,7 @@ cooled reactor:
 - Escalation threshold: climbing past 1000 RPM for 3 readings
 - Second calibration target: 1800 RPM
 - Full-steam preflight: 5 readings
+- Steam-buffer priming threshold: 85%
 - Steam loss during spool: abort after 2 readings
 - Stable loaded measurement: 8 readings within 2 RPM/tick
 - Minimum valid loaded result: 850 RPM

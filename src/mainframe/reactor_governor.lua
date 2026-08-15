@@ -233,6 +233,7 @@ function governor.steamSourceStatus(reactors, demand, control)
         reactor = reactor.name,
         demand = required,
         production = production,
+        bufferPercent = tonumber(reactor.hotFluidPercent),
     }
 end
 
@@ -398,7 +399,7 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
     elseif reactor.active == false then
         local requested = math.max(0, tonumber(targetSteam) or 0)
         local reserve = math.max(0, math.min(0.25,
-            tonumber(control.reactorSteamReserveMargin) or 0.025))
+            tonumber(control.reactorSteamReserveMargin) or 0.15))
         if requested > 0 then
             result = {
                 mode = "automatic",
@@ -445,11 +446,10 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
                 rawProduction, control)
             local requestedSteam = math.max(0, tonumber(targetSteam))
             local reserveMargin = math.max(0, math.min(0.25,
-                tonumber(control.reactorSteamReserveMargin) or 0.025))
+                tonumber(control.reactorSteamReserveMargin) or 0.15))
             local target = requestedSteam > 0 and
                 requestedSteam * (1 + reserveMargin) or 0
             local hotFluid = tonumber(reactor.hotFluidPercent)
-            local highBuffer = tonumber(control.reactorHotFluidHigh) or 85
             local lowBuffer = tonumber(control.reactorHotFluidLow) or 15
             local deadband = math.max(tonumber(control.reactorSteamDeadbandMin) or 25,
                 target * (tonumber(control.reactorSteamDeadband) or 0.01))
@@ -571,16 +571,12 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
                 reason = "Waiting for steam, buffer, and casing temperature to settle"
             else
                 clearCooldown(previous)
-                local bufferUsable = hotFluid == nil or
-                    (hotFluid > lowBuffer and hotFluid < highBuffer)
-                if bufferUsable then addLearningPoint(previous, exposure, production) end
+                -- Once telemetry has settled, a full buffer is a valid operating
+                -- condition. The steam loop exhausts overflow, so active demand
+                -- must retain its reserve instead of draining the network again.
+                addLearningPoint(previous, exposure, production)
 
-                if hotFluid and hotFluid >= highBuffer then
-                    proposed = math.max(0, exposure - maxStep)
-                    state, action = "BUFFER HIGH", "REDUCE EXPOSURE"
-                    reason = ("Hot-fluid buffer is %.1f%%; reduce exposed fuel"):
-                        format(hotFluid)
-                elseif production < target - deadband then
+                if production < target - deadband then
                     if exposure >= rodCount - 0.005 then
                         state = "STEAM DEFICIT"
                         reason = "Reactor cannot meet turbine demand with every rod exposed"

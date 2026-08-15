@@ -189,7 +189,7 @@ severe alarm can still sound, and silence resets after the condition clears.
 
 For one steam reactor, HELIOS totals the configured intake requested by
 all active turbines and regulates exposed rod-equivalents until reactor steam
-production matches that demand plus a small reserve. Total exposure is spread
+production matches that demand plus a 15% reserve. Total exposure is spread
 across every fuel column as evenly as integer insertion levels allow. For
 example, 0.26 equivalent on 25 rods becomes one rod at 98% insertion and 24 at
 99%. A rolling steam average filters the reactor's fuel-column cycle before
@@ -198,10 +198,11 @@ still corrects for temperature, fuel, moderator layout, and other nonlinear
 effects. Each individual rod write is read back and verified.
 
 For an uncalibrated turbine, the reactor target is based on the turbine's hard
-intake limit. HELIOS starts an offline steam reactor, averages its output, and
-holds the turbine in `WAITING FOR STEAM SOURCE` until supply is ready. Only then
-does the turbine begin its own 900/1800-RPM calibration. A power-mode reactor is
-never considered a steam source.
+intake limit. HELIOS starts an offline steam reactor, closes turbine intake,
+and charges both steam buffers to the 85% safety threshold before opening full
+flow. It then verifies sustained steam and begins its 900/1800-RPM calibration.
+Peripherals without readable buffer capacity retain the full-steam preflight
+fallback. A power-mode reactor is never considered a steam source.
 
 The reactor governor holds during maintenance, ID conflict, missing or
 untrusted turbine telemetry, unsupported rod control, or when more than one
