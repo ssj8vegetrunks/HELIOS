@@ -4,6 +4,7 @@ function mainframe.run(config)
     local display = dofile("/helios/core/display.lua")
     display.start(config)
     local ui = dofile("/helios/core/ui.lua")
+    ui.setVersion(config.version)
     local configStore = dofile("/helios/core/config.lua")
     local registry = dofile("/helios/mainframe/device_registry.lua")
     local reactorAdapter = dofile("/helios/mainframe/reactor_adapter.lua")
@@ -1043,12 +1044,26 @@ function mainframe.run(config)
 
                 local plan = reactor.governor or {}
                 local profile = (config.control.reactorProfiles or {})[reactorName]
-                ui.status("Calibration state", plan.state or "UNCALIBRATED",
+                local phase = plan.calibrationPhase or
+                    (profile and "LEARNED" or "NOT ACTIVE")
+                local state = plan.state or "WAITING FOR GOVERNOR UPDATE"
+                ui.status("Calibration", phase .. " / " .. state,
                     plan.recalibrating and colors.orange or colors.lime)
                 ui.status("Target output", plan.targetSteam and
-                    ("%.0f mB/t"):format(plan.targetSteam) or "NO TURBINE DEMAND")
-                ui.status("Current output", plan.averageSteamProduction and
-                    ("%.0f mB/t average"):format(plan.averageSteamProduction) or "AVERAGING")
+                    ("%.0f mB/t"):format(plan.targetSteam) or
+                    "WAITING FOR TRUSTED DEMAND")
+                local sampleCount = tonumber(plan.averageSteamSamples) or 0
+                local sampleTarget = math.max(3,
+                    math.floor(tonumber(config.control.reactorSteamAverageSamples) or 10))
+                local responseCount = tonumber(plan.processStableSamples) or 0
+                local responseTarget = math.max(3,
+                    math.floor(tonumber(config.control.reactorLearningSamples) or 8))
+                local output = plan.averageSteamProduction and
+                    ("%.0f mB/t avg"):format(plan.averageSteamProduction) or
+                    reactor.steamProduction and
+                    ("%.0f mB/t raw"):format(reactor.steamProduction) or "N/A"
+                ui.status("Output / progress", ("%s [%d/%d; %d/%d]"):format(
+                    output, sampleCount, sampleTarget, responseCount, responseTarget))
                 ui.status("Current setting", formatRodLayout(reactor,
                     plan.currentRodExposure))
                 ui.status("Saved calibration", profile and
@@ -1069,6 +1084,7 @@ function mainframe.run(config)
                 buttons.close = ui.button("CLOSE", colors.cyan)
             end
 
+            pollReactors()
             while true do
                 drawCalibration()
                 local event, value, message, protocol = os.pullEvent()
@@ -1105,6 +1121,7 @@ function mainframe.run(config)
                         saveConfig()
                         if maintenance then stopMaintenance() end
                         maintenanceEnabledHere = false
+                        pollReactors()
                         calibrationNotice = { text = "RECALIBRATION STARTED", colour = colors.orange }
                     end
                 elseif reactor and reactor.mode == "steam" and

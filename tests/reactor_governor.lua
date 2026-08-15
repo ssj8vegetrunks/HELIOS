@@ -367,6 +367,28 @@ do
     equal(control.reactorProfiles.reactor_0.exposure, 0.26,
         "completed calibration saves the measured exposure")
 
+    -- A large reactor casing can keep warming after steam output has already
+    -- settled at turbine demand. Temperature drift must not hold a proven test
+    -- step forever; steam and hot-fluid response are the control signals.
+    memory = governor.new()
+    governor.beginRecalibration(memory, control, "reactor_0")
+    memory.reactors.reactor_0.calibrationPhase = "ADJUSTING"
+    memory.reactors.reactor_0.lastAppliedAt = 0
+    local drifting
+    for now = 20, 20 + control.reactorSteamAverageSamples +
+            control.reactorLearningSamples + 2 do
+        drifting = governor.evaluate(memory, reactor(2000, 0.25, {
+            casingTemperature = 100 + now,
+            hotFluidPercent = 5,
+        }), control, { now = now }, 2000, 1)
+    end
+    equal(drifting.action, "INCREASE EXPOSURE",
+        "stable steam advances while the large casing temperature drifts")
+    equal(drifting.recommendedRodExposure, 0.26,
+        "two-thousand mB/t test advances to the reserve setting")
+    equal(drifting.calibrationPhase, "ADJUSTING",
+        "thermal drift cannot reset or stall forward calibration")
+
     memory = governor.new()
     governor.beginRecalibration(memory, control, "reactor_0")
     local hot = settle(memory, reactor(1, 0, {

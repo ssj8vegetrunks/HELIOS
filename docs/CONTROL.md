@@ -1,6 +1,6 @@
 # HELIOS Control Boundary
 
-## v1.4.0-alpha.13
+## v1.4.0-alpha.14
 
 The Power Control screen now runs a guarded automatic turbine governor.
 
@@ -56,7 +56,10 @@ cooled reactor:
 - Steam decisions use a 10-sample rolling average and target 2.5% above turbine demand.
 - A stable measurement provides a proportional estimate; two stable measurements allow interpolation toward the target.
 - Formula estimates are bounded to 0.25 rod-equivalent per change and corrected by feedback.
-- Steam, hot-fluid-buffer, and casing-temperature motion pauses further changes and invalidates learning samples.
+- Ordinary regulation waits for steam, hot-fluid-buffer, and casing-temperature
+  response. During explicit recalibration, a completed rolling steam window and
+  stable hot-fluid response may advance one bounded step even while a massive
+  casing continues drifting thermally.
 - Learned exposure is saved per reactor only at a stable, unsaturated operating point.
 - A rod layout changed outside HELIOS invalidates the old rolling average; automatic mode restores the learned exposure once fresh samples confirm turbine starvation.
 - Maintenance mode suppresses this recovery so deliberate manual rod settings remain untouched.
@@ -67,6 +70,8 @@ cooled reactor:
 - Recalibration advances through a forward-only `BASELINE` -> `TESTING` ->
   `ADJUSTING` sequence. Rod movement and fresh sample windows cannot send an
   active calibration back to `BASELINE`; only a new `RECALIBRATE` command can.
+- The calibration page reports phase, governor state, steam-average samples,
+  and process-response samples so a genuine hold is visible immediately.
 - `SAVE CURRENT REACTOR SETUP` records the selected reactor's actual balanced rod layout and live steam target as its learned profile.
 - Closing the screen offers to disable Maintenance Mode when that screen enabled it. Power reactors report that calibration is not required and expose no calibration actions.
 - Every `setControlRodLevel` command is verified by reading that physical rod back.

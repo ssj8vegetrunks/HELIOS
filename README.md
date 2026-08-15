@@ -1,4 +1,4 @@
-# HELIOS â v1.4.0 Alpha 13 Forward-Only Reactor Calibration
+# HELIOS — v1.4.0 Alpha 14 Live Reactor Calibration Progress
 
 Industrial power management for **CC:Tweaked** and **Extreme Reactors**.
 
@@ -59,13 +59,20 @@ The existing touch interface and network-ID protection remain online:
   casing to reach ambient temperature or become perfectly motionless;
 - recalibration records explicit baseline, testing, and adjusting phases so a
   positive test exposure cannot restart the zero-exposure baseline loop;
+- once a recalibration test has a full rolling steam window and stable fluid
+  response, slow casing-temperature drift cannot hold that bounded step forever;
 - formula-assisted learning estimates the needed exposure, then bounded feedback corrects it;
-- reactor commands wait for steam, buffer, and casing-temperature response before another change;
+- ordinary reactor commands still wait for full plant response; recalibration
+  may ignore casing drift only after steam and hot-fluid response have settled;
 - stable learned exposure is saved per reactor and every individual rod command is verified;
 - external rod changes clear stale steam samples and automatically restore the learned exposure when turbine supply falls short;
 - high hot-fluid buffer pressure and zero turbine demand insert rods to reduce fuel use;
 - missing turbine demand, duplicate IDs, maintenance, unsupported rod telemetry, and ambiguous multiple-reactor routing hold reactor output unchanged;
 - settings and telemetry navigation use stable touch targets that fit the mirrored terminal canvas;
+- every mainframe and remote screen shows that computer's locally installed
+  HELIOS version in the upper-right corner;
+- reactor calibration shows its explicit phase plus rolling-steam and
+  process-response sample progress instead of ambiguous fallback labels;
 - upgrades remove obsolete HELIOS rollback copies before staging and retain only the immediately replaced version.
 
 The existing telemetry foundation includes:

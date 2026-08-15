@@ -88,6 +88,7 @@ end
 local function clearTransient(previous)
     previous.productionSamples = {}
     previous.stableSamples = 0
+    previous.processStableSamples = 0
     previous.actionSamples = 0
     previous.action = nil
     previous.observation = nil
@@ -285,19 +286,26 @@ local function observeResponse(previous, reactor, control, context, production)
         tonumber(control.reactorLearningBufferDelta) or 0.1)
     local minimumResponse = math.max(5,
         tonumber(control.reactorMinimumResponseTime) or 15)
-    local moving = false
+    local processMoving, temperatureMoving = false, false
 
     if prior then
-        moving = math.abs(production - prior.production) > steamDelta
-        if temperature and prior.temperature then
-            moving = moving or math.abs(temperature - prior.temperature) > temperatureDelta
-        end
+        processMoving = math.abs(production - prior.production) > steamDelta
         if buffer and prior.buffer then
-            moving = moving or math.abs(buffer - prior.buffer) > bufferDelta
+            processMoving = processMoving or
+                math.abs(buffer - prior.buffer) > bufferDelta
+        end
+        if temperature and prior.temperature then
+            temperatureMoving =
+                math.abs(temperature - prior.temperature) > temperatureDelta
         end
     end
     local waiting = previous.lastAppliedAt and now - previous.lastAppliedAt < minimumResponse
-    if not prior or moving or waiting then
+    if not prior or processMoving or waiting then
+        previous.processStableSamples = 0
+    else
+        previous.processStableSamples = (previous.processStableSamples or 0) + 1
+    end
+    if not prior or processMoving or temperatureMoving or waiting then
         previous.stableSamples = 0
     else
         previous.stableSamples = (previous.stableSamples or 0) + 1
@@ -308,7 +316,12 @@ local function observeResponse(previous, reactor, control, context, production)
         temperature = temperature,
         buffer = buffer,
     }
-    return not moving and not waiting, moving or waiting
+    return not processMoving and not temperatureMoving and not waiting,
+        processMoving or temperatureMoving or waiting, {
+            waiting = waiting == true,
+            processMoving = processMoving,
+            temperatureMoving = temperatureMoving,
+        }
 end
 
 local function addLearningPoint(previous, exposure, production)
@@ -423,6 +436,7 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
                math.abs(exposure - previous.observedRodExposure) >= 0.005 then
                 previous.productionSamples = {}
                 previous.stableSamples = 0
+                previous.processStableSamples = 0
                 previous.observation = nil
                 clearCooldown(previous)
             end
@@ -459,9 +473,17 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
             local needsFreshBaseline = exposure <= 0.005 and
                 (calibrationPhase == "BASELINE" or
                     (calibrationPhase == nil and type(profile) ~= "table"))
-            local _, responding = observeResponse(previous, reactor, control,
+            local _, responding, response = observeResponse(previous, reactor, control,
                 context, production)
             local stable = (previous.stableSamples or 0) >= stableRequired
+            -- During an explicit recalibration test, steam output and hot-fluid
+            -- response are sufficient to advance after the normal post-write
+            -- delay. A massive casing may keep drifting long after production
+            -- has settled, so temperature motion remains diagnostic but cannot
+            -- hold a bounded calibration step forever.
+            local calibrationStable = calibrationPhase == "ADJUSTING" and
+                averageReady and not response.waiting and
+                (previous.processStableSamples or 0) >= stableRequired
             local proposed, state, action, reason = exposure, "STABLE", "HOLD",
                 "Steam production matches trusted turbine demand"
             local balanced = layoutIsBalanced(reactor, exposure, rodCount)
@@ -544,7 +566,7 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
                 state, action = "RECOVERING", "INCREASE EXPOSURE"
                 reason = ("Steam is below demand; restore learned %.2f rod-equivalents"):
                     format(tonumber(profile.exposure))
-            elseif responding or not stable then
+            elseif (responding or not stable) and not calibrationStable then
                 state = "RESPONDING"
                 reason = "Waiting for steam, buffer, and casing temperature to settle"
             else
@@ -623,6 +645,8 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
                 rodExposureChange = round(proposed - exposure, 2),
                 actionSamples = previous.actionSamples,
                 stableSamples = previous.stableSamples or 0,
+                processStableSamples = previous.processStableSamples or 0,
+                temperatureMoving = response.temperatureMoving == true,
                 hotFluidPercent = hotFluid,
                 learnedProfile = profile,
                 recalibrating = previous.recalibrating == true,
@@ -729,6 +753,7 @@ function governor.apply(memory, reactor, control, context, writers)
             end
             previous.lastError = nil
             previous.stableSamples = 0
+            previous.processStableSamples = 0
             previous.productionSamples = {}
             previous.observation = nil
             plan.actuatorState = "APPLIED"

@@ -1,5 +1,10 @@
 local ui = {}
 local idConflicts = {}
+local systemVersion
+
+function ui.setVersion(version)
+    systemVersion = version and tostring(version) or nil
+end
 
 function ui.setIdConflicts(conflicts)
     idConflicts = {}
@@ -59,7 +64,20 @@ function ui.header(role, subtitle)
         term.setBackgroundColor(colors.black)
     end
     term.setTextColor(colors.yellow)
-    print("HELIOS // " .. string.upper(role))
+    local width = select(1, term.getSize())
+    local heading = "HELIOS // " .. string.upper(role)
+    local version = systemVersion and ("v" .. systemVersion) or ""
+    local row = select(2, term.getCursorPos())
+    term.setCursorPos(1, row)
+    if #version > 0 and #version < width then
+        local headingWidth = math.max(0, width - #version - 1)
+        write(string.sub(heading, 1, headingWidth))
+        term.setCursorPos(width - #version + 1, row)
+        write(version)
+    else
+        write(string.sub(heading, 1, width))
+    end
+    term.setCursorPos(1, row + 1)
     term.setTextColor(colors.lightGray)
     print(subtitle)
     term.setTextColor(colors.gray)
