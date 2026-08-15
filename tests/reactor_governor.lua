@@ -156,6 +156,19 @@ end
 
 do
     local memory = governor.new()
+    local unit = reactor(2050, 0.26, {
+        name = "dry_buffer",
+        hotFluidPercent = 0,
+    })
+    local stable = settle(memory, unit, 2000, 0, 8)
+    equal(stable.state, "LEARNED",
+        "stable turbine-matched output learns with an empty buffer")
+    assert(control.reactorProfiles.dry_buffer,
+        "empty hot-fluid buffer must not block automatic profile saving")
+end
+
+do
+    local memory = governor.new()
     memory.reactors.reactor_0 = {
         points = { { exposure = 1, steam = 1000 } },
     }

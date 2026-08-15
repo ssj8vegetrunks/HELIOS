@@ -601,7 +601,11 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
                     state, action = "STEAM HIGH", "REDUCE EXPOSURE"
                     reason = ("Formula estimate %.2f rod-equivalents; reduce gradually"):
                         format(estimate)
-                elseif bufferUsable then
+                else
+                    -- A drained hot-fluid buffer is normal when reactor output
+                    -- closely matches live turbine demand. Stable production is
+                    -- sufficient to learn the operating point; only the high
+                    -- buffer branch above must prevent saving.
                     saveProfile(memory, control, name, exposure, production, target,
                         context)
                     previous.recalibrating = false
