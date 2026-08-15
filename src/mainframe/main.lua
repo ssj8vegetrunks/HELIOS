@@ -609,10 +609,14 @@ function mainframe.run(config)
         end
     end
 
-    local function restoreTimersAfterTextInput()
+    local function restartReactorPolling()
         if reactorTimer then os.cancelTimer(reactorTimer) end
         pollReactors()
         reactorTimer = os.startTimer(1)
+    end
+
+    local function restoreTimersAfterTextInput()
+        restartReactorPolling()
         if maintenance then
             if maintenanceTimer then os.cancelTimer(maintenanceTimer) end
             if countdownTimer then os.cancelTimer(countdownTimer) end
@@ -1129,13 +1133,30 @@ function mainframe.run(config)
                         { "Close all rods and relearn this", "reactor from zero exposure?",
                           "HELIOS will resume automatic control." },
                         "RECALIBRATE", "CANCEL") then
-                        reactorGovernor.beginRecalibration(reactorGovernorMemory,
-                            config.control, reactorName)
-                        saveConfig()
-                        if maintenance then stopMaintenance() end
-                        maintenanceEnabledHere = false
-                        pollReactors()
-                        calibrationNotice = { text = "RECALIBRATION STARTED", colour = colors.orange }
+                        -- Recalibration is an explicit operator-confirmed safe
+                        -- insertion. Apply and verify that conservative command
+                        -- immediately, then restart the polling timer so the
+                        -- baseline cannot remain at sample 1 after a modal view.
+                        local inserted, _, insertError =
+                            reactorAdapter.setControlRodExposure(reactor, 0)
+                        if inserted then
+                            reactorGovernor.beginRecalibration(reactorGovernorMemory,
+                                config.control, reactorName)
+                            saveConfig()
+                            if maintenance then stopMaintenance() end
+                            maintenanceEnabledHere = false
+                            restartReactorPolling()
+                            calibrationNotice = {
+                                text = "RECALIBRATION STARTED — RODS INSERTED",
+                                colour = colors.orange,
+                            }
+                        else
+                            calibrationNotice = {
+                                text = "RECALIBRATION BLOCKED: " ..
+                                    tostring(insertError or "ROD INSERTION FAILED"),
+                                colour = colors.red,
+                            }
+                        end
                     end
                 elseif reactor and reactor.mode == "steam" and
                        ui.hit(buttons.save, touchX, touchY) then

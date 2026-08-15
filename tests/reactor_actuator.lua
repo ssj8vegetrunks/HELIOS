@@ -64,6 +64,14 @@ for index = 1, 24 do
     assert(levels[index] == 99, "remaining rods should be 99% inserted")
 end
 
+ok, applied, reason = adapter.setControlRodExposure(reactor, 0)
+assert(ok, tostring(reason))
+assert(applied == 0, "recalibration baseline should report zero exposure")
+for index = 0, 24 do
+    assert(levels[index] == 100,
+        "confirmed recalibration should insert every control rod")
+end
+
 stuck = true
 reactor.controlRods = 3
 levels = { [0] = 40, [1] = 40, [2] = 40 }
