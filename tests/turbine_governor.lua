@@ -72,19 +72,28 @@ do
         steamSourceReady = false,
         steamSourceBufferPercent = 55,
     })
-    equal(plan.state, "CHARGING STEAM", "steam buffers prime before preflight")
-    equal(plan.recommendedFlow, 0, "priming closes turbine flow")
+    equal(plan.state, "WAITING FOR STEAM SOURCE",
+        "priming waits until managed reactor output is ready")
+    equal(plan.recommendedFlow, 2000, "waiting preserves turbine flow")
     equal(plan.recommendedInductor, true, "priming keeps generator load engaged")
 
     plan = governor.evaluate(memory, unit, control, {
         now = 2,
         steamSourceManaged = true,
-        steamSourceReady = false,
+        steamSourceReady = true,
+        steamSourceBufferPercent = 55,
+    })
+    equal(plan.state, "CHARGING STEAM", "ready source begins buffer priming")
+    equal(plan.recommendedFlow, 0, "priming closes turbine flow")
+    plan = governor.evaluate(memory, unit, control, {
+        now = 3,
+        steamSourceManaged = true,
+        steamSourceReady = true,
         steamSourceBufferPercent = 55,
     })
     unit.governor = plan
     local appliedFlow
-    governor.apply(memory, unit, control, { now = 2 }, {
+    governor.apply(memory, unit, control, { now = 3 }, {
         setFlowLimit = function(_, flow) appliedFlow = flow return true, flow end,
     })
     equal(appliedFlow, 0, "confirmed priming command closes turbine intake")
@@ -92,7 +101,7 @@ do
 
     unit.inputPercent = 90
     plan = governor.evaluate(memory, unit, control, {
-        now = 3,
+        now = 5,
         steamSourceManaged = true,
         steamSourceReady = true,
         steamSourceBufferPercent = 90,
@@ -100,17 +109,93 @@ do
     equal(plan.state, "CALIBRATION PREFLIGHT", "full buffers release preflight")
     equal(plan.recommendedFlow, 2000, "primed turbine opens full flow")
     plan = governor.evaluate(memory, unit, control, {
-        now = 4,
+        now = 6,
         steamSourceManaged = true,
         steamSourceReady = true,
         steamSourceBufferPercent = 90,
     })
     unit.governor = plan
     appliedFlow = nil
-    governor.apply(memory, unit, control, { now = 4 }, {
+    governor.apply(memory, unit, control, { now = 6 }, {
         setFlowLimit = function(_, flow) appliedFlow = flow return true, flow end,
     })
     equal(appliedFlow, 2000, "confirmed preflight command opens full intake")
+end
+
+do
+    local memory = governor.new()
+    setProfile("saved_prime", 900, 900, 1700)
+    local unit = turbine("saved_prime", 900, 1700, {
+        inputPercent = 40,
+        inductorEngaged = true,
+    })
+    local plan = governor.evaluate(memory, unit, control, {
+        now = 1,
+        steamSourceManaged = true,
+        steamSourceReady = false,
+        steamSourceBufferPercent = 50,
+    })
+    equal(plan.state, "WAITING FOR STEAM SOURCE",
+        "saved profile waits for reactor before startup prime")
+    equal(plan.recommendedFlow, 1700,
+        "saved profile keeps learned flow while reactor prepares")
+
+    plan = governor.evaluate(memory, unit, control, {
+        now = 2,
+        steamSourceManaged = true,
+        steamSourceReady = true,
+        steamSourceBufferPercent = 50,
+    })
+    equal(plan.state, "CHARGING STEAM", "saved profile enters one-shot prime")
+    equal(plan.recommendedFlow, 0, "saved profile closes flow while priming")
+
+    unit.flowRateMax = 0
+    unit.inputPercent = 90
+    plan = governor.evaluate(memory, unit, control, {
+        now = 3,
+        steamSourceManaged = true,
+        steamSourceReady = false,
+        steamSourceBufferPercent = 90,
+    })
+    equal(plan.state, "STEAM PRIMED",
+        "full buffers complete startup prime even when source is saturated")
+    equal(plan.recommendedFlow, 1700, "saved profile restores learned flow")
+    equal(plan.calibrationPhase, "RESTORE_PROFILE",
+        "saved profile enters guarded flow restoration")
+
+    plan = governor.evaluate(memory, unit, control, {
+        now = 4,
+        steamSourceManaged = true,
+        steamSourceReady = true,
+        steamSourceBufferPercent = 90,
+    })
+    unit.governor = plan
+    local restoredFlow
+    governor.apply(memory, unit, control, { now = 4 }, {
+        setFlowLimit = function(_, flow) restoredFlow = flow return true, flow end,
+    })
+    equal(restoredFlow, 1700, "guarded prime exit restores learned flow")
+
+    unit.flowRateMax = 1700
+    unit.inputPercent = 20
+    plan = governor.evaluate(memory, unit, control, {
+        now = 5,
+        steamSourceManaged = true,
+        steamSourceReady = true,
+        steamSourceBufferPercent = 20,
+    })
+    assert(plan.state ~= "CHARGING STEAM",
+        "ordinary buffer use must not retrigger priming")
+
+    governor.requestSteamPrime(memory)
+    plan = governor.evaluate(memory, unit, control, {
+        now = 6,
+        steamSourceManaged = true,
+        steamSourceReady = true,
+        steamSourceBufferPercent = 20,
+    })
+    equal(plan.state, "CHARGING STEAM",
+        "reactor recalibration can request another one-shot prime")
 end
 
 do

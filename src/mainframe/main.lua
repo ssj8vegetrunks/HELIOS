@@ -1145,6 +1145,7 @@ function mainframe.run(config)
                         if prepared then
                             reactorGovernor.beginRecalibration(reactorGovernorMemory,
                                 config.control, reactorName)
+                            turbineGovernor.requestSteamPrime(governorMemory)
                             saveConfig()
                             if maintenance then stopMaintenance() end
                             maintenanceEnabledHere = false

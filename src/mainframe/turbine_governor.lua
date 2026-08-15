@@ -59,6 +59,13 @@ function governor.new()
     return { turbines = {}, profileDirty = false }
 end
 
+function governor.requestSteamPrime(memory)
+    memory.turbines = memory.turbines or {}
+    for _, previous in pairs(memory.turbines) do
+        previous.primeRequested = true
+    end
+end
+
 function governor.consumeProfileChanges(memory)
     local changed = memory.profileDirty == true
     memory.profileDirty = false
@@ -70,7 +77,7 @@ function governor.resetCalibration(memory, control, name)
     control.turbineProfiles = control.turbineProfiles or {}
     local hadProfile = control.turbineProfiles[name] ~= nil
     control.turbineProfiles[name] = nil
-    memory.turbines[name] = { overspeedCount = 0 }
+    memory.turbines[name] = { overspeedCount = 0, primeRequested = true }
     if hadProfile then memory.profileDirty = true end
     return true
 end
@@ -81,7 +88,10 @@ function governor.evaluate(memory, turbine, control, context)
     memory.turbines = memory.turbines or {}
 
     local name = tostring(turbine.name or "unknown")
-    local previous = memory.turbines[name] or { overspeedCount = 0 }
+    local previous = memory.turbines[name] or {
+        overspeedCount = 0,
+        primeRequested = true,
+    }
     local profile = profileFor(control, name)
     local lowBand = tonumber(control.lowBandRpm) or 900
     local highBand = tonumber(control.highBandRpm) or 1800
@@ -211,12 +221,21 @@ function governor.evaluate(memory, turbine, control, context)
             target = wanted
             overspeedRpm = target + overspeedMargin
             previous.phase = "OPERATING"
+            previous.primeRequested = false
             previous.settleCount, previous.settleSum = 0, 0
             return learned
         end
 
         if profile then
-            previous.phase = "OPERATING"
+            if previous.phase == "CHARGE_STEAM" or
+               previous.phase == "RESTORE_PROFILE" then
+                -- Preserve an active one-shot prime and its guarded flow restore.
+            elseif previous.primeRequested == true and canPrimeSteam then
+                beginPhase("CHARGE_STEAM")
+            else
+                previous.primeRequested = false
+                previous.phase = "OPERATING"
+            end
         elseif previous.phase == nil then
             beginInputPhase()
         elseif previous.phase == "ENGAGE_LOW" and turbine.inductorEngaged == true then
@@ -238,7 +257,7 @@ function governor.evaluate(memory, turbine, control, context)
                 action = turbine.inductorEngaged and "HOLD" or "ENGAGE INDUCTOR"
                 reason = ("Overspeed sample %d/%d"):format(overspeedCount, overspeedSamples)
             end
-        elseif not profile and previous.phase == "CHARGE_STEAM" then
+        elseif previous.phase == "CHARGE_STEAM" then
             previous.calibrationError = nil
             previous.fullSteamCount = 0
             previous.lowSteamCount = 0
@@ -246,20 +265,59 @@ function governor.evaluate(memory, turbine, control, context)
             previous.settleSum = 0
             recommendedInductor = true
             if not canPrimeSteam then
-                beginPhase("PREFLIGHT")
-                state = "CALIBRATION PREFLIGHT"
-                recommendedFlow = flowMaximum
-                action = turbine.inductorEngaged and "MAXIMIZE FLOW" or
-                    "ENGAGE INDUCTOR"
-                reason = "Buffer telemetry unavailable; using full-steam preflight"
+                previous.primeRequested = false
+                if profile then
+                    beginPhase("RESTORE_PROFILE")
+                    recommendedFlow = tonumber(profile.flowLimit) or currentFlow
+                    state = "RESTORING PROFILE"
+                    action = turbine.inductorEngaged and "RESTORE FLOW" or
+                        "ENGAGE INDUCTOR"
+                    reason = "Buffer telemetry unavailable; resume saved turbine profile"
+                else
+                    beginPhase("PREFLIGHT")
+                    state = "CALIBRATION PREFLIGHT"
+                    recommendedFlow = flowMaximum
+                    action = turbine.inductorEngaged and "MAXIMIZE FLOW" or
+                        "ENGAGE INDUCTOR"
+                    reason = "Buffer telemetry unavailable; using full-steam preflight"
+                end
             elseif sourceBuffer >= bufferReady and turbineBuffer >= bufferReady then
-                beginPhase("PREFLIGHT")
-                state = "CALIBRATION PREFLIGHT"
-                recommendedFlow = flowMaximum
-                action = turbine.inductorEngaged and "MAXIMIZE FLOW" or
-                    "ENGAGE INDUCTOR"
-                reason = ("Steam buffers primed at reactor %.0f%% / turbine %.0f%%; open full flow"):
-                    format(sourceBuffer, turbineBuffer)
+                previous.primeRequested = false
+                if profile then
+                    beginPhase("RESTORE_PROFILE")
+                    recommendedFlow = tonumber(profile.flowLimit) or currentFlow
+                    state = "STEAM PRIMED"
+                    if turbine.inductorEngaged == false then
+                        action = "ENGAGE INDUCTOR"
+                    elseif currentFlow ~= recommendedFlow then
+                        action = "RESTORE FLOW"
+                    else
+                        action = "HOLD"
+                    end
+                    reason = ("Steam buffers primed at reactor %.0f%% / turbine %.0f%%; resume saved flow"):
+                        format(sourceBuffer, turbineBuffer)
+                else
+                    beginPhase("PREFLIGHT")
+                    state = "CALIBRATION PREFLIGHT"
+                    recommendedFlow = flowMaximum
+                    action = turbine.inductorEngaged and "MAXIMIZE FLOW" or
+                        "ENGAGE INDUCTOR"
+                    reason = ("Steam buffers primed at reactor %.0f%% / turbine %.0f%%; open full flow"):
+                        format(sourceBuffer, turbineBuffer)
+                end
+            elseif context.steamSourceReady ~= true then
+                local waitingFlow = profile and tonumber(profile.flowLimit) or flowMaximum
+                recommendedFlow = waitingFlow or currentFlow
+                state = "WAITING FOR STEAM SOURCE"
+                if turbine.inductorEngaged == false then
+                    action = "ENGAGE INDUCTOR"
+                elseif currentFlow ~= recommendedFlow then
+                    action = "RESTORE FLOW"
+                else
+                    action = "WAIT FOR STEAM SOURCE"
+                end
+                reason = tostring(context.steamSourceReason or
+                    "Preparing managed steam before buffer priming")
             else
                 state = "CHARGING STEAM"
                 recommendedFlow = 0
@@ -272,6 +330,21 @@ function governor.evaluate(memory, turbine, control, context)
                 end
                 reason = ("Priming steam buffers to %.0f%%: reactor %.0f%% / turbine %.0f%%"):
                     format(bufferReady, sourceBuffer, turbineBuffer)
+            end
+        elseif profile and previous.phase == "RESTORE_PROFILE" then
+            recommendedInductor = true
+            recommendedFlow = tonumber(profile.flowLimit) or currentFlow
+            if turbine.inductorEngaged == false then
+                state, action = "RESTORING PROFILE", "ENGAGE INDUCTOR"
+                reason = "Re-engage generator load before restoring saved steam flow"
+            elseif currentFlow ~= recommendedFlow then
+                state, action = "RESTORING PROFILE", "RESTORE FLOW"
+                reason = ("Restore learned turbine flow at %.0f mB/t"):
+                    format(recommendedFlow)
+            else
+                beginPhase("OPERATING")
+                state, action = "STABLE", "HOLD"
+                reason = "Steam buffers primed; saved turbine profile restored"
             end
         elseif not profile and context.steamSourceManaged == true and
                context.steamSourceReady ~= true then

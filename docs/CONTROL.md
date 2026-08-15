@@ -1,6 +1,6 @@
 # HELIOS Control Boundary
 
-## v1.4.0-alpha.16
+## v1.4.0-alpha.17
 
 The Power Control screen now runs a guarded automatic turbine governor.
 
@@ -20,6 +20,9 @@ The Power Control screen now runs a guarded automatic turbine governor.
 - Once both buffers are primed, HELIOS opens the turbine to its full intake,
   verifies sustained steam, and starts the RPM tests. Older peripherals without
   buffer-capacity telemetry retain the full-steam preflight fallback.
+- Turbines with saved profiles also perform one priming cycle when HELIOS starts
+  and after reactor recalibration, then return to their learned flow. Priming is
+  not repeatedly triggered during ordinary operation.
 - Waiting for the reactor never consumes turbine calibration-failure samples.
 - Calibration then verifies full steam with the inductor engaged.
 - It spools unloaded to 900 RPM and tests that band under full load first.
