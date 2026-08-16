@@ -277,6 +277,7 @@ function mainframe.run(config)
                 maintenance = maintenance,
                 now = now,
         }, {
+            setActive = turbineAdapter.setActive,
             setFlowLimit = turbineAdapter.setFlowLimit,
             setInductor = turbineAdapter.setInductor,
         })
@@ -587,7 +588,10 @@ function mainframe.run(config)
             buttons.back = ui.inlineButton("BACK", colors.cyan)
             print("")
             if #turbines > 0 then
-                buttons.retry = ui.button("RETRY CALIBRATION", colors.orange)
+                local selectedTurbine = turbines[selected]
+                local label = selectedTurbine.active == false and
+                    "START & CALIBRATE" or "RETRY CALIBRATION"
+                buttons.retry = ui.button(label, colors.orange)
             else
                 buttons.retry = nil
             end

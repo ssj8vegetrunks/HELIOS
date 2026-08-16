@@ -111,6 +111,34 @@ function adapter.setFlowLimit(turbine, requested)
     return true, verified
 end
 
+function adapter.setActive(turbine, requested)
+    if type(turbine) ~= "table" or type(turbine.name) ~= "string" then
+        return false, nil, "Invalid turbine identity"
+    end
+    if not peripheral.isPresent(turbine.name) then
+        return false, nil, "Peripheral unavailable"
+    end
+
+    local methods = availableMethods(turbine.name)
+    if not methods.setActive or not methods.getActive then
+        return false, nil, "Verified turbine power control is unavailable"
+    end
+
+    requested = requested == true
+    local ok, reason = pcall(peripheral.call, turbine.name, "setActive", requested)
+    if not ok then return false, nil, tostring(reason) end
+
+    local readOk, actual = pcall(peripheral.call, turbine.name, "getActive")
+    if not readOk or type(actual) ~= "boolean" then
+        return false, nil, "Turbine power-state verification failed"
+    end
+    if actual ~= requested then
+        return false, actual, ("Requested turbine %s; turbine reports %s"):format(
+            requested and "active" or "inactive", actual and "active" or "inactive")
+    end
+    return true, actual
+end
+
 function adapter.setInductor(turbine, engaged)
     if type(turbine) ~= "table" or type(turbine.name) ~= "string" then
         return false, nil, "Invalid turbine identity"

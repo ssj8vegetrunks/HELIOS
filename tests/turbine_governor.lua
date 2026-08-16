@@ -61,6 +61,34 @@ end
 
 do
     local memory = governor.new()
+    local unit = turbine("offline_start", 0, 2000, { active = false })
+    local plan = governor.evaluate(memory, unit, control, { now = 1 })
+    equal(plan.state, "OFFLINE", "inactive turbine remains off without a request")
+    equal(plan.activeChange, false, "ordinary discovery never starts a turbine")
+
+    governor.resetCalibration(memory, control, unit.name)
+    plan = governor.evaluate(memory, unit, control, { now = 2 })
+    equal(plan.state, "STARTING", "calibration request starts an offline turbine")
+    equal(plan.recommendedActive, true, "offline calibration requests activation")
+    unit.governor = plan
+    local started
+    governor.apply(memory, unit, control, { now = 2 }, {
+        setActive = function(_, requested)
+            started = requested
+            return true, requested
+        end,
+    })
+    equal(started, true, "selected turbine receives a verified start command")
+    equal(plan.actuatorState, "APPLIED", "verified start is reported as applied")
+
+    unit.active = true
+    plan = governor.evaluate(memory, unit, control, { now = 3 })
+    assert(plan.state ~= "OFFLINE" and plan.state ~= "STARTING",
+        "active turbine proceeds into calibration")
+end
+
+do
+    local memory = governor.new()
     local unit = turbine("buffer_prime", 0, 2000, {
         flowRate = 0,
         inputPercent = 40,

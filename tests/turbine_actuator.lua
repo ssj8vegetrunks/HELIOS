@@ -15,6 +15,7 @@ peripheral = {
         if name ~= "turbine_0" then return {} end
         return { "setFluidFlowRateMax", "getFluidFlowRateMax",
             "getFluidFlowRateMaxMax", "getFluidFlowRate", "getActive",
+            "setActive",
             "getRotorSpeed", "getInputAmount", "getFluidAmountMax",
             "setInductorEngaged", "getInductorEngaged" }
     end,
@@ -25,6 +26,7 @@ peripheral = {
         if method == "getFluidFlowRateMaxMax" then return 2000 end
         if method == "getFluidFlowRate" then return telemetry.flow end
         if method == "getActive" then return telemetry.active end
+        if method == "setActive" then telemetry.active = value return end
         if method == "getRotorSpeed" then return telemetry.rpm end
         if method == "getInputAmount" then return telemetry.input end
         if method == "getFluidAmountMax" then return telemetry.capacity end
@@ -40,6 +42,19 @@ local turbine = { name = "turbine_0", flowRateLimit = 2000 }
 local reading = adapter.read(turbine)
 assert(reading.inputMax == 4000, "shared turbine fluid capacity was not read")
 assert(reading.inputPercent == 85, "turbine steam-buffer percentage was not calculated")
+calls = {}
+
+local activeOk, activeState, activeReason = adapter.setActive(turbine, false)
+assert(activeOk, tostring(activeReason))
+assert(activeState == false and telemetry.active == false,
+    "turbine shutdown was not verified")
+assert(calls[1].method == "setActive", "wrong turbine power method")
+assert(calls[2].method == "getActive", "missing turbine power read-back")
+
+activeOk, activeState, activeReason = adapter.setActive(turbine, true)
+assert(activeOk, tostring(activeReason))
+assert(activeState == true and telemetry.active == true,
+    "turbine startup was not verified")
 calls = {}
 
 local ok, applied, reason = adapter.setFlowLimit(turbine, 1100)

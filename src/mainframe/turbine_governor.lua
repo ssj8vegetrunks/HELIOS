@@ -91,7 +91,11 @@ function governor.resetCalibration(memory, control, name)
     control.turbineProfiles = control.turbineProfiles or {}
     local hadProfile = control.turbineProfiles[name] ~= nil
     control.turbineProfiles[name] = nil
-    memory.turbines[name] = { overspeedCount = 0, primeRequested = true }
+    memory.turbines[name] = {
+        overspeedCount = 0,
+        primeRequested = true,
+        startRequested = true,
+    }
     if hadProfile then memory.profileDirty = true end
     return true
 end
@@ -148,7 +152,21 @@ function governor.evaluate(memory, turbine, control, context)
     elseif turbine.error then
         result = hold("NO TRUSTED DATA", tostring(turbine.error), false)
     elseif turbine.active == false then
-        result = hold("OFFLINE", "Turbine is not active")
+        if previous.startRequested == true then
+            result = {
+                mode = "automatic",
+                state = "STARTING",
+                action = "START TURBINE",
+                reason = "Calibration requested; activate and verify this turbine",
+                trusted = true,
+                currentActive = false,
+                recommendedActive = true,
+                activeChange = true,
+                actionSamples = 1,
+            }
+        else
+            result = hold("OFFLINE", "Turbine is not active")
+        end
     elseif turbine.active ~= true then
         result = hold("NO STATE DATA", "Turbine active-state telemetry is unavailable", false)
     elseif turbine.rotorSpeed == nil then
@@ -160,6 +178,7 @@ function governor.evaluate(memory, turbine, control, context)
     elseif type(turbine.inductorEngaged) ~= "boolean" then
         result = hold("NO INDUCTOR STATE", "Inductor-state telemetry is unavailable", false)
     else
+        previous.startRequested = false
         local rpm = tonumber(turbine.rotorSpeed)
         local currentFlow = tonumber(turbine.flowRateMax)
         local flowMaximum = tonumber(turbine.flowRateLimit)
@@ -759,6 +778,10 @@ function governor.evaluate(memory, turbine, control, context)
     result.actualFlow = result.actualFlow or tonumber(turbine.flowRate)
     result.recommendedFlow = result.recommendedFlow or result.currentFlow
     result.flowChange = result.flowChange or 0
+    if result.currentActive == nil then result.currentActive = turbine.active end
+    if result.recommendedActive == nil then result.recommendedActive = turbine.active end
+    result.activeChange = result.recommendedActive ~= nil and
+        result.currentActive ~= nil and result.recommendedActive ~= result.currentActive
     if result.currentInductor == nil then result.currentInductor = turbine.inductorEngaged end
     if result.recommendedInductor == nil then result.recommendedInductor = turbine.inductorEngaged end
     result.inductorChange = result.recommendedInductor ~= nil and
@@ -779,6 +802,7 @@ function governor.apply(memory, turbine, control, context, writers)
     local commandSamples = math.max(1, math.floor(tonumber(control.commandSamples) or 2))
     local current = tonumber(plan.currentFlow)
     local proposed = tonumber(plan.recommendedFlow)
+    local needsActive = plan.activeChange == true
     local needsFlow = current ~= nil and proposed ~= nil and current ~= proposed
     local needsInductor = plan.inductorChange == true
     local emergency = plan.action == "CUT FLOW" or
@@ -792,11 +816,13 @@ function governor.apply(memory, turbine, control, context, writers)
         plan.actuatorState = "PAUSED"
     elseif plan.trusted == false then
         plan.actuatorState = "UNTRUSTED"
-    elseif not needsFlow and not needsInductor then
+    elseif not needsActive and not needsFlow and not needsInductor then
         plan.actuatorState = "HOLD"
-    elseif not emergency and (tonumber(plan.actionSamples) or 0) < commandSamples then
+    elseif plan.action ~= "START TURBINE" and not emergency and
+           (tonumber(plan.actionSamples) or 0) < commandSamples then
         plan.actuatorState = "VERIFYING"
     elseif type(writers) ~= "table" or
+           (needsActive and type(writers.setActive) ~= "function") or
            (needsFlow and type(writers.setFlowLimit) ~= "function") or
            (needsInductor and type(writers.setInductor) ~= "function") then
         plan.actuatorState = "FAULT"
@@ -808,8 +834,13 @@ function governor.apply(memory, turbine, control, context, writers)
         plan.nextAdjustmentIn = interval - (now - previous.lastAttemptAt)
     else
         previous.lastAttemptAt = now
-        local ok, appliedFlow, appliedInductor, reason = true, nil, nil, nil
-        if needsInductor then
+        local ok, appliedActive, appliedFlow, appliedInductor, reason =
+            true, nil, nil, nil, nil
+        if needsActive then
+            ok, appliedActive, reason = writers.setActive(
+                turbine, plan.recommendedActive)
+        end
+        if ok and needsInductor then
             ok, appliedInductor, reason = writers.setInductor(turbine, plan.recommendedInductor)
         end
         if ok and needsFlow then
@@ -817,6 +848,11 @@ function governor.apply(memory, turbine, control, context, writers)
         end
         if ok then
             previous.lastAppliedAt = now
+            if needsActive then
+                previous.lastAppliedActive = appliedActive == true
+                previous.startRequested = false
+                plan.appliedActive = previous.lastAppliedActive
+            end
             if needsFlow then
                 previous.lastAppliedFlow = tonumber(appliedFlow) or proposed
                 plan.appliedFlow = previous.lastAppliedFlow
@@ -831,12 +867,14 @@ function governor.apply(memory, turbine, control, context, writers)
             previous.lastError = tostring(reason or "Turbine rejected the actuator command")
             plan.actuatorState = "FAULT"
             plan.actuatorError = previous.lastError
+            if needsActive then plan.reportedActive = appliedActive end
             if needsFlow then plan.reportedFlow = tonumber(appliedFlow) end
             if needsInductor then plan.reportedInductor = appliedInductor end
         end
     end
 
     plan.lastAppliedAt = previous.lastAppliedAt
+    plan.lastAppliedActive = previous.lastAppliedActive
     plan.lastAppliedFlow = previous.lastAppliedFlow
     plan.lastAppliedInductor = previous.lastAppliedInductor
     memory.turbines[name] = previous
