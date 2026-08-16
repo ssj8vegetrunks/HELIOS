@@ -139,6 +139,7 @@ do
     local unit = reactor(2300, 0.29, { name = "prime_source" })
     local plan
     for now = 1, 8 do
+        unit.casingTemperature = 600 + now
         plan = governor.evaluate(memory, unit, primeControl, {
             now = now,
             steamPrimeRequested = true,
@@ -147,7 +148,7 @@ do
     equal(plan.targetSteam, 3800,
         "buffer priming temporarily targets ninety-percent surplus")
     equal(plan.action, "INCREASE EXPOSURE",
-        "reactor opens further while priming buffers")
+        "reactor opens further while priming despite casing-temperature drift")
 
     memory = governor.new()
     unit = reactor(3800, 0.48, { name = "prime_source" })

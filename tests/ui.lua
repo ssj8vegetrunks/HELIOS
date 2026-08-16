@@ -54,12 +54,12 @@ term = {
 }
 
 local ui = dofile("src/core/ui.lua")
-ui.setVersion("1.4.0-alpha.18")
+ui.setVersion("1.4.0-alpha.19")
 ui.header("mainframe", "Central control authority")
 
 assert(rows[1]:sub(1, 19) == "HELIOS // MAINFRAME",
     "header role is not left aligned")
-assert(rows[1]:sub(width - #"v1.4.0-alpha.18" + 1) == "v1.4.0-alpha.18",
+assert(rows[1]:sub(width - #"v1.4.0-alpha.19" + 1) == "v1.4.0-alpha.19",
     "installed version is not right aligned")
 
 rows, cursorX, cursorY, scrollCount = {}, 1, 5, 0

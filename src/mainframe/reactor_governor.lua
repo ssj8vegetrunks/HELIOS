@@ -491,6 +491,9 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
             local calibrationStable = calibrationPhase == "ADJUSTING" and
                 averageReady and not response.waiting and
                 (previous.processStableSamples or 0) >= stableRequired
+            local primeStable = primeRequested and averageReady and
+                not response.waiting and
+                (previous.processStableSamples or 0) >= stableRequired
             local calibrationCompleted = false
             local proposed, state, action, reason = exposure, "STABLE", "HOLD",
                 "Steam production matches trusted turbine demand"
@@ -574,9 +577,12 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
                 state, action = "RECOVERING", "INCREASE EXPOSURE"
                 reason = ("Steam is below demand; restore learned %.2f rod-equivalents"):
                     format(tonumber(profile.exposure))
-            elseif (responding or not stable) and not calibrationStable then
+            elseif (responding or not stable) and not calibrationStable and
+                   not primeStable then
                 state = "RESPONDING"
-                reason = "Waiting for steam, buffer, and casing temperature to settle"
+                reason = primeRequested and
+                    "Waiting for steam and buffer response; casing temperature is diagnostic during priming" or
+                    "Waiting for steam, buffer, and casing temperature to settle"
             else
                 clearCooldown(previous)
                 -- Once telemetry has settled, a full buffer is a valid operating
