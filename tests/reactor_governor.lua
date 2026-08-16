@@ -505,6 +505,30 @@ do
     equal(drifting.calibrationPhase, "ADJUSTING",
         "thermal drift cannot reset or stall forward calibration")
 
+    -- The same large casing continues drifting after a second turbine changes
+    -- normal demand. Once steam and the hot-fluid process settle, HELIOS must
+    -- take the next bounded rod step instead of holding the old profile.
+    memory = governor.new()
+    control.reactorProfiles.reactor_0 = {
+        exposure = 0.29,
+        steam = 2300,
+        targetSteam = 2300,
+        updatedAt = 10,
+    }
+    for now = 20, 20 + control.reactorSteamAverageSamples +
+            control.reactorLearningSamples + 2 do
+        drifting = governor.evaluate(memory, reactor(3820, 0.48, {
+            casingTemperature = 100 + now,
+            hotFluidPercent = 0,
+        }), control, { now = now }, 4000, 2)
+    end
+    equal(drifting.state, "STEAM LOW",
+        "stable steam deficit advances despite large-casing thermal drift")
+    equal(drifting.action, "INCREASE EXPOSURE",
+        "higher turbine demand receives another bounded rod step")
+    assert(drifting.recommendedRodExposure > 0.48,
+        "normal regulation must move beyond the old one-turbine setting")
+
     memory = governor.new()
     governor.beginRecalibration(memory, control, "reactor_0")
     local hot = settle(memory, reactor(1, 0, {

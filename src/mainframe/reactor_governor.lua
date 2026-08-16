@@ -483,15 +483,12 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
             local _, responding, response = observeResponse(previous, reactor, control,
                 context, production)
             local stable = (previous.stableSamples or 0) >= stableRequired
-            -- During an explicit recalibration test, steam output and hot-fluid
-            -- response are sufficient to advance after the normal post-write
-            -- delay. A massive casing may keep drifting long after production
-            -- has settled, so temperature motion remains diagnostic but cannot
-            -- hold a bounded calibration step forever.
-            local calibrationStable = calibrationPhase == "ADJUSTING" and
-                averageReady and not response.waiting and
-                (previous.processStableSamples or 0) >= stableRequired
-            local primeStable = primeRequested and averageReady and
+            -- Steam output and hot-fluid response are the active control
+            -- signals after the normal post-write delay. A massive casing may
+            -- keep drifting long after production has settled, so temperature
+            -- motion remains diagnostic but cannot hold calibration, priming,
+            -- or an ordinary demand adjustment forever.
+            local processStable = averageReady and
                 not response.waiting and
                 (previous.processStableSamples or 0) >= stableRequired
             local calibrationCompleted = false
@@ -577,8 +574,7 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
                 state, action = "RECOVERING", "INCREASE EXPOSURE"
                 reason = ("Steam is below demand; restore learned %.2f rod-equivalents"):
                     format(tonumber(profile.exposure))
-            elseif (responding or not stable) and not calibrationStable and
-                   not primeStable then
+            elseif (responding or not stable) and not processStable then
                 state = "RESPONDING"
                 reason = primeRequested and
                     "Waiting for steam and buffer response; casing temperature is diagnostic during priming" or
