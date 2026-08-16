@@ -96,6 +96,10 @@ local function clearTransient(previous)
     previous.observedRodExposure = nil
     previous.lastAttemptAt = nil
     previous.lastError = nil
+    previous.turbineBufferPercent = nil
+    previous.bufferRecoverySamples = 0
+    previous.bufferExposureFloor = nil
+    previous.bufferExposureDemand = nil
     clearCooldown(previous)
 end
 
@@ -369,9 +373,38 @@ saveProfile = function(memory, control, name, exposure, production, target, cont
             steam = round(production, 1),
             targetSteam = round(target, 1),
             updatedAt = tonumber(context and context.now) or 0,
+            bufferExposure = old and old.bufferExposure or nil,
+            bufferDemand = old and old.bufferDemand or nil,
+            bufferSteam = old and old.bufferSteam or nil,
+            bufferUpdatedAt = old and old.bufferUpdatedAt or nil,
         }
         memory.profileDirty = true
     end
+end
+
+local function saveBufferDefault(memory, control, name, exposure, production,
+                                 target, requested, context)
+    control.reactorProfiles = control.reactorProfiles or {}
+    local profile = control.reactorProfiles[name]
+    if type(profile) ~= "table" then return profile, false end
+    local roundedExposure = round(exposure, 2)
+    local roundedDemand = round(requested, 1)
+    local changed = math.abs((tonumber(profile.bufferExposure) or -1) -
+        roundedExposure) >= 0.01 or
+        math.abs((tonumber(profile.bufferDemand) or -1) - roundedDemand) >= 1
+    if changed then
+        local now = tonumber(context and context.now) or 0
+        profile.exposure = roundedExposure
+        profile.steam = round(production, 1)
+        profile.targetSteam = round(target, 1)
+        profile.updatedAt = now
+        profile.bufferExposure = roundedExposure
+        profile.bufferDemand = roundedDemand
+        profile.bufferSteam = round(production, 1)
+        profile.bufferUpdatedAt = now
+        memory.profileDirty = true
+    end
+    return profile, changed
 end
 
 function governor.evaluate(memory, reactor, control, context, targetSteam, activeTurbines)
@@ -491,6 +524,71 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
             local processStable = averageReady and
                 not response.waiting and
                 (previous.processStableSamples or 0) >= stableRequired
+            local turbineBuffer = tonumber(context.turbineBufferPercent)
+            local turbineBufferReady = math.max(50, math.min(
+                tonumber(control.reactorHotFluidHigh) or 85,
+                tonumber(control.calibrationBufferReady) or 85))
+            local bufferTelemetryReady =
+                context.turbineBufferTelemetryComplete == true
+            local bufferFeedbackEnabled = type(profile) == "table" and
+                previous.recalibrating ~= true and not primeRequested and
+                (activeTurbines or 0) > 0 and bufferTelemetryReady and
+                turbineBuffer ~= nil
+            if previous.bufferExposureFloor == nil and type(profile) == "table" and
+               tonumber(profile.bufferExposure) ~= nil and
+               tonumber(profile.bufferDemand) ~= nil and
+               requestedSteam >= tonumber(profile.bufferDemand) - 1 then
+                previous.bufferExposureFloor = tonumber(profile.bufferExposure)
+                previous.bufferExposureDemand = tonumber(profile.bufferDemand)
+            end
+            local bufferBelowReady = bufferFeedbackEnabled and
+                turbineBuffer < turbineBufferReady
+            local bufferFilling = false
+            local bufferDelta = math.max(0.01,
+                tonumber(control.reactorLearningBufferDelta) or 0.1)
+
+            -- A turbine buffer is the downstream truth. Reactor production is
+            -- instantaneous telemetry and can look sufficient while transport
+            -- buffers are still losing steam. After calibration, confirm a
+            -- flat/falling turbine buffer before taking one bounded fuel step.
+            if bufferBelowReady and not response.waiting then
+                local priorBuffer = tonumber(previous.turbineBufferPercent)
+                if priorBuffer ~= nil and
+                   turbineBuffer >= priorBuffer + bufferDelta then
+                    previous.bufferRecoverySamples = 0
+                    bufferFilling = true
+                else
+                    previous.bufferRecoverySamples =
+                        (previous.bufferRecoverySamples or 0) + 1
+                end
+            else
+                previous.bufferRecoverySamples = 0
+            end
+            previous.turbineBufferPercent = turbineBuffer
+            local bufferRecoveryRequired = bufferBelowReady and
+                (previous.bufferRecoverySamples or 0) >= stableRequired
+
+            -- A learned downstream-loss allowance must disappear when turbine
+            -- demand falls, but it remains valid when another turbine is added.
+            if previous.bufferExposureFloor ~= nil and
+               previous.bufferExposureDemand ~= nil and
+               requestedSteam < previous.bufferExposureDemand - 1 then
+                previous.bufferExposureFloor = nil
+                previous.bufferExposureDemand = nil
+            end
+            if type(profile) ~= "table" or target <= 0 then
+                previous.bufferExposureFloor = nil
+                previous.bufferExposureDemand = nil
+            end
+            local bufferDefaultSaved = false
+            local exposureFloor = tonumber(previous.bufferExposureFloor)
+            if exposureFloor ~= nil and bufferFeedbackEnabled and
+               exposure >= exposureFloor - 0.005 and
+               (bufferFilling or turbineBuffer >= turbineBufferReady) then
+                profile, bufferDefaultSaved = saveBufferDefault(memory, control,
+                    name, exposure, production, normalTarget, requestedSteam,
+                    context)
+            end
             local calibrationCompleted = false
             local proposed, state, action, reason = exposure, "STABLE", "HOLD",
                 "Steam production matches trusted turbine demand"
@@ -574,6 +672,17 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
                 state, action = "RECOVERING", "INCREASE EXPOSURE"
                 reason = ("Steam is below demand; restore learned %.2f rod-equivalents"):
                     format(tonumber(profile.exposure))
+            elseif bufferRecoveryRequired then
+                if exposure >= rodCount - 0.005 then
+                    state = "STEAM DEFICIT"
+                    reason = ("Turbine buffer remains at %.1f%% with every rod exposed"):
+                        format(turbineBuffer)
+                else
+                    proposed = math.min(exposure + maxStep, rodCount)
+                    state, action = "BUFFER RECOVERY", "INCREASE EXPOSURE"
+                    reason = ("Turbine buffer stalled at %.1f%%; increase reactor output"):
+                        format(turbineBuffer)
+                end
             elseif (responding or not stable) and not processStable then
                 state = "RESPONDING"
                 reason = primeRequested and
@@ -599,14 +708,36 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
                         reason = ("Formula estimate %.2f rod-equivalents; increase gradually"):
                             format(estimate)
                     end
+                elseif bufferBelowReady then
+                    state = "BUFFER FILLING"
+                    reason = bufferDefaultSaved and
+                        ("Turbine buffer is climbing at %.1f%%; saved reactor default"):
+                            format(turbineBuffer) or bufferFilling and
+                        ("Turbine buffer is filling at %.1f%%; hold reactor output"):
+                            format(turbineBuffer) or
+                        ("Turbine buffer is %.1f%%; observing recovery %d/%d"):
+                            format(turbineBuffer,
+                                previous.bufferRecoverySamples or 0,
+                                stableRequired)
                 elseif production > target + deadband then
                     local estimate = learnedExposure(previous, profile, exposure,
                         production, target, rodCount)
                     proposed = math.max(exposure - maxStep,
                         math.min(exposure - 0.01, estimate))
-                    state, action = "STEAM HIGH", "REDUCE EXPOSURE"
-                    reason = ("Formula estimate %.2f rod-equivalents; reduce gradually"):
-                        format(estimate)
+                    local exposureFloor = tonumber(previous.bufferExposureFloor)
+                    if exposureFloor ~= nil then
+                        proposed = math.max(proposed, exposureFloor)
+                    end
+                    if proposed < exposure - 0.005 then
+                        state, action = "STEAM HIGH", "REDUCE EXPOSURE"
+                        reason = ("Formula estimate %.2f rod-equivalents; reduce gradually"):
+                            format(estimate)
+                    else
+                        proposed = exposure
+                        state = "BUFFER RESERVE"
+                        reason = ("Holding %.2f rod-equivalents learned from turbine buffer loss"):
+                            format(exposureFloor or exposure)
+                    end
                 elseif primeRequested then
                     state = "PRIMING STEAM"
                     reason = ("Holding elevated %.0f mB/t output until steam buffers are ready"):
@@ -665,6 +796,15 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
                 processStableSamples = previous.processStableSamples or 0,
                 temperatureMoving = response.temperatureMoving == true,
                 hotFluidPercent = hotFluid,
+                turbineBufferPercent = turbineBuffer,
+                turbineBufferReady = turbineBufferReady,
+                turbineBufferFeedback = bufferFeedbackEnabled,
+                bufferFilling = bufferFilling,
+                bufferRecoverySamples = previous.bufferRecoverySamples or 0,
+                bufferRecoveryRequested = state == "BUFFER RECOVERY" and
+                    action == "INCREASE EXPOSURE",
+                bufferExposureFloor = previous.bufferExposureFloor,
+                bufferDefaultSaved = bufferDefaultSaved,
                 learnedProfile = profile,
                 recalibrating = previous.recalibrating == true,
                 calibrationPhase = previous.calibrationPhase,
@@ -684,6 +824,18 @@ end
 
 function governor.evaluateAll(memory, reactors, turbines, control, context)
     local demand, activeTurbines, demandError = governor.steamDemand(turbines, control)
+    local turbineBufferPercent, bufferReadings = nil, 0
+    for _, turbine in ipairs(turbines or {}) do
+        if turbine.active == true and not turbine.error and
+           not (turbine.governor and turbine.governor.trusted == false) then
+            local buffer = tonumber(turbine.inputPercent)
+            if buffer ~= nil then
+                turbineBufferPercent = turbineBufferPercent and
+                    math.min(turbineBufferPercent, buffer) or buffer
+                bufferReadings = bufferReadings + 1
+            end
+        end
+    end
     local steamReactors = 0
     for _, reactor in ipairs(reactors or {}) do
         if reactor.mode == "steam" and not reactor.error then
@@ -700,6 +852,9 @@ function governor.evaluateAll(memory, reactors, turbines, control, context)
         local reactorContext = {}
         for key, value in pairs(context or {}) do reactorContext[key] = value end
         reactorContext.demandError = demandError
+        reactorContext.turbineBufferPercent = turbineBufferPercent
+        reactorContext.turbineBufferTelemetryComplete = activeTurbines > 0 and
+            bufferReadings == activeTurbines
         reactor.governor = governor.evaluate(memory, reactor, control, reactorContext,
             demand, activeTurbines)
     end
@@ -768,12 +923,20 @@ function governor.apply(memory, reactor, control, context, writers)
             else
                 previous.lastAppliedRodExposure = tonumber(applied) or proposed
                 plan.appliedRodExposure = previous.lastAppliedRodExposure
+                if plan.bufferRecoveryRequested == true then
+                    previous.bufferExposureFloor = previous.lastAppliedRodExposure
+                    previous.bufferExposureDemand =
+                        tonumber(plan.requestedSteam) or 0
+                    plan.bufferExposureFloor = previous.bufferExposureFloor
+                end
             end
             previous.lastError = nil
             previous.stableSamples = 0
             previous.processStableSamples = 0
             previous.productionSamples = {}
             previous.observation = nil
+            previous.turbineBufferPercent = nil
+            previous.bufferRecoverySamples = 0
             plan.actuatorState = "APPLIED"
         else
             previous.lastError = tostring(reason or (needsActive and

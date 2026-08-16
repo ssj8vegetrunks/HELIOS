@@ -94,6 +94,105 @@ do
 end
 
 do
+    local feedbackControl = {}
+    for key, value in pairs(control) do feedbackControl[key] = value end
+    feedbackControl.reactorSteamReserveMargin = 0.15
+    feedbackControl.reactorProfiles = {
+        reactor_0 = {
+            exposure = 0.29,
+            steam = 2300,
+            targetSteam = 2300,
+            updatedAt = 1,
+        },
+    }
+    local memory = governor.new()
+    local source = reactor(4660, 0.58)
+    local first = turbine(2000, { name = "turbine_0", inputPercent = 20 })
+    local second = turbine(2000, { name = "turbine_1", inputPercent = 90 })
+    local plan
+    for now = 1, 8 do
+        governor.evaluateAll(memory, { source }, { first, second },
+            feedbackControl, { now = now })
+        plan = source.governor
+    end
+    equal(plan.targetSteam, 4600,
+        "a second turbine updates the fifteen-percent nominal target")
+    equal(plan.state, "BUFFER RECOVERY",
+        "flat downstream buffer overrides optimistic production telemetry")
+    equal(plan.action, "INCREASE EXPOSURE",
+        "buffer loss requests additional reactor output")
+    equal(plan.turbineBufferPercent, 20,
+        "lowest active turbine buffer drives recovery")
+    equal(plan.recommendedRodExposure, 0.83,
+        "buffer recovery remains bounded to one configured rod step")
+
+    source.governor = plan
+    local applied
+    governor.apply(memory, source, feedbackControl, { now = 10 }, {
+        setControlRodExposure = function(_, exposure)
+            applied = exposure
+            return true, exposure
+        end,
+    })
+    equal(applied, 0.83,
+        "confirmed buffer recovery reaches the rod actuator")
+    equal(source.governor.bufferExposureFloor, 0.83,
+        "successful recovery remembers its downstream-loss allowance")
+
+    source = reactor(6000, 0.83)
+    first.inputPercent, second.inputPercent = 90, 90
+    for now = 20, 30 do
+        governor.evaluateAll(memory, { source }, { first, second },
+            feedbackControl, { now = now })
+        plan = source.governor
+    end
+    equal(plan.state, "BUFFER RESERVE",
+        "full buffers do not immediately erase learned network allowance")
+    equal(plan.action, "HOLD",
+        "buffer reserve prevents a new drain-and-refill oscillation")
+    equal(plan.recommendedRodExposure, 0.83,
+        "learned buffer exposure floor is retained")
+    equal(feedbackControl.reactorProfiles.reactor_0.exposure, 0.83,
+        "rising turbine buffers promote recovery exposure to reactor default")
+    equal(feedbackControl.reactorProfiles.reactor_0.bufferDemand, 4000,
+        "saved buffer default is tied to aggregate turbine demand")
+    equal(feedbackControl.reactorProfiles.reactor_0.bufferSteam, 6000,
+        "saved buffer default records measured reactor output")
+    assert(governor.consumeProfileChanges(memory),
+        "buffer-calibrated reactor default is marked for persistence")
+
+    second.active = false
+    governor.evaluateAll(memory, { source }, { first, second },
+        feedbackControl, { now = 31 })
+    equal(source.governor.bufferExposureFloor, nil,
+        "removing turbine demand clears the old buffer exposure floor")
+    equal(source.governor.action, "REDUCE EXPOSURE",
+        "reactor may reduce output after turbine demand falls")
+    second.active = true
+
+    first.inputPercent, second.inputPercent = 20, 90
+    memory = governor.new()
+    source = reactor(5000, 0.58)
+    for now = 1, 8 do
+        first.inputPercent = 20 + now
+        governor.evaluateAll(memory, { source }, { first, second },
+            feedbackControl, { now = now })
+        plan = source.governor
+    end
+    equal(plan.state, "BUFFER FILLING",
+        "rising downstream buffer is allowed to fill")
+    equal(plan.action, "HOLD",
+        "reactor does not reduce output while a turbine buffer is filling")
+
+    governor.evaluateAll(memory, { source }, {
+        turbine(2000, { name = "turbine_0" }),
+        turbine(2000, { name = "turbine_1" }),
+    }, feedbackControl, { now = 20 })
+    equal(source.governor.turbineBufferFeedback, false,
+        "missing buffer telemetry cannot authorize reactor writes")
+end
+
+do
     local uncalibrated = turbine(500, { flowRateLimit = 2000 })
     local demand = governor.steamDemand({ uncalibrated }, control)
     equal(demand, 2000, "uncalibrated turbine requests its hard intake limit")
