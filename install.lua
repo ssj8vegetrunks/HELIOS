@@ -1,7 +1,7 @@
 -- HELIOS single-file installer
--- Milestone 6.0: control interface, monitor touch, and network identity safety.
+-- Milestone 8.5: coordinated reactor-first steam startup.
 
-local VERSION = "1.3.0-alpha.2"
+local VERSION = "1.4.0-alpha.22"
 local INSTALL_DIR = "/helios"
 local STAGE_DIR = "/.helios-install"
 
@@ -104,13 +104,97 @@ function config.load()
     loaded.ui.monitorTextScale = tonumber(loaded.ui.monitorTextScale) or 0.5
     loaded.control = loaded.control or {}
     loaded.control.mode = "automatic"
-    loaded.control.actuatorsEnabled = false
+    loaded.control.actuatorsEnabled = loaded.role == "mainframe"
     loaded.control.targetRpm = tonumber(loaded.control.targetRpm) or 1800
+    loaded.control.rpmDeadband = math.max(1, tonumber(loaded.control.rpmDeadband) or 25)
+    loaded.control.overspeedRpm = math.max(loaded.control.targetRpm + loaded.control.rpmDeadband,
+        tonumber(loaded.control.overspeedRpm) or 2000)
+    loaded.control.overspeedSamples = math.max(1,
+        math.floor(tonumber(loaded.control.overspeedSamples) or 3))
     loaded.control.storageLow = tonumber(loaded.control.storageLow) or 25
     loaded.control.storageHigh = tonumber(loaded.control.storageHigh) or 85
-    loaded.control.maxRodStep = tonumber(loaded.control.maxRodStep) or 5
+    loaded.control.maxRodStep = math.max(1, math.min(10,
+        tonumber(loaded.control.maxRodStep) or 5))
+    loaded.control.reactorAdjustmentInterval = math.max(2,
+        tonumber(loaded.control.reactorAdjustmentInterval) or 5)
+    loaded.control.reactorCommandSamples = math.max(2,
+        math.floor(tonumber(loaded.control.reactorCommandSamples) or 3))
+    loaded.control.reactorSteamDeadband = math.max(0.005, math.min(0.25,
+        tonumber(loaded.control.reactorSteamDeadband) or 0.01))
+    loaded.control.reactorSteamDeadbandMin = math.max(1,
+        tonumber(loaded.control.reactorSteamDeadbandMin) or 25)
+    loaded.control.reactorSteamReserveMargin = math.max(0, math.min(0.25,
+        tonumber(loaded.control.reactorSteamReserveMargin) or 0.15))
+    loaded.control.reactorSteamPrimeMargin = math.max(
+        loaded.control.reactorSteamReserveMargin, math.min(2,
+            tonumber(loaded.control.reactorSteamPrimeMargin) or 0.90))
+    loaded.control.reactorSteamAverageSamples = math.max(3,
+        math.floor(tonumber(loaded.control.reactorSteamAverageSamples) or 10))
+    loaded.control.reactorHotFluidHigh = math.max(50, math.min(99,
+        tonumber(loaded.control.reactorHotFluidHigh) or 85))
+    loaded.control.calibrationBufferReady = math.max(50, math.min(
+        loaded.control.reactorHotFluidHigh,
+        tonumber(loaded.control.calibrationBufferReady) or 85))
+    loaded.control.reactorHotFluidLow = math.max(1, math.min(
+        loaded.control.reactorHotFluidHigh - 1,
+        tonumber(loaded.control.reactorHotFluidLow) or 15))
+    loaded.control.maxRodEquivalentStep = math.max(0.01, math.min(1,
+        tonumber(loaded.control.maxRodEquivalentStep) or 0.25))
+    loaded.control.reactorLearningSamples = math.max(3,
+        math.floor(tonumber(loaded.control.reactorLearningSamples) or 8))
+    loaded.control.reactorLearningSteamDelta = math.max(1,
+        tonumber(loaded.control.reactorLearningSteamDelta) or 10)
+    loaded.control.reactorLearningTemperatureDelta = math.max(0.01,
+        tonumber(loaded.control.reactorLearningTemperatureDelta) or 0.1)
+    loaded.control.reactorLearningBufferDelta = math.max(0.01,
+        tonumber(loaded.control.reactorLearningBufferDelta) or 0.1)
+    loaded.control.reactorMinimumResponseTime = math.max(5,
+        tonumber(loaded.control.reactorMinimumResponseTime) or 15)
+    loaded.control.reactorProfiles = loaded.control.reactorProfiles or {}
+    loaded.control.reactorCooldownWindow = math.max(5,
+        tonumber(loaded.control.reactorCooldownWindow) or 10)
+    loaded.control.reactorCooldownStallTimeout = math.max(60,
+        tonumber(loaded.control.reactorCooldownStallTimeout) or 180)
+    loaded.control.reactorCooldownSteamDelta = math.max(0.1,
+        tonumber(loaded.control.reactorCooldownSteamDelta) or 2)
+    loaded.control.reactorCooldownTemperatureDelta = math.max(0.01,
+        tonumber(loaded.control.reactorCooldownTemperatureDelta) or 0.05)
+    loaded.control.reactorCalibrationMaxTemperature = math.max(50,
+        tonumber(loaded.control.reactorCalibrationMaxTemperature) or 150)
     loaded.control.maxFlowStep = tonumber(loaded.control.maxFlowStep) or 100
     loaded.control.adjustmentInterval = tonumber(loaded.control.adjustmentInterval) or 2
+    loaded.control.commandSamples = math.max(1,
+        math.floor(tonumber(loaded.control.commandSamples) or 2))
+    loaded.control.lowBandRpm = tonumber(loaded.control.lowBandRpm) or 900
+    loaded.control.highBandRpm = tonumber(loaded.control.highBandRpm) or 1800
+    loaded.control.calibrationLowEscapeRpm = math.max(
+        loaded.control.lowBandRpm + loaded.control.rpmDeadband,
+        tonumber(loaded.control.calibrationLowEscapeRpm) or
+            (loaded.control.lowBandRpm + 100))
+    loaded.control.coldStartRpm = math.max(0,
+        tonumber(loaded.control.coldStartRpm) or 100)
+    loaded.control.calibrationSettleDelta = math.max(0.1,
+        tonumber(loaded.control.calibrationSettleDelta) or 2)
+    loaded.control.calibrationSettleSamples = math.max(3,
+        math.floor(tonumber(loaded.control.calibrationSettleSamples) or 8))
+    loaded.control.calibrationMinimumRpm = math.max(0,
+        tonumber(loaded.control.calibrationMinimumRpm) or
+            (loaded.control.lowBandRpm - loaded.control.rpmDeadband * 2))
+    loaded.control.calibrationSteamRatio = math.max(0.1, math.min(1,
+        tonumber(loaded.control.calibrationSteamRatio) or 0.98))
+    loaded.control.calibrationSteamSamples = math.max(3,
+        math.floor(tonumber(loaded.control.calibrationSteamSamples) or 5))
+    loaded.control.calibrationFailureSamples = math.max(3,
+        math.floor(tonumber(loaded.control.calibrationFailureSamples) or 10))
+    loaded.control.calibrationSpoolFailureSamples = math.max(1,
+        math.floor(tonumber(loaded.control.calibrationSpoolFailureSamples) or 2))
+    loaded.control.calibrationBandEscapeSamples = math.max(2,
+        math.floor(tonumber(loaded.control.calibrationBandEscapeSamples) or 3))
+    loaded.control.calibrationStallTimeout = math.max(30,
+        tonumber(loaded.control.calibrationStallTimeout) or 180)
+    loaded.control.overspeedMargin = math.max(loaded.control.rpmDeadband,
+        tonumber(loaded.control.overspeedMargin) or 200)
+    loaded.control.turbineProfiles = loaded.control.turbineProfiles or {}
     loaded.power = loaded.power or {}
     local validUnits = { FE = true, RF = true, J = true, EU = true }
     if not validUnits[loaded.power.unit] then loaded.power.unit = "FE" end
@@ -367,6 +451,11 @@ return formatter
     ["core/ui.lua"] = [=[
 local ui = {}
 local idConflicts = {}
+local systemVersion
+
+function ui.setVersion(version)
+    systemVersion = version and tostring(version) or nil
+end
 
 function ui.setIdConflicts(conflicts)
     idConflicts = {}
@@ -415,6 +504,26 @@ function ui.prepare()
     term.setCursorPos(1, 1)
 end
 
+function ui.line(value, colour)
+    local width = select(1, term.getSize())
+    term.setTextColor(colour or colors.white)
+    print(string.sub(tostring(value or ""), 1, width))
+    term.setTextColor(colors.white)
+end
+
+function ui.block(value, colour, maxRows)
+    local width = select(1, term.getSize())
+    local remaining = tostring(value or "")
+    local rows = 0
+    maxRows = math.max(1, math.floor(tonumber(maxRows) or 1))
+    while #remaining > 0 and rows < maxRows do
+        ui.line(string.sub(remaining, 1, width), colour)
+        remaining = string.sub(remaining, width + 1)
+        rows = rows + 1
+    end
+    return rows
+end
+
 function ui.header(role, subtitle)
     ui.prepare()
     if #idConflicts > 0 then
@@ -426,7 +535,20 @@ function ui.header(role, subtitle)
         term.setBackgroundColor(colors.black)
     end
     term.setTextColor(colors.yellow)
-    print("HELIOS // " .. string.upper(role))
+    local width = select(1, term.getSize())
+    local heading = "HELIOS // " .. string.upper(role)
+    local version = systemVersion and ("v" .. systemVersion) or ""
+    local row = select(2, term.getCursorPos())
+    term.setCursorPos(1, row)
+    if #version > 0 and #version < width then
+        local headingWidth = math.max(0, width - #version - 1)
+        write(string.sub(heading, 1, headingWidth))
+        term.setCursorPos(width - #version + 1, row)
+        write(version)
+    else
+        write(string.sub(heading, 1, width))
+    end
+    term.setCursorPos(1, row + 1)
     term.setTextColor(colors.lightGray)
     print(subtitle)
     term.setTextColor(colors.gray)
@@ -435,10 +557,13 @@ function ui.header(role, subtitle)
 end
 
 function ui.status(label, value, colour)
+    local width = select(1, term.getSize())
+    local prefix = tostring(label) .. ": "
     term.setTextColor(colors.lightGray)
-    write(label .. ": ")
+    write(string.sub(prefix, 1, width))
     term.setTextColor(colour or colors.white)
-    print(tostring(value))
+    local x = select(1, term.getCursorPos())
+    print(string.sub(tostring(value), 1, math.max(0, width - x + 1)))
     term.setTextColor(colors.white)
 end
 
@@ -652,10 +777,13 @@ function mainframe.run(config)
     local display = dofile("/helios/core/display.lua")
     display.start(config)
     local ui = dofile("/helios/core/ui.lua")
+    ui.setVersion(config.version)
     local configStore = dofile("/helios/core/config.lua")
     local registry = dofile("/helios/mainframe/device_registry.lua")
     local reactorAdapter = dofile("/helios/mainframe/reactor_adapter.lua")
+    local reactorGovernor = dofile("/helios/mainframe/reactor_governor.lua")
     local turbineAdapter = dofile("/helios/mainframe/turbine_adapter.lua")
+    local turbineGovernor = dofile("/helios/mainframe/turbine_governor.lua")
     local storageAdapter = dofile("/helios/mainframe/storage_adapter.lua")
     local powerFormat = dofile("/helios/core/power_format.lua")
     local network = dofile("/helios/core/network.lua")
@@ -681,6 +809,8 @@ function mainframe.run(config)
     local identityClaims = {}
     local idConflicts = {}
     local dashboardButtons = {}
+    local governorMemory = turbineGovernor.new()
+    local reactorGovernorMemory = reactorGovernor.new()
 
     local timeoutChoices = { 300, 900, 1800, 3600 }
 
@@ -780,10 +910,26 @@ function mainframe.run(config)
                 candidates[#candidates + 1] = { level = level, key = key, message = message }
             end
         end
+        local function addConfirmed(level, key, message)
+            activeKeys[key] = true
+            conditionSamples[key] = config.alarms.confirmSamples
+            candidates[#candidates + 1] = { level = level, key = key, message = message }
+        end
 
         for _, reactor in ipairs(reactors) do
             if reactor.error and not maintenance then
                 add(3, reactor.name .. ":telemetry", alarmName(reactor.name) .. " TELEMETRY LOST")
+            elseif reactor.governor and reactor.governor.actuatorState == "FAULT" then
+                add(2, reactor.name .. ":control", alarmName(reactor.name) .. " CONTROL FAULT")
+            elseif reactor.governor and reactor.governor.state == "STEAM DEFICIT" then
+                add(2, reactor.name .. ":steam-deficit",
+                    alarmName(reactor.name) .. " CANNOT MEET STEAM DEMAND")
+            elseif reactor.governor and reactor.governor.state == "STEAM SURPLUS" then
+                add(2, reactor.name .. ":steam-surplus",
+                    alarmName(reactor.name) .. " STEAM OUTPUT CANNOT REDUCE")
+            elseif reactor.governor and reactor.governor.state == "RODS NOT UNIFORM" then
+                add(2, reactor.name .. ":rod-levels",
+                    alarmName(reactor.name) .. " CONTROL RODS NOT UNIFORM")
             elseif reactor.fuelPercent then
                 if reactor.fuelPercent <= config.alarms.criticalFuel then
                     add(3, reactor.name .. ":fuel-critical", alarmName(reactor.name) .. " FUEL CRITICAL")
@@ -795,6 +941,14 @@ function mainframe.run(config)
         for _, turbine in ipairs(turbines) do
             if turbine.error and not maintenance then
                 add(3, turbine.name .. ":telemetry", alarmName(turbine.name) .. " TELEMETRY LOST")
+            elseif turbine.governor and turbine.governor.state == "OVERSPEED" then
+                addConfirmed(3, turbine.name .. ":overspeed", alarmName(turbine.name) .. " OVERSPEED")
+            elseif turbine.governor and turbine.governor.state == "CALIBRATION FAILED" then
+                addConfirmed(2, turbine.name .. ":calibration",
+                    alarmName(turbine.name) .. " CALIBRATION FAILED: " ..
+                    tostring(turbine.governor.reason or "invalid operating result"))
+            elseif turbine.governor and turbine.governor.actuatorState == "FAULT" then
+                add(2, turbine.name .. ":control", alarmName(turbine.name) .. " CONTROL FAULT")
             end
         end
         for _, storage in ipairs(storages) do
@@ -850,6 +1004,56 @@ function mainframe.run(config)
         reactors = reactorAdapter.readAll(devices)
         turbines = turbineAdapter.readAll(devices)
         storages = storageAdapter.readAll(devices, config.power)
+        local now = os.epoch("utc") / 1000
+        local steamPrimeRequested = turbineGovernor.needsSteamPrime(
+            governorMemory, turbines)
+        local _, steamDemand = reactorGovernor.evaluateAll(reactorGovernorMemory,
+            reactors, turbines, config.control, {
+                maintenance = maintenance,
+                mainframeId = os.getComputerID(),
+                idConflicts = idConflicts,
+                now = now,
+                steamPrimeRequested = steamPrimeRequested,
+            })
+        for _, reactor in ipairs(reactors) do
+            if reactor.governor and reactor.governor.calibrationCompleted == true then
+                turbineGovernor.requestSteamPrime(governorMemory)
+            end
+        end
+        if reactorGovernor.consumeProfileChanges(reactorGovernorMemory) then
+            configStore.save(config)
+        end
+        reactorGovernor.applyAll(reactorGovernorMemory, reactors, config.control, {
+            maintenance = maintenance,
+            now = now,
+        }, {
+            setActive = reactorAdapter.setActive,
+            setControlRodExposure = reactorAdapter.setControlRodExposure,
+        })
+
+        local steamSource = reactorGovernor.steamSourceStatus(reactors,
+            steamDemand, config.control)
+        turbineGovernor.evaluateAll(governorMemory, turbines, config.control, {
+            maintenance = maintenance,
+            mainframeId = os.getComputerID(),
+            idConflicts = idConflicts,
+            now = now,
+            steamSourceManaged = steamSource.managed,
+            steamSourceReady = steamSource.ready,
+            steamSourceReason = steamSource.reason,
+            steamSourceBufferPercent = steamSource.bufferPercent,
+        })
+        if turbineGovernor.consumeProfileChanges(governorMemory) then
+            configStore.save(config)
+        end
+        turbineGovernor.applyAll(governorMemory, turbines, config.control, {
+                maintenance = maintenance,
+                now = now,
+        }, {
+            setActive = turbineAdapter.setActive,
+            setFlowLimit = turbineAdapter.setFlowLimit,
+            setInductor = turbineAdapter.setInductor,
+        })
         updateAlarm()
         local conflictsChanged = refreshIdConflicts()
         if conflictsChanged or #idConflicts > 0 then advertiseIntegrity() end
@@ -978,6 +1182,64 @@ function mainframe.run(config)
         return math.max(0, math.ceil((maintenanceEndsAt - os.epoch("utc")) / 1000))
     end
 
+    local function controlStatus()
+        if maintenance then return "MAINTENANCE / ACTUATORS PAUSED", colors.orange end
+        if #idConflicts > 0 then return "CONTROL LOCKED / ID CONFLICT", colors.red end
+
+        for _, turbine in ipairs(turbines) do
+            local plan = turbine.governor or {}
+            if plan.actuatorState == "FAULT" or plan.state == "CALIBRATION FAILED" then
+                return "CONTROL FAULT / ATTENTION REQUIRED", colors.red
+            end
+            if plan.state == "WAITING FOR STEAM SOURCE" then
+                return "AUTOMATIC / PREPARING STEAM", colors.orange
+            end
+            if tostring(plan.state or ""):find("CALIBRATION", 1, true) then
+                return "AUTOMATIC / CALIBRATING TURBINES", colors.orange
+            end
+        end
+        for _, reactor in ipairs(reactors) do
+            local plan = reactor.governor or {}
+            if plan.actuatorState == "FAULT" then
+                return "CONTROL FAULT / ATTENTION REQUIRED", colors.red
+            elseif plan.state == "STARTING" or plan.state == "BASELINING" or
+                   plan.state == "AVERAGING" or plan.state == "RESPONDING" or
+                   plan.state == "STEAM LOW" or plan.state == "STEAM HIGH" or
+                   plan.state == "RECOVERING" or plan.state == "RECALIBRATING" then
+                return "AUTOMATIC / PREPARING STEAM", colors.orange
+            elseif plan.state == "COOLING" then
+                return "AUTOMATIC / REACTOR COOLING", colors.orange
+            elseif plan.state == "STEAM DEFICIT" or plan.state == "STEAM SURPLUS" then
+                return "AUTOMATIC / STEAM CAPACITY LIMIT", colors.orange
+            elseif reactor.active == true and reactor.mode == "steam" and
+                   plan.trusted == false then
+                return "AUTOMATIC / REACTOR CONTROL HELD", colors.orange
+            end
+        end
+
+        local target, count, matching, allStable = nil, 0, true, true
+        for _, turbine in ipairs(turbines) do
+            local plan = turbine.governor or {}
+            if turbine.active == true and plan.calibrated then
+                local wanted = tonumber(plan.targetRpm)
+                if target and wanted and math.abs(target - wanted) > 1 then matching = false end
+                target = target or wanted
+                count = count + 1
+                if plan.state ~= "STABLE" or plan.actuatorState ~= "HOLD" then
+                    allStable = false
+                end
+            end
+        end
+        if count > 0 and matching and target and allStable then
+            return ("AUTOMATIC / HOLDING %.0f RPM"):format(target), colors.lime
+        elseif count > 0 then
+            return "AUTOMATIC / GOVERNORS ACTIVE", colors.lime
+        elseif #turbines > 0 or #reactors > 0 then
+            return "AUTOMATIC / WAITING FOR PLANT", colors.orange
+        end
+        return "AUTOMATIC / NO CONTROLLED PLANT", colors.gray
+    end
+
     local function render()
         ui.setIdConflicts(idConflicts)
         ui.header("MAINFRAME", "Central control authority")
@@ -991,15 +1253,13 @@ function mainframe.run(config)
             (function() local count = 0 for _ in pairs(terminals) do count = count + 1 end return count end)()),
             onlineTerminalCount() > 0 and colors.lime or colors.gray)
         ui.status("Discovery", modeName(), maintenance and colors.orange or colors.cyan)
-        ui.status("Control", "AUTOMATIC / ACTUATORS DISABLED", colors.orange)
+        local controlText, controlColour = controlStatus()
+        ui.status("Control", controlText, controlColour)
         if registryStale then
-            term.setTextColor(colors.orange)
-            print("Registry may be outdated")
-            term.setTextColor(colors.white)
+            ui.line("Registry may be outdated", colors.orange)
         elseif maintenance then
-            print(("Auto return in %d:%02d"):format(
-                math.floor(remainingMaintenance() / 60), remainingMaintenance() % 60
-            ))
+            ui.line(("Auto return in %d:%02d"):format(
+                math.floor(remainingMaintenance() / 60), remainingMaintenance() % 60))
         end
 
         local counts = registry.countByCategory(devices)
@@ -1007,10 +1267,9 @@ function mainframe.run(config)
             counts.reactor, counts.turbine, counts.battery, counts.monitor
         ))
 
+        local width, height = term.getSize()
         if currentAlarm then
-            term.setTextColor(alarmColour())
-            print("!! " .. currentAlarm.message)
-            term.setTextColor(colors.white)
+            ui.block("!! " .. currentAlarm.message, alarmColour(), 3)
             local _, row = term.getCursorPos()
             print("[ SILENCE ALARM ]")
             silenceButton = { y = row, x1 = 1, x2 = 17 }
@@ -1020,8 +1279,11 @@ function mainframe.run(config)
                 config.alarms.enabled and colors.lime or colors.gray)
         end
 
-        local width, height = term.getSize()
-        local availableRows = math.max(0, height - 18)
+        -- Keep the controls on fixed bottom rows. Alarm and device text may
+        -- consume only the space above this footer, preserving touch hitboxes.
+        local footerRow = math.max(1, height - 2)
+        local contentRow = select(2, term.getCursorPos())
+        local availableRows = math.max(0, footerRow - contentRow)
         if #devices > availableRows then
             availableRows = math.max(0, availableRows - 1)
         end
@@ -1033,7 +1295,7 @@ function mainframe.run(config)
         if #devices > availableRows then
             print(("+ %d more (run: helios scan)"):format(#devices - availableRows))
         end
-        print("")
+        term.setCursorPos(1, footerRow)
         dashboardButtons = {}
         dashboardButtons.reactors = ui.inlineButton("REACTORS", colors.cyan)
         write(" ")
@@ -1048,40 +1310,81 @@ function mainframe.run(config)
         dashboardButtons.settings = ui.inlineButton("SETTINGS", colors.cyan)
         print("")
         term.setTextColor(colors.gray)
-        print("Keyboard: V/G/E/C/R/S | Q exit")
+        term.setCursorPos(1, height)
+        write(string.sub("Keyboard: V/G/E/C/R/S | Q exit", 1, width))
         term.setTextColor(colors.white)
     end
 
     local function controlView()
+        local selected = 1
         local buttons = {}
         local function draw()
             ui.setIdConflicts(idConflicts)
-            ui.header("POWER CONTROL", "Automatic governor configuration")
+            ui.header("POWER CONTROL", "Automatic turbine governor")
             ui.status("Mode", "AUTOMATIC", colors.lime)
-            ui.status("Actuators", "DISABLED - INTERFACE TEST", colors.orange)
-            ui.status("Target turbine RPM", config.control.targetRpm .. " RPM", colors.gray)
-            ui.status("Storage demand band", config.control.storageLow .. "% - " .. config.control.storageHigh .. "%", colors.gray)
-            ui.status("Maximum rod step", config.control.maxRodStep .. "%", colors.gray)
-            ui.status("Maximum flow step", config.control.maxFlowStep .. " mB/t", colors.gray)
-            ui.status("Adjustment interval", config.control.adjustmentInterval .. " seconds", colors.gray)
+            ui.status("Actuators", "ENABLED - GUARDED", colors.lime)
+            if #turbines == 0 then
+                ui.status("Status", "NO TURBINES FOUND", colors.orange)
+            else
+                if selected > #turbines then selected = #turbines end
+                local turbine = turbines[selected]
+                local plan = turbine.governor or {}
+                ui.status("Turbine", ("%d/%d %s"):format(selected, #turbines,
+                    deviceName(turbine.name)), colors.cyan)
+                ui.status("Governor", plan.state or "WAITING",
+                    (plan.trusted == false or plan.actuatorState == "FAULT" or
+                        plan.state == "CALIBRATION FAILED") and colors.red or colors.lime)
+                ui.status("Rotor / target", ("%.1f / %d RPM"):format(
+                    tonumber(turbine.rotorSpeed) or 0,
+                    tonumber(plan.targetRpm) or config.control.highBandRpm), colors.cyan)
+                if plan.currentFlow ~= nil and plan.recommendedFlow ~= nil then
+                    ui.status("Flow-limit plan", ("%.0f -> %.0f mB/t"):format(
+                        plan.currentFlow, plan.recommendedFlow), colors.cyan)
+                else
+                    ui.status("Flow-limit plan", "HOLD - TELEMETRY REQUIRED", colors.gray)
+                end
+                ui.status("Action", (plan.action or "HOLD") .. " / " ..
+                    (plan.actuatorState or "WAITING"),
+                    (plan.action == "CUT FLOW" or plan.actuatorState == "FAULT") and colors.red or colors.white)
+            end
             print("")
             term.setTextColor(colors.lime)
-            print("[ AUTOMATIC ]")
+            write("[ AUTOMATIC ] ")
             term.setTextColor(colors.gray)
             print("[ MANUAL - LOCKED ]")
-            print("[ TARGETS - LOCKED ]")
-            print("[ LIMITS - LOCKED ]")
+            print("Targets learned automatically; manual tuning LOCKED")
             term.setTextColor(colors.white)
-            buttons.back = ui.button("BACK", colors.cyan)
+            buttons.previous = ui.inlineButton("< PREVIOUS", colors.cyan)
+            write(" ")
+            buttons.next = ui.inlineButton("NEXT >", colors.cyan)
+            write(" ")
+            buttons.back = ui.inlineButton("BACK", colors.cyan)
+            print("")
+            if #turbines > 0 then
+                local selectedTurbine = turbines[selected]
+                local label = selectedTurbine.active == false and
+                    "START & CALIBRATE" or "RETRY CALIBRATION"
+                buttons.retry = ui.button(label, colors.orange)
+            else
+                buttons.retry = nil
+            end
         end
         while true do
             draw()
-            local event, value, x, y = os.pullEvent()
-            local touch = event == "monitor_touch"
-            if touch then x, y = x, y end
+            local event, value, message, protocol = os.pullEvent()
+            local x, y = ui.eventPoint(event, value, message, protocol)
             if event == "key" and value == keys.b then return
-            elseif (event == "mouse_click" or touch) and ui.hit(buttons.back, x, y) then return
-            elseif event == "rednet_message" then handleNetwork(value, x, y)
+            elseif ((event == "key" and value == keys.left) or ui.hit(buttons.previous, x, y)) and #turbines > 0 then
+                selected = ((selected - 2) % #turbines) + 1
+            elseif ((event == "key" and value == keys.right) or ui.hit(buttons.next, x, y)) and #turbines > 0 then
+                selected = (selected % #turbines) + 1
+            elseif ui.hit(buttons.retry, x, y) and #turbines > 0 then
+                turbineGovernor.resetCalibration(governorMemory, config.control,
+                    turbines[selected].name)
+                configStore.save(config)
+                pollReactors()
+            elseif ui.hit(buttons.back, x, y) then return
+            elseif event == "rednet_message" then handleNetwork(value, message, protocol)
             elseif event == "peripheral" or event == "peripheral_detach" then
                 if maintenance or config.discovery.defaultMode == "manual" then registryStale = true else rescan() end
             elseif event == "timer" and value == reactorTimer then
@@ -1092,10 +1395,14 @@ function mainframe.run(config)
         end
     end
 
-    local function restoreTimersAfterTextInput()
+    local function restartReactorPolling()
         if reactorTimer then os.cancelTimer(reactorTimer) end
         pollReactors()
         reactorTimer = os.startTimer(1)
+    end
+
+    local function restoreTimersAfterTextInput()
+        restartReactorPolling()
         if maintenance then
             if maintenanceTimer then os.cancelTimer(maintenanceTimer) end
             if countdownTimer then os.cancelTimer(countdownTimer) end
@@ -1417,18 +1724,256 @@ function mainframe.run(config)
         local previousButton
         local nextButton
         local backButton
+        local calibrationButton
+        local notice
 
         local function formatValue(value, suffix)
             if value == nil then return "N/A" end
             return ("%.1f%s"):format(value, suffix or "")
         end
 
+        local function formatRodLayout(reactor, exposure)
+            local minimum = tonumber(reactor.controlRodMinimum)
+            local maximum = tonumber(reactor.controlRodMaximum)
+            local range
+            if minimum == nil or maximum == nil then
+                range = "N/A"
+            elseif math.abs(maximum - minimum) < 0.05 then
+                range = ("%.0f%%"):format(minimum)
+            else
+                range = ("%.0f-%.0f%%"):format(minimum, maximum)
+            end
+            return ("%s / %s eq"):format(range,
+                exposure ~= nil and ("%.2f"):format(exposure) or "N/A")
+        end
+
+        local function reactorByName(name)
+            for _, candidate in ipairs(reactors) do
+                if candidate.name == name then return candidate end
+            end
+        end
+
+        local function serviceEvent(event, value, message, protocol)
+            if event == "rednet_message" then
+                handleNetwork(value, message, protocol)
+            elseif event == "peripheral" or event == "peripheral_detach" then
+                if maintenance or config.discovery.defaultMode == "manual" then
+                    registryStale = true
+                else
+                    rescan()
+                    updateAlarm()
+                end
+            elseif event == "timer" then
+                if maintenance and value == maintenanceTimer then
+                    stopMaintenance()
+                elseif maintenance and value == countdownTimer then
+                    countdownTimer = os.startTimer(1)
+                elseif value == reactorTimer then
+                    pollReactors()
+                    broadcastSnapshots()
+                    reactorTimer = os.startTimer(1)
+                end
+            end
+        end
+
+        local function confirm(title, lines, yesLabel, noLabel)
+            local yesButton, noButton
+            local function drawConfirm()
+                ui.header(title, "Confirmation required")
+                for _, line in ipairs(lines or {}) do print(line) end
+                print("")
+                yesButton = ui.inlineButton(yesLabel or "YES", colors.lime)
+                write("   ")
+                noButton = ui.inlineButton(noLabel or "NO", colors.orange)
+                print("")
+            end
+            while true do
+                drawConfirm()
+                local event, value, message, protocol = os.pullEvent()
+                local touchX, touchY = ui.eventPoint(event, value, message, protocol)
+                if (event == "key" and value == keys.y) or
+                   ui.hit(yesButton, touchX, touchY) then
+                    return true
+                elseif (event == "key" and (value == keys.n or value == keys.b)) or
+                       ui.hit(noButton, touchX, touchY) then
+                    return false
+                else
+                    serviceEvent(event, value, message, protocol)
+                end
+            end
+        end
+
+        local function calibrationView(reactorName, maintenanceEnabledHere)
+            local buttons = {}
+            local calibrationNotice
+
+            local function formatUpdatedAt(value)
+                value = tonumber(value)
+                if not value or value <= 0 then return "UNKNOWN" end
+                local ok, formatted = pcall(os.date, "!%Y-%m-%d %H:%M UTC", value)
+                return ok and formatted or tostring(value)
+            end
+
+            local function drawCalibration()
+                local reactor = reactorByName(reactorName)
+                ui.header("REACTOR CALIBRATION", deviceName(reactorName))
+                ui.status("Control mode", maintenance and "MAINTENANCE" or "AUTOMATIC",
+                    maintenance and colors.orange or colors.lime)
+                if not reactor then
+                    ui.status("Status", "REACTOR NOT FOUND", colors.red)
+                    buttons = { close = ui.button("CLOSE", colors.cyan) }
+                    return
+                end
+                if reactor.mode ~= "steam" then
+                    ui.status("Status", "POWER REACTOR / CALIBRATION NOT REQUIRED",
+                        colors.orange)
+                    print("")
+                    buttons = { close = ui.button("CLOSE", colors.cyan) }
+                    return
+                end
+
+                local plan = reactor.governor or {}
+                local profile = (config.control.reactorProfiles or {})[reactorName]
+                local phase = plan.calibrationPhase or
+                    (profile and "LEARNED" or "NOT ACTIVE")
+                local state = plan.state or "WAITING FOR GOVERNOR UPDATE"
+                ui.status("Calibration", phase .. " / " .. state,
+                    plan.recalibrating and colors.orange or colors.lime)
+                ui.status("Target output", plan.targetSteam and
+                    ("%.0f mB/t"):format(plan.targetSteam) or
+                    "WAITING FOR TRUSTED DEMAND")
+                local sampleCount = tonumber(plan.averageSteamSamples) or 0
+                local sampleTarget = math.max(3,
+                    math.floor(tonumber(config.control.reactorSteamAverageSamples) or 10))
+                local responseCount = tonumber(plan.processStableSamples) or 0
+                local responseTarget = math.max(3,
+                    math.floor(tonumber(config.control.reactorLearningSamples) or 8))
+                local output = plan.averageSteamProduction and
+                    ("%.0f mB/t avg"):format(plan.averageSteamProduction) or
+                    reactor.steamProduction and
+                    ("%.0f mB/t raw"):format(reactor.steamProduction) or "N/A"
+                ui.status("Output / progress", ("%s [%d/%d; %d/%d]"):format(
+                    output, sampleCount, sampleTarget, responseCount, responseTarget))
+                local commandTarget = math.max(2,
+                    math.floor(tonumber(config.control.reactorCommandSamples) or 3))
+                ui.status("Actuator", ("%s / %s [%d/%d]"):format(
+                    tostring(plan.action or "HOLD"),
+                    tostring(plan.actuatorState or "WAITING"),
+                    tonumber(plan.actionSamples) or 0, commandTarget),
+                    plan.actuatorState == "FAULT" and colors.red or colors.lightGray)
+                ui.status("Current setting", formatRodLayout(reactor,
+                    plan.currentRodExposure))
+                ui.status("Saved calibration", profile and
+                    (("%.2f eq / %.0f mB/t"):format(
+                        tonumber(profile.exposure) or 0,
+                        tonumber(profile.targetSteam) or 0)) or "NONE")
+                ui.status("Last calibrated", profile and
+                    formatUpdatedAt(profile.updatedAt) or "NEVER")
+                if plan.reason then ui.status("Governor", plan.reason, colors.lightGray) end
+                if calibrationNotice then
+                    print("")
+                    ui.status("Result", calibrationNotice.text, calibrationNotice.colour)
+                end
+                print("")
+                -- Keep the four actions on two rows. A fourth full-width print
+                -- could advance past the mirrored 19-row terminal, scroll the
+                -- display, and leave every recorded touch target one row low.
+                buttons.delete = ui.inlineButton("DELETE CALIBRATION DATA", colors.red)
+                write(" ")
+                buttons.recalibrate = ui.inlineButton("RECALIBRATE", colors.orange)
+                print("")
+                buttons.save = ui.inlineButton("SAVE CURRENT REACTOR SETUP", colors.lime)
+                write(" ")
+                buttons.close = ui.inlineButton("CLOSE", colors.cyan)
+            end
+
+            pollReactors()
+            while true do
+                drawCalibration()
+                local event, value, message, protocol = os.pullEvent()
+                local touchX, touchY = ui.eventPoint(event, value, message, protocol)
+                local reactor = reactorByName(reactorName)
+                if (event == "key" and value == keys.b) or
+                   ui.hit(buttons.close, touchX, touchY) then
+                    if maintenanceEnabledHere and maintenance and confirm(
+                        "MAINTENANCE MODE",
+                        { "Disable Maintenance Mode and", "return control to HELIOS?" },
+                        "YES", "NO") then
+                        stopMaintenance()
+                    end
+                    return
+                elseif reactor and reactor.mode == "steam" and
+                       ui.hit(buttons.delete, touchX, touchY) then
+                    if confirm("DELETE CALIBRATION",
+                        { "Delete the saved calibration for", deviceName(reactorName) .. "?",
+                          "Rod positions will not change immediately." },
+                        "DELETE", "CANCEL") then
+                        reactorGovernor.deleteCalibration(reactorGovernorMemory,
+                            config.control, reactorName)
+                        saveConfig()
+                        calibrationNotice = { text = "CALIBRATION DATA DELETED", colour = colors.orange }
+                    end
+                elseif reactor and reactor.mode == "steam" and
+                       ui.hit(buttons.recalibrate, touchX, touchY) then
+                    if confirm("RECALIBRATE REACTOR",
+                        { "Close all rods and relearn this", "reactor from zero exposure?",
+                          "HELIOS will resume automatic control." },
+                        "RECALIBRATE", "CANCEL") then
+                        -- Recalibration is an explicit operator-confirmed safe
+                        -- insertion. Apply and verify that conservative command
+                        -- immediately, then restart the polling timer so the
+                        -- baseline cannot remain at sample 1 after a modal view.
+                        local prepared, prepareError =
+                            reactorAdapter.prepareRecalibration(reactor, function()
+                                sleep(0.1)
+                            end)
+                        if prepared then
+                            reactorGovernor.beginRecalibration(reactorGovernorMemory,
+                                config.control, reactorName)
+                            saveConfig()
+                            if maintenance then stopMaintenance() end
+                            maintenanceEnabledHere = false
+                            restartReactorPolling()
+                            calibrationNotice = {
+                                text = "RECALIBRATION STARTED - RODS INSERTED",
+                                colour = colors.orange,
+                            }
+                        else
+                            calibrationNotice = {
+                                text = "RECALIBRATION BLOCKED: " ..
+                                    tostring(prepareError or "REACTOR RESET FAILED"),
+                                colour = colors.red,
+                            }
+                        end
+                    end
+                elseif reactor and reactor.mode == "steam" and
+                       ui.hit(buttons.save, touchX, touchY) then
+                    if confirm("SAVE CURRENT SETUP",
+                        { "Save the reactor's current rod layout", "as its learned calibration?" },
+                        "SAVE", "CANCEL") then
+                        local ok, reason = reactorGovernor.saveCurrentCalibration(
+                            reactorGovernorMemory, config.control, reactor,
+                            { now = os.epoch("utc") / 1000 })
+                        if ok then
+                            turbineGovernor.requestSteamPrime(governorMemory)
+                            saveConfig()
+                            calibrationNotice = { text = "CURRENT SETUP SAVED", colour = colors.lime }
+                        else
+                            calibrationNotice = { text = tostring(reason), colour = colors.red }
+                        end
+                    end
+                else
+                    serviceEvent(event, value, message, protocol)
+                end
+            end
+        end
+
         local function draw()
-            ui.header("REACTORS", "Read-only live telemetry")
+            ui.header("REACTORS", "Live telemetry and steam governor")
             if #reactors == 0 then
                 ui.status("Status", "NO REACTORS FOUND", colors.orange)
                 print("")
-                previousButton, nextButton, viewSilenceButton = nil, nil, nil
+                previousButton, nextButton, viewSilenceButton, calibrationButton = nil, nil, nil, nil
                 backButton = ui.button("BACK", colors.cyan)
                 return
             end
@@ -1441,14 +1986,29 @@ function mainframe.run(config)
             else
                 ui.status("State", reactor.active == true and "ACTIVE" or reactor.active == false and "OFFLINE" or "UNKNOWN",
                     reactor.active == true and colors.lime or colors.orange)
-                ui.status("Fuel", formatValue(reactor.fuelPercent, "%"))
-                ui.status("Fuel use", formatValue(reactor.fuelUse, " mB/t"))
-                ui.status("Fuel temp", formatValue(reactor.fuelTemperature, " C"))
-                ui.status("Casing temp", formatValue(reactor.casingTemperature, " C"))
+                ui.status("Fuel / use", ("%s / %s"):format(
+                    formatValue(reactor.fuelPercent, "%"),
+                    formatValue(reactor.fuelUse, " mB/t")))
+                ui.status("Temps fuel/case", ("%s / %s"):format(
+                    formatValue(reactor.fuelTemperature, " C"),
+                    formatValue(reactor.casingTemperature, " C")))
                 if reactor.mode == "steam" then
-                    ui.status("Steam output", formatValue(reactor.steamProduction, " mB/t"), colors.cyan)
-                    ui.status("Coolant", formatValue(reactor.coolantPercent, "%"))
-                    ui.status("Hot fluid", formatValue(reactor.hotFluidPercent, "%"))
+                    local plan = reactor.governor or {}
+                    ui.status("Steam avg/target", ("%s / %s"):format(
+                        formatValue(plan.averageSteamProduction or
+                            reactor.steamProduction, ""),
+                        formatValue(plan.targetSteam, " mB/t")), colors.cyan)
+                    ui.status("Coolant / hot", ("%s / %s"):format(
+                        formatValue(reactor.coolantPercent, "%"),
+                        formatValue(reactor.hotFluidPercent, "%")))
+                    ui.status("Rods range / exposed",
+                        formatRodLayout(reactor, plan.currentRodExposure))
+                    ui.status("Governor", (plan.state or "WAITING") .. " / " ..
+                        (plan.actuatorState or "WAITING"),
+                        (plan.trusted == false or plan.actuatorState == "FAULT") and
+                            colors.red or
+                        ((plan.state == "STEAM DEFICIT" or
+                          plan.state == "STEAM SURPLUS") and colors.orange or colors.lime))
                 else
                     ui.status("Power output", powerFormat.power(reactor.energyProduction, config.power, true), colors.cyan)
                     ui.status("Energy buffer", formatValue(reactor.energyPercent, "%"))
@@ -1471,6 +2031,10 @@ function mainframe.run(config)
             write(" ")
             backButton = ui.inlineButton("BACK", colors.cyan)
             print("")
+            local selectedReactor = reactors[selected]
+            calibrationButton = selectedReactor and ui.button("CALIBRATION STATUS",
+                selectedReactor.mode == "steam" and colors.lime or colors.gray) or nil
+            if notice then ui.status("Result", notice, colors.orange) end
         end
 
         while true do
@@ -1490,6 +2054,18 @@ function mainframe.run(config)
                 selected = (selected % #reactors) + 1
             elseif (event == "mouse_click" or event == "monitor_touch") and ui.hit(backButton, x, y) then
                 return
+            elseif (event == "mouse_click" or event == "monitor_touch") and
+                   ui.hit(calibrationButton, x, y) and #reactors > 0 then
+                local reactor = reactors[selected]
+                local enabledHere = false
+                if reactor.mode == "steam" and not maintenance then
+                    enabledHere = confirm("CALIBRATION STATUS",
+                        { "Enable Maintenance Mode?", "",
+                          "This prevents HELIOS from changing", "the reactor while settings are reviewed." },
+                        "YES", "NO")
+                    if enabledHere then startMaintenance() end
+                end
+                calibrationView(reactor.name, enabledHere)
             elseif event == "rednet_message" then
                 handleNetwork(value, x, y)
             elseif event == "peripheral" or event == "peripheral_detach" then
@@ -1523,7 +2099,7 @@ function mainframe.run(config)
         end
 
         local function draw()
-            ui.header("TURBINES", "Read-only live telemetry")
+            ui.header("TURBINES", "Live telemetry and governor plan")
             if #turbines == 0 then
                 ui.status("Status", "NO TURBINES FOUND", colors.orange)
                 print("")
@@ -1540,14 +2116,23 @@ function mainframe.run(config)
                 ui.status("State", turbine.active == true and "ACTIVE" or turbine.active == false and "OFFLINE" or "UNKNOWN",
                     turbine.active == true and colors.lime or colors.orange)
                 ui.status("Rotor speed", formatValue(turbine.rotorSpeed, " RPM"), colors.cyan)
+                local plan = turbine.governor or {}
+                ui.status("Governor", (plan.state or "WAITING") .. " / " ..
+                    (plan.actuatorState or "WAITING"),
+                    (plan.trusted == false or plan.actuatorState == "FAULT" or
+                        plan.state == "CALIBRATION FAILED") and colors.red or colors.lime)
                 ui.status("Power output", powerFormat.power(turbine.energyProduction, config.power, true), colors.cyan)
                 ui.status("Energy buffer", formatValue(turbine.energyPercent, "%"))
-                ui.status("Fluid flow", formatValue(turbine.flowRate, " mB/t"))
-                ui.status("Max flow", formatValue(turbine.flowRateMax, " mB/t"))
-                ui.status("Input tank", formatValue(turbine.inputPercent, "%"))
-                ui.status("Output tank", formatValue(turbine.outputPercent, "%"))
+                if plan.currentFlow ~= nil and plan.recommendedFlow ~= nil then
+                    ui.status("Flow actual/set/plan", ("%s / %.0f -> %.0f"):format(
+                        plan.actualFlow and ("%.0f"):format(plan.actualFlow) or "N/A",
+                        plan.currentFlow, plan.recommendedFlow), colors.cyan)
+                else
+                    ui.status("Flow actual/set/plan", "N/A / HOLD", colors.gray)
+                end
+                ui.status("Tanks in / out", formatValue(turbine.inputPercent, "%") .. " / " ..
+                    formatValue(turbine.outputPercent, "%"))
                 ui.status("Inductor", turbine.inductorEngaged == true and "ENGAGED" or turbine.inductorEngaged == false and "DISENGAGED" or "N/A")
-                if turbine.ventMode ~= nil then ui.status("Vent mode", tostring(turbine.ventMode)) end
             end
             print("")
             previousButton = ui.inlineButton("< PREVIOUS", colors.cyan)
@@ -1784,6 +2369,53 @@ local function percent(amount, maximum)
     return math.max(0, math.min(100, amount / maximum * 100))
 end
 
+local function availableMethods(name)
+    local methods = {}
+    for _, method in ipairs(peripheral.getMethods(name) or {}) do
+        methods[method] = true
+    end
+    return methods
+end
+
+local function rodLevels(name, methods, count)
+    local levels
+    if methods.getControlRodLevel and count and count > 0 then
+        levels = {}
+        for index = 0, count - 1 do
+            local ok, value = pcall(peripheral.call, name, "getControlRodLevel", index)
+            if not ok or tonumber(value) == nil then return nil end
+            levels[index] = tonumber(value)
+        end
+    end
+    if not levels and methods.getControlRodsLevels then
+        local ok, values = pcall(peripheral.call, name, "getControlRodsLevels")
+        if ok and type(values) == "table" then
+            levels = {}
+            local zeroBased = values[0] ~= nil
+            for index = 0, (count or #values) - 1 do
+                levels[index] = tonumber(values[zeroBased and index or (index + 1)])
+                if levels[index] == nil then return nil end
+            end
+        end
+    end
+    return levels
+end
+
+local function rodSummary(levels)
+    if type(levels) ~= "table" then return nil, nil, nil end
+    local total, count, minimum, maximum = 0, 0
+    for _, value in pairs(levels) do
+        value = number(value)
+        if value then
+            total, count = total + value, count + 1
+            minimum = minimum and math.min(minimum, value) or value
+            maximum = maximum and math.max(maximum, value) or value
+        end
+    end
+    if count == 0 then return nil, nil, nil end
+    return total / count, minimum, maximum
+end
+
 function adapter.read(device)
     local name = device.name
     local reactor = { name = name, available = peripheral.isPresent(name) }
@@ -1792,10 +2424,7 @@ function adapter.read(device)
         return reactor
     end
 
-    local availableMethods = {}
-    for _, method in ipairs(peripheral.getMethods(name) or {}) do
-        availableMethods[method] = true
-    end
+    local availableMethods = availableMethods(name)
 
     reactor.connected = readAny(name, availableMethods, { "getConnected", "isConnected", "mbIsConnected", "mbIsAssembled", "connected" })
     reactor.active = readAny(name, availableMethods, { "getActive", "isActive", "active" })
@@ -1815,6 +2444,13 @@ function adapter.read(device)
     reactor.hotFluidMax = number(readAny(name, availableMethods, { "getHotFluidAmountMax", "getHotFluidCapacity", "hotFluidAmountMax" }))
     reactor.steamProduction = number(readAny(name, availableMethods, { "getHotFluidProducedLastTick", "getSteamProducedLastTick", "hotFluidProducedLastTick" }))
     reactor.controlRods = number(readAny(name, availableMethods, { "getNumberOfControlRods", "getControlRodCount" }))
+    reactor.controlRodLevels = rodLevels(name, availableMethods, reactor.controlRods)
+    reactor.controlRodLevel, reactor.controlRodMinimum, reactor.controlRodMaximum =
+        rodSummary(reactor.controlRodLevels)
+    if reactor.controlRodLevel and reactor.controlRods then
+        reactor.controlRodExposure = reactor.controlRods *
+            (100 - reactor.controlRodLevel) / 100
+    end
 
     reactor.fuelPercent = percent(reactor.fuel, reactor.fuelMax)
     reactor.energyPercent = percent(reactor.energy, reactor.energyMax)
@@ -1842,6 +2478,177 @@ function adapter.read(device)
         reactor.error = "No supported telemetry methods"
     end
     return reactor
+end
+
+function adapter.setAllControlRodLevels(reactor, requested, pauseBeforeVerify)
+    if type(reactor) ~= "table" or type(reactor.name) ~= "string" then
+        return false, nil, "Invalid reactor identity"
+    end
+    if not peripheral.isPresent(reactor.name) then
+        return false, nil, "Peripheral unavailable"
+    end
+
+    local methods = availableMethods(reactor.name)
+    if not methods.setAllControlRodLevels or
+       (not methods.getControlRodsLevels and not methods.getControlRodLevel) then
+        return false, nil, "Verified control-rod control is unavailable"
+    end
+
+    requested = tonumber(requested)
+    if not requested then return false, nil, "Invalid control-rod level" end
+    requested = math.max(0, math.min(100, math.floor(requested + 0.5)))
+
+    local ok, reason = pcall(peripheral.call, reactor.name,
+        "setAllControlRodLevels", requested)
+    if not ok then return false, nil, tostring(reason) end
+    if type(pauseBeforeVerify) == "function" then pauseBeforeVerify() end
+
+    local count = tonumber(reactor.controlRods)
+    if not count and methods.getNumberOfControlRods then
+        local countOk, value = pcall(peripheral.call, reactor.name,
+            "getNumberOfControlRods")
+        if countOk then count = tonumber(value) end
+    end
+    local levels = rodLevels(reactor.name, methods, count)
+    local average, minimum, maximum = rodSummary(levels)
+    if average == nil then return false, nil, "Control-rod verification failed" end
+    if minimum ~= requested or maximum ~= requested then
+        return false, average, ("Requested %d%%; reactor reports %.0f-%.0f%%"):format(
+            requested, minimum, maximum)
+    end
+    return true, average
+end
+
+function adapter.setActive(reactor, requested, pauseBeforeVerify)
+    if type(reactor) ~= "table" or type(reactor.name) ~= "string" then
+        return false, nil, "Invalid reactor identity"
+    end
+    if not peripheral.isPresent(reactor.name) then
+        return false, nil, "Peripheral unavailable"
+    end
+
+    local methods = availableMethods(reactor.name)
+    if not methods.setActive then
+        return false, nil, "Verified reactor activation control is unavailable"
+    end
+    local readMethod
+    for _, candidate in ipairs({ "getActive", "isActive", "active" }) do
+        if methods[candidate] then readMethod = candidate break end
+    end
+    if not readMethod then
+        return false, nil, "Reactor active-state read-back is unavailable"
+    end
+
+    requested = requested == true
+    local ok, reason = pcall(peripheral.call, reactor.name, "setActive", requested)
+    if not ok then return false, nil, tostring(reason) end
+    if type(pauseBeforeVerify) == "function" then pauseBeforeVerify() end
+
+    local readOk, actual = pcall(peripheral.call, reactor.name, readMethod)
+    if not readOk or type(actual) ~= "boolean" then
+        return false, nil, "Reactor activation verification failed"
+    end
+    if actual ~= requested then
+        return false, actual, ("Requested reactor %s; reactor reports %s"):format(
+            requested and "active" or "inactive",
+            actual and "active" or "inactive")
+    end
+    return true, actual
+end
+
+function adapter.prepareRecalibration(reactor, pause)
+    pause = type(pause) == "function" and pause or function() end
+
+    local stopped, _, stopError = adapter.setActive(reactor, false, pause)
+    if not stopped then
+        return false, "Reactor shutdown failed: " ..
+            tostring(stopError or "activation command rejected")
+    end
+    local inserted, _, rodError = adapter.setAllControlRodLevels(reactor, 100, pause)
+    if not inserted then
+        return false, "Rod insertion failed: " ..
+            tostring(rodError or "bulk rod command rejected")
+    end
+    local started, _, startError = adapter.setActive(reactor, true, pause)
+    if not started then
+        return false, "Reactor restart failed: " ..
+            tostring(startError or "activation command rejected")
+    end
+    return true
+end
+
+local function exposureLevels(count, exposure)
+    count = math.max(0, math.floor(tonumber(count) or 0))
+    exposure = math.max(0, math.min(count, tonumber(exposure) or 0))
+    if count < 1 then return {} end
+    local exposurePoints = math.floor(exposure * 100 + 0.5)
+    local pointsPerRod = math.floor(exposurePoints / count)
+    local remainder = exposurePoints % count
+    local levels = {}
+    for index = 0, count - 1 do
+        local exposedPercent = pointsPerRod + (index < remainder and 1 or 0)
+        levels[index] = 100 - exposedPercent
+    end
+    return levels
+end
+
+local function exposureFromLevels(levels, count)
+    local exposure = 0
+    for index = 0, count - 1 do
+        local level = tonumber(levels and levels[index])
+        if level == nil then return nil end
+        exposure = exposure + (100 - math.max(0, math.min(100, level))) / 100
+    end
+    return exposure
+end
+
+function adapter.setControlRodExposure(reactor, requestedExposure)
+    if type(reactor) ~= "table" or type(reactor.name) ~= "string" then
+        return false, nil, "Invalid reactor identity"
+    end
+    if not peripheral.isPresent(reactor.name) then
+        return false, nil, "Peripheral unavailable"
+    end
+
+    local methods = availableMethods(reactor.name)
+    if not methods.setControlRodLevel or not methods.getControlRodLevel then
+        return false, nil, "Verified individual control-rod control is unavailable"
+    end
+    local count = math.floor(tonumber(reactor.controlRods) or 0)
+    if count < 1 then return false, nil, "Control-rod count is unavailable" end
+
+    local current = rodLevels(reactor.name, methods, count)
+    if not current then return false, nil, "Control-rod read failed" end
+    local wanted = exposureLevels(count, requestedExposure)
+
+    -- Insert rods first, then withdraw rods. A partial failure therefore reduces
+    -- reactor output instead of briefly exposing more fuel than requested.
+    for pass = 1, 2 do
+        for index = 0, count - 1 do
+            local before, after = tonumber(current[index]), wanted[index]
+            local safer = pass == 1 and after > before
+            local stronger = pass == 2 and after < before
+            if safer or stronger then
+                local ok, reason = pcall(peripheral.call, reactor.name,
+                    "setControlRodLevel", index, after)
+                if not ok then
+                    return false, exposureFromLevels(current, count), tostring(reason)
+                end
+                current[index] = after
+            end
+        end
+    end
+
+    local reported = rodLevels(reactor.name, methods, count)
+    if not reported then return false, nil, "Control-rod verification failed" end
+    for index = 0, count - 1 do
+        if tonumber(reported[index]) ~= wanted[index] then
+            return false, exposureFromLevels(reported, count),
+                ("Rod %d requested %d%%; reactor reports %s%%"):format(
+                    index, wanted[index], tostring(reported[index]))
+        end
+    end
+    return true, exposureFromLevels(reported, count), wanted
 end
 
 function adapter.readAll(devices)
@@ -1880,6 +2687,8 @@ function adapter.printReport(reactors, config, formatter)
                 print("  Steam: " .. value(reactor.steamProduction, " mB/t"))
                 print("  Coolant: " .. value(reactor.coolantPercent, "%"))
                 print("  Hot fluid: " .. value(reactor.hotFluidPercent, "%"))
+                print("  Rod insertion: " .. value(reactor.controlRodLevel, "%"))
+                print("  Rod exposure: " .. value(reactor.controlRodExposure, " equivalents"))
             else
                 print("  Power: " .. formatter.power(reactor.energyProduction, config.power, true))
                 print("  Buffer: " .. value(reactor.energyPercent, "%"))
@@ -1890,6 +2699,978 @@ function adapter.printReport(reactors, config, formatter)
 end
 
 return adapter
+]=],
+
+    ["mainframe/reactor_governor.lua"] = [=[
+local governor = {}
+local clearCooldown
+local saveProfile
+
+local function clamp(value, minimum, maximum)
+    return math.max(minimum, math.min(maximum, value))
+end
+
+local function round(value, places)
+    local scale = 10 ^ (places or 0)
+    return math.floor(value * scale + 0.5) / scale
+end
+
+local function hasConflict(context)
+    local wanted = tonumber(context and context.mainframeId)
+    for _, id in ipairs((context and context.idConflicts) or {}) do
+        if tonumber(id) == wanted then return true end
+    end
+    return false
+end
+
+local function hold(state, reason, trusted)
+    return {
+        mode = "automatic",
+        state = state,
+        action = "HOLD",
+        reason = reason,
+        trusted = trusted ~= false,
+        actuatorState = "HOLD",
+    }
+end
+
+local function rodExposure(reactor)
+    local count = math.floor(tonumber(reactor and reactor.controlRods) or 0)
+    local levels = reactor and reactor.controlRodLevels
+    if count < 1 or type(levels) ~= "table" then return nil, count end
+    local exposure = 0
+    for index = 0, count - 1 do
+        local level = tonumber(levels[index])
+        if level == nil then return nil, count end
+        exposure = exposure + (100 - clamp(level, 0, 100)) / 100
+    end
+    return exposure, count
+end
+
+local function wantedRodLevel(index, exposure, count)
+    local exposurePoints = math.floor(clamp(exposure, 0, count) * 100 + 0.5)
+    local pointsPerRod = math.floor(exposurePoints / count)
+    local remainder = exposurePoints % count
+    local exposedPercent = pointsPerRod + (index < remainder and 1 or 0)
+    return 100 - exposedPercent
+end
+
+local function layoutIsBalanced(reactor, exposure, count)
+    local levels = reactor.controlRodLevels or {}
+    for index = 0, count - 1 do
+        local actual = tonumber(levels[index])
+        if actual == nil or
+           math.abs(actual - wantedRodLevel(index, exposure, count)) > 0.5 then
+            return false
+        end
+    end
+    return true
+end
+
+local function rollingSteam(previous, production, control)
+    local wanted = math.max(3,
+        math.floor(tonumber(control.reactorSteamAverageSamples) or 10))
+    previous.productionSamples = previous.productionSamples or {}
+    local samples = previous.productionSamples
+    samples[#samples + 1] = production
+    while #samples > wanted do table.remove(samples, 1) end
+    local total = 0
+    for _, sample in ipairs(samples) do total = total + sample end
+    return total / #samples, #samples, #samples >= wanted
+end
+
+function governor.new()
+    return { reactors = {}, profileDirty = false }
+end
+
+function governor.consumeProfileChanges(memory)
+    local dirty = memory and memory.profileDirty == true
+    if memory then memory.profileDirty = false end
+    return dirty
+end
+
+local function clearTransient(previous)
+    previous.productionSamples = {}
+    previous.stableSamples = 0
+    previous.processStableSamples = 0
+    previous.actionSamples = 0
+    previous.action = nil
+    previous.observation = nil
+    previous.points = {}
+    previous.observedRodExposure = nil
+    previous.lastAttemptAt = nil
+    previous.lastError = nil
+    previous.turbineBufferPercent = nil
+    previous.bufferRecoverySamples = 0
+    previous.bufferExposureFloor = nil
+    previous.bufferExposureDemand = nil
+    clearCooldown(previous)
+end
+
+function governor.deleteCalibration(memory, control, name)
+    name = tostring(name or "unknown")
+    control.reactorProfiles = control.reactorProfiles or {}
+    control.reactorProfiles[name] = nil
+    memory.reactors = memory.reactors or {}
+    local previous = memory.reactors[name] or {}
+    previous.recalibrating = false
+    previous.calibrationPhase = nil
+    previous.previousProfile = nil
+    clearTransient(previous)
+    memory.reactors[name] = previous
+    memory.profileDirty = true
+    return true
+end
+
+function governor.beginRecalibration(memory, control, name)
+    name = tostring(name or "unknown")
+    control.reactorProfiles = control.reactorProfiles or {}
+    memory.reactors = memory.reactors or {}
+    local previous = memory.reactors[name] or {}
+    previous.previousProfile = control.reactorProfiles[name]
+    control.reactorProfiles[name] = nil
+    clearTransient(previous)
+    previous.recalibrating = true
+    previous.calibrationPhase = "BASELINE"
+    memory.reactors[name] = previous
+    memory.profileDirty = true
+    return true
+end
+
+function governor.saveCurrentCalibration(memory, control, reactor, context)
+    if type(reactor) ~= "table" or reactor.mode ~= "steam" then
+        return false, "Only steam reactors can be calibrated"
+    end
+    local exposure = rodExposure(reactor)
+    if exposure == nil then return false, "Control-rod telemetry is unavailable" end
+    local plan = reactor.governor or {}
+    local production = tonumber(plan.averageSteamProduction) or
+        tonumber(reactor.steamProduction)
+    local target = tonumber(plan.targetSteam)
+    if production == nil then return false, "Steam-production telemetry is unavailable" end
+    if target == nil or target <= 0 then return false, "No turbine steam target is available" end
+    saveProfile(memory, control, tostring(reactor.name), exposure, production,
+        target, context or {})
+    local previous = memory.reactors[tostring(reactor.name)] or {}
+    previous.recalibrating = false
+    previous.calibrationPhase = nil
+    previous.previousProfile = nil
+    clearTransient(previous)
+    previous.observedRodExposure = exposure
+    memory.reactors[tostring(reactor.name)] = previous
+    return true
+end
+
+function governor.steamDemand(turbines, control)
+    if #(turbines or {}) == 0 then
+        return nil, 0, "No turbine telemetry is available"
+    end
+    control = control or {}
+    local total, active = 0, 0
+    for _, turbine in ipairs(turbines or {}) do
+        if turbine.active == true then
+            if turbine.error then
+                return nil, active, "Active turbine telemetry is unavailable"
+            end
+            if turbine.governor and turbine.governor.trusted == false then
+                return nil, active, "Active turbine telemetry is untrusted"
+            end
+            local profile = (control.turbineProfiles or {})[tostring(turbine.name)]
+            local requested = profile and tonumber(profile.flowLimit) or
+                tonumber(turbine.flowRateLimit) or tonumber(turbine.flowRateMax)
+            if requested == nil then
+                return nil, active, "Active turbine intake setting is unavailable"
+            end
+            total, active = total + math.max(0, requested), active + 1
+        end
+    end
+    return total, active
+end
+
+function governor.steamSourceStatus(reactors, demand, control)
+    local sources = {}
+    for _, reactor in ipairs(reactors or {}) do
+        if reactor.mode == "steam" and not reactor.error then
+            sources[#sources + 1] = reactor
+        end
+    end
+    if #sources == 0 then
+        return { managed = false, ready = true, state = "UNMANAGED" }
+    elseif #sources > 1 then
+        return {
+            managed = true,
+            ready = false,
+            state = "ROUTING REQUIRED",
+            reason = "Multiple steam reactors require routing assignments",
+        }
+    end
+
+    local reactor = sources[1]
+    local plan = reactor.governor or {}
+    local required = math.max(0, tonumber(demand) or 0)
+    local production = tonumber(plan.averageSteamProduction)
+    local samples = tonumber(plan.averageSteamSamples) or 0
+    local wantedSamples = math.max(3,
+        math.floor(tonumber((control or {}).reactorSteamAverageSamples) or 10))
+    local ratio = clamp(tonumber((control or {}).calibrationSteamRatio) or 0.98,
+        0.1, 1)
+    local ready = required <= 0 or (
+        reactor.active == true and plan.trusted ~= false and
+        production ~= nil and samples >= wantedSamples and
+        production >= required * ratio)
+    local reason
+    if reactor.active ~= true then
+        reason = "Starting steam reactor"
+    elseif plan.trusted == false then
+        reason = tostring(plan.reason or "Steam reactor telemetry is untrusted")
+    elseif samples < wantedSamples then
+        reason = ("Averaging reactor steam %d/%d"):format(samples, wantedSamples)
+    elseif production == nil then
+        reason = "Waiting for reactor steam telemetry"
+    elseif not ready then
+        reason = ("Reactor supplying %.0f of %.0f mB/t"):format(production, required)
+    else
+        reason = ("Reactor supplying %.0f mB/t for %.0f mB/t demand"):format(
+            production, required)
+    end
+    return {
+        managed = true,
+        ready = ready,
+        state = ready and "READY" or "PREPARING",
+        reason = reason,
+        reactor = reactor.name,
+        demand = required,
+        production = production,
+        bufferPercent = tonumber(reactor.hotFluidPercent),
+    }
+end
+
+clearCooldown = function(previous)
+    previous.cooldownStartedAt = nil
+    previous.cooldownReferenceAt = nil
+    previous.cooldownReferenceSteam = nil
+    previous.cooldownReferenceTemperature = nil
+    previous.cooldownLastProgressAt = nil
+end
+
+local function observeCooldown(previous, reactor, control, context, production)
+    local now = tonumber(context and context.now) or 0
+    local casingTemperature = tonumber(reactor and reactor.casingTemperature)
+    local window = math.max(5, tonumber(control.reactorCooldownWindow) or 10)
+    local timeout = math.max(60, tonumber(control.reactorCooldownStallTimeout) or 180)
+    local steamDelta = math.max(0.1, tonumber(control.reactorCooldownSteamDelta) or 2)
+    local temperatureDelta = math.max(0.01,
+        tonumber(control.reactorCooldownTemperatureDelta) or 0.05)
+
+    if previous.cooldownStartedAt == nil then
+        previous.cooldownStartedAt = now
+        previous.cooldownReferenceAt = now
+        previous.cooldownReferenceSteam = production
+        previous.cooldownReferenceTemperature = casingTemperature
+        previous.cooldownLastProgressAt = now
+    elseif now - (previous.cooldownReferenceAt or now) >= window then
+        local steamFalling = previous.cooldownReferenceSteam ~= nil and
+            production <= previous.cooldownReferenceSteam - steamDelta
+        local temperatureFalling = casingTemperature ~= nil and
+            previous.cooldownReferenceTemperature ~= nil and
+            casingTemperature <= previous.cooldownReferenceTemperature - temperatureDelta
+        if steamFalling or temperatureFalling then previous.cooldownLastProgressAt = now end
+        previous.cooldownReferenceAt = now
+        previous.cooldownReferenceSteam = production
+        previous.cooldownReferenceTemperature = casingTemperature
+    end
+    local stalledFor = math.max(0, now - (previous.cooldownLastProgressAt or now))
+    return stalledFor < timeout, stalledFor, casingTemperature
+end
+
+local function observeResponse(previous, reactor, control, context, production)
+    local now = tonumber(context and context.now) or 0
+    local temperature = tonumber(reactor.casingTemperature)
+    local buffer = tonumber(reactor.hotFluidPercent)
+    local prior = previous.observation
+    local steamDelta = math.max(1, tonumber(control.reactorLearningSteamDelta) or 10)
+    local temperatureDelta = math.max(0.01,
+        tonumber(control.reactorLearningTemperatureDelta) or 0.1)
+    local bufferDelta = math.max(0.01,
+        tonumber(control.reactorLearningBufferDelta) or 0.1)
+    local minimumResponse = math.max(5,
+        tonumber(control.reactorMinimumResponseTime) or 15)
+    local processMoving, temperatureMoving = false, false
+
+    if prior then
+        processMoving = math.abs(production - prior.production) > steamDelta
+        if buffer and prior.buffer then
+            processMoving = processMoving or
+                math.abs(buffer - prior.buffer) > bufferDelta
+        end
+        if temperature and prior.temperature then
+            temperatureMoving =
+                math.abs(temperature - prior.temperature) > temperatureDelta
+        end
+    end
+    local waiting = previous.lastAppliedAt and now - previous.lastAppliedAt < minimumResponse
+    if not prior or processMoving or waiting then
+        previous.processStableSamples = 0
+    else
+        previous.processStableSamples = (previous.processStableSamples or 0) + 1
+    end
+    if not prior or processMoving or temperatureMoving or waiting then
+        previous.stableSamples = 0
+    else
+        previous.stableSamples = (previous.stableSamples or 0) + 1
+    end
+    previous.observation = {
+        at = now,
+        production = production,
+        temperature = temperature,
+        buffer = buffer,
+    }
+    return not processMoving and not temperatureMoving and not waiting,
+        processMoving or temperatureMoving or waiting, {
+            waiting = waiting == true,
+            processMoving = processMoving,
+            temperatureMoving = temperatureMoving,
+        }
+end
+
+local function addLearningPoint(previous, exposure, production)
+    previous.points = previous.points or {}
+    for _, point in ipairs(previous.points) do
+        if math.abs(point.exposure - exposure) < 0.05 then
+            point.exposure, point.steam = exposure, production
+            return
+        end
+    end
+    previous.points[#previous.points + 1] = { exposure = exposure, steam = production }
+    while #previous.points > 4 do table.remove(previous.points, 1) end
+end
+
+local function learnedExposure(previous, profile, current, production, target, count)
+    local points = previous.points or {}
+    if #points >= 2 then
+        local first, second = points[#points - 1], points[#points]
+        local steamChange = second.steam - first.steam
+        if math.abs(steamChange) >= math.max(10, target * 0.01) then
+            return clamp(first.exposure +
+                (target - first.steam) * (second.exposure - first.exposure) /
+                    steamChange, 0, count)
+        end
+    end
+    if production > 1 and current > 0 then
+        return clamp(current * target / production, 0, count)
+    end
+    if type(profile) == "table" and tonumber(profile.exposure) and
+       tonumber(profile.targetSteam) and tonumber(profile.targetSteam) > 0 then
+        return clamp(tonumber(profile.exposure) * target /
+            tonumber(profile.targetSteam), 0, count)
+    end
+    return clamp(current + 0.25, 0, count)
+end
+
+saveProfile = function(memory, control, name, exposure, production, target, context)
+    control.reactorProfiles = control.reactorProfiles or {}
+    local old = control.reactorProfiles[name]
+    if not old or math.abs((tonumber(old.exposure) or -1) - exposure) >= 0.01 or
+       math.abs((tonumber(old.targetSteam) or -1) - target) >= 1 then
+        control.reactorProfiles[name] = {
+            exposure = round(exposure, 2),
+            steam = round(production, 1),
+            targetSteam = round(target, 1),
+            updatedAt = tonumber(context and context.now) or 0,
+            bufferExposure = old and old.bufferExposure or nil,
+            bufferDemand = old and old.bufferDemand or nil,
+            bufferSteam = old and old.bufferSteam or nil,
+            bufferUpdatedAt = old and old.bufferUpdatedAt or nil,
+        }
+        memory.profileDirty = true
+    end
+end
+
+local function saveBufferDefault(memory, control, name, exposure, production,
+                                 target, requested, context)
+    control.reactorProfiles = control.reactorProfiles or {}
+    local profile = control.reactorProfiles[name]
+    if type(profile) ~= "table" then return profile, false end
+    local roundedExposure = round(exposure, 2)
+    local roundedDemand = round(requested, 1)
+    local changed = math.abs((tonumber(profile.bufferExposure) or -1) -
+        roundedExposure) >= 0.01 or
+        math.abs((tonumber(profile.bufferDemand) or -1) - roundedDemand) >= 1
+    if changed then
+        local now = tonumber(context and context.now) or 0
+        profile.exposure = roundedExposure
+        profile.steam = round(production, 1)
+        profile.targetSteam = round(target, 1)
+        profile.updatedAt = now
+        profile.bufferExposure = roundedExposure
+        profile.bufferDemand = roundedDemand
+        profile.bufferSteam = round(production, 1)
+        profile.bufferUpdatedAt = now
+        memory.profileDirty = true
+    end
+    return profile, changed
+end
+
+function governor.evaluate(memory, reactor, control, context, targetSteam, activeTurbines)
+    memory.reactors = memory.reactors or {}
+    control, context = control or {}, context or {}
+    local name = tostring(reactor and reactor.name or "unknown")
+    local previous = memory.reactors[name] or {}
+    local result
+
+    if type(reactor) ~= "table" then
+        result = hold("NO REACTOR", "Reactor telemetry is unavailable", false)
+    elseif hasConflict(context) then
+        result = hold("ID CONFLICT", "Mainframe identity is not unique", false)
+    elseif reactor.error then
+        result = hold("NO TRUSTED DATA", tostring(reactor.error), false)
+    elseif reactor.mode == "power" then
+        result = hold("MONITOR ONLY", "Power reactor is excluded from steam control")
+        result.managed = false
+        result.actuatorState = "MONITOR"
+    elseif reactor.mode ~= "steam" then
+        result = hold("UNKNOWN MODE", "Reactor cooling mode is unavailable", false)
+    elseif tonumber(targetSteam) == nil then
+        result = hold("NO TRUSTED DEMAND", tostring(context.demandError or
+            "Turbine steam demand is unavailable"), false)
+    elseif reactor.active == false then
+        local requested = math.max(0, tonumber(targetSteam) or 0)
+        local reserve = math.max(0, math.min(0.25,
+            tonumber(control.reactorSteamReserveMargin) or 0.15))
+        if requested > 0 then
+            result = {
+                mode = "automatic",
+                state = "STARTING",
+                action = "START REACTOR",
+                reason = "Turbine demand requires the steam reactor online",
+                trusted = true,
+                managed = true,
+                currentActive = false,
+                recommendedActive = true,
+                activeChange = true,
+                requestedSteam = requested,
+                targetSteam = requested * (1 + reserve),
+                activeTurbines = activeTurbines or 0,
+            }
+        else
+            result = hold("OFFLINE", "No turbine demand requires this reactor")
+            result.managed = true
+        end
+    elseif reactor.active ~= true then
+        result = hold("NO STATE DATA", "Reactor active-state telemetry is unavailable", false)
+    elseif tonumber(reactor.steamProduction) == nil then
+        result = hold("NO STEAM DATA", "Steam-production telemetry is unavailable", false)
+    else
+        local exposure, rodCount = rodExposure(reactor)
+        if exposure == nil then
+            result = hold("NO ROD DATA",
+                "Individual control-rod telemetry is unavailable", false)
+        else
+            local rawProduction = math.max(0, tonumber(reactor.steamProduction))
+            -- Rod changes made outside HELIOS do not pass through apply(), so they
+            -- must invalidate the same observations as a governor command. Mixing
+            -- samples from two layouts can hide a real steam deficit.
+            if previous.observedRodExposure ~= nil and
+               math.abs(exposure - previous.observedRodExposure) >= 0.005 then
+                previous.productionSamples = {}
+                previous.stableSamples = 0
+                previous.processStableSamples = 0
+                previous.observation = nil
+                clearCooldown(previous)
+            end
+            previous.observedRodExposure = exposure
+            local production, averageSamples, averageReady = rollingSteam(previous,
+                rawProduction, control)
+            local requestedSteam = math.max(0, tonumber(targetSteam))
+            local reserveMargin = math.max(0, math.min(0.25,
+                tonumber(control.reactorSteamReserveMargin) or 0.15))
+            local normalTarget = requestedSteam > 0 and
+                requestedSteam * (1 + reserveMargin) or 0
+            local profile = (control.reactorProfiles or {})[name]
+            local primeRequested = context.steamPrimeRequested == true and
+                type(profile) == "table" and previous.recalibrating ~= true
+            local primeMargin = math.max(reserveMargin, math.min(2,
+                tonumber(control.reactorSteamPrimeMargin) or 0.90))
+            local target = primeRequested and
+                math.max(normalTarget, requestedSteam * (1 + primeMargin)) or
+                normalTarget
+            local hotFluid = tonumber(reactor.hotFluidPercent)
+            local lowBuffer = tonumber(control.reactorHotFluidLow) or 15
+            local deadband = math.max(tonumber(control.reactorSteamDeadbandMin) or 25,
+                target * (tonumber(control.reactorSteamDeadband) or 0.01))
+            local maxStep = math.max(0.01, math.min(1,
+                tonumber(control.maxRodEquivalentStep) or 0.25))
+            local stableRequired = math.max(3,
+                math.floor(tonumber(control.reactorLearningSamples) or 8))
+            -- Calibration advances through a durable, forward-only phase. The
+            -- old recalibrating boolean could not distinguish a completed
+            -- baseline from one still being collected, so every positive test
+            -- exposure was mistaken for a reason to close the rods again.
+            if previous.calibrationPhase == "TESTING" and exposure > 0.005 then
+                previous.calibrationPhase = "ADJUSTING"
+            end
+            local calibrationPhase = previous.calibrationPhase
+            local calibrationTemperature = tonumber(reactor.casingTemperature)
+            local calibrationMaxTemperature = math.max(50,
+                tonumber(control.reactorCalibrationMaxTemperature) or 150)
+            local baselineSteamLimit = deadband
+            local needsFreshBaseline = exposure <= 0.005 and
+                (calibrationPhase == "BASELINE" or
+                    (calibrationPhase == nil and type(profile) ~= "table"))
+            local _, responding, response = observeResponse(previous, reactor, control,
+                context, production)
+            local stable = (previous.stableSamples or 0) >= stableRequired
+            -- Steam output and hot-fluid response are the active control
+            -- signals after the normal post-write delay. A massive casing may
+            -- keep drifting long after production has settled, so temperature
+            -- motion remains diagnostic but cannot hold calibration, priming,
+            -- or an ordinary demand adjustment forever.
+            local processStable = averageReady and
+                not response.waiting and
+                (previous.processStableSamples or 0) >= stableRequired
+            local turbineBuffer = tonumber(context.turbineBufferPercent)
+            local turbineBufferReady = math.max(50, math.min(
+                tonumber(control.reactorHotFluidHigh) or 85,
+                tonumber(control.calibrationBufferReady) or 85))
+            local bufferTelemetryReady =
+                context.turbineBufferTelemetryComplete == true
+            local bufferFeedbackEnabled = type(profile) == "table" and
+                previous.recalibrating ~= true and not primeRequested and
+                (activeTurbines or 0) > 0 and bufferTelemetryReady and
+                turbineBuffer ~= nil
+            if previous.bufferExposureFloor == nil and type(profile) == "table" and
+               tonumber(profile.bufferExposure) ~= nil and
+               tonumber(profile.bufferDemand) ~= nil and
+               requestedSteam >= tonumber(profile.bufferDemand) - 1 then
+                previous.bufferExposureFloor = tonumber(profile.bufferExposure)
+                previous.bufferExposureDemand = tonumber(profile.bufferDemand)
+            end
+            local bufferBelowReady = bufferFeedbackEnabled and
+                turbineBuffer < turbineBufferReady
+            local bufferFilling = false
+            local bufferDelta = math.max(0.01,
+                tonumber(control.reactorLearningBufferDelta) or 0.1)
+
+            -- A turbine buffer is the downstream truth. Reactor production is
+            -- instantaneous telemetry and can look sufficient while transport
+            -- buffers are still losing steam. After calibration, confirm a
+            -- flat/falling turbine buffer before taking one bounded fuel step.
+            if bufferBelowReady and not response.waiting then
+                local priorBuffer = tonumber(previous.turbineBufferPercent)
+                if priorBuffer ~= nil and
+                   turbineBuffer >= priorBuffer + bufferDelta then
+                    previous.bufferRecoverySamples = 0
+                    bufferFilling = true
+                else
+                    previous.bufferRecoverySamples =
+                        (previous.bufferRecoverySamples or 0) + 1
+                end
+            else
+                previous.bufferRecoverySamples = 0
+            end
+            previous.turbineBufferPercent = turbineBuffer
+            local bufferRecoveryRequired = bufferBelowReady and
+                (previous.bufferRecoverySamples or 0) >= stableRequired
+
+            -- A learned downstream-loss allowance must disappear when turbine
+            -- demand falls, but it remains valid when another turbine is added.
+            if previous.bufferExposureFloor ~= nil and
+               previous.bufferExposureDemand ~= nil and
+               requestedSteam < previous.bufferExposureDemand - 1 then
+                previous.bufferExposureFloor = nil
+                previous.bufferExposureDemand = nil
+            end
+            if type(profile) ~= "table" or target <= 0 then
+                previous.bufferExposureFloor = nil
+                previous.bufferExposureDemand = nil
+            end
+            local bufferDefaultSaved = false
+            local exposureFloor = tonumber(previous.bufferExposureFloor)
+            if exposureFloor ~= nil and bufferFeedbackEnabled and
+               exposure >= exposureFloor - 0.005 and
+               (bufferFilling or turbineBuffer >= turbineBufferReady) then
+                profile, bufferDefaultSaved = saveBufferDefault(memory, control,
+                    name, exposure, production, normalTarget, requestedSteam,
+                    context)
+            end
+            local calibrationCompleted = false
+            local proposed, state, action, reason = exposure, "STABLE", "HOLD",
+                "Steam production matches trusted turbine demand"
+            local balanced = layoutIsBalanced(reactor, exposure, rodCount)
+
+            if calibrationPhase == "BASELINE" and exposure > 0.005 then
+                proposed = 0
+                state, action = "RECALIBRATING", "REDUCE EXPOSURE"
+                reason = "Insert every rod and establish a fresh zero-exposure baseline"
+            elseif not balanced then
+                proposed = 0
+                state, action = "BASELINING", "REDUCE EXPOSURE"
+                reason = "Insert every rod before switching to balanced exposure"
+            elseif target <= 0 then
+                if exposure > 0.005 then
+                    proposed, state, action = 0, "NO DEMAND", "REDUCE EXPOSURE"
+                    reason = "No active turbine is requesting steam"
+                else
+                    state, reason = "IDLE", "No active turbine demand; all rods inserted"
+                end
+            elseif needsFreshBaseline and not averageReady then
+                previous.stableSamples = 0
+                state = "AVERAGING"
+                reason = ("Collecting zero-exposure steam sample %d/%d"):
+                    format(averageSamples,
+                        math.max(3, math.floor(tonumber(
+                            control.reactorSteamAverageSamples) or 10)))
+            elseif needsFreshBaseline and production > baselineSteamLimit then
+                local cooling, stalledFor, temperature = observeCooldown(previous,
+                    reactor, control, context, production)
+                if cooling then
+                    state = "COOLING"
+                    reason = temperature and
+                        ("Residual steam %.0f mB/t; waiting below %.0f (case %.1f C)"):
+                            format(production, baselineSteamLimit, temperature) or
+                        ("Residual steam %.0f mB/t; waiting below %.0f"):
+                            format(production, baselineSteamLimit)
+                else
+                    state = "STEAM SURPLUS"
+                    reason = ("Steam and casing temperature have not declined for %.0f seconds"):
+                        format(stalledFor)
+                end
+            elseif needsFreshBaseline and hotFluid ~= nil and
+                   hotFluid > lowBuffer then
+                state = "COOLING"
+                reason = ("Hot-fluid buffer is %.1f%%; waiting below %.1f%%"):
+                    format(hotFluid, lowBuffer)
+            elseif needsFreshBaseline and calibrationTemperature ~= nil and
+                   calibrationTemperature > calibrationMaxTemperature then
+                state = "COOLING"
+                reason = ("Casing is %.1f C; calibration begins below %.1f C"):
+                    format(calibrationTemperature, calibrationMaxTemperature)
+            elseif needsFreshBaseline then
+                clearCooldown(previous)
+                addLearningPoint(previous, exposure, production)
+                previous.calibrationPhase = "TESTING"
+                proposed = math.min(maxStep, rodCount)
+                state, action = "RECALIBRATING", "INCREASE EXPOSURE"
+                reason = ("Zero-exposure baseline ready at %.0f mB/t; begin learning"):
+                    format(production)
+            elseif calibrationPhase == "TESTING" and exposure <= 0.005 then
+                -- Keep proposing the first bounded test until the three-reading
+                -- actuator confirmation succeeds. Do not fall back into baseline.
+                proposed = math.min(maxStep, rodCount)
+                state, action = "RECALIBRATING", "INCREASE EXPOSURE"
+                reason = ("Baseline complete; testing %.2f rod-equivalents"):
+                    format(proposed)
+            elseif not averageReady then
+                previous.stableSamples = 0
+                state = "AVERAGING"
+                reason = ("Collecting steam sample %d/%d"):
+                    format(averageSamples,
+                        math.max(3, math.floor(tonumber(
+                            control.reactorSteamAverageSamples) or 10)))
+            elseif exposure <= 0.005 and production < requestedSteam - deadband and
+                   type(profile) == "table" and tonumber(profile.exposure) and
+                   tonumber(profile.exposure) > 0 then
+                local estimate = learnedExposure(previous, profile, exposure,
+                    production, target, rodCount)
+                proposed = math.min(maxStep, math.max(0.01, estimate))
+                state, action = "RECOVERING", "INCREASE EXPOSURE"
+                reason = ("Steam is below demand; restore learned %.2f rod-equivalents"):
+                    format(tonumber(profile.exposure))
+            elseif bufferRecoveryRequired then
+                if exposure >= rodCount - 0.005 then
+                    state = "STEAM DEFICIT"
+                    reason = ("Turbine buffer remains at %.1f%% with every rod exposed"):
+                        format(turbineBuffer)
+                else
+                    proposed = math.min(exposure + maxStep, rodCount)
+                    state, action = "BUFFER RECOVERY", "INCREASE EXPOSURE"
+                    reason = ("Turbine buffer stalled at %.1f%%; increase reactor output"):
+                        format(turbineBuffer)
+                end
+            elseif (responding or not stable) and not processStable then
+                state = "RESPONDING"
+                reason = primeRequested and
+                    "Waiting for steam and buffer response; casing temperature is diagnostic during priming" or
+                    "Waiting for steam, buffer, and casing temperature to settle"
+            else
+                clearCooldown(previous)
+                -- Once telemetry has settled, a full buffer is a valid operating
+                -- condition. The steam loop exhausts overflow, so active demand
+                -- must retain its reserve instead of draining the network again.
+                addLearningPoint(previous, exposure, production)
+
+                if production < target - deadband then
+                    if exposure >= rodCount - 0.005 then
+                        state = "STEAM DEFICIT"
+                        reason = "Reactor cannot meet turbine demand with every rod exposed"
+                    else
+                        local estimate = learnedExposure(previous, profile, exposure,
+                            production, target, rodCount)
+                        proposed = math.min(exposure + maxStep,
+                            math.max(exposure + 0.01, estimate))
+                        state, action = "STEAM LOW", "INCREASE EXPOSURE"
+                        reason = ("Formula estimate %.2f rod-equivalents; increase gradually"):
+                            format(estimate)
+                    end
+                elseif bufferBelowReady then
+                    state = "BUFFER FILLING"
+                    reason = bufferDefaultSaved and
+                        ("Turbine buffer is climbing at %.1f%%; saved reactor default"):
+                            format(turbineBuffer) or bufferFilling and
+                        ("Turbine buffer is filling at %.1f%%; hold reactor output"):
+                            format(turbineBuffer) or
+                        ("Turbine buffer is %.1f%%; observing recovery %d/%d"):
+                            format(turbineBuffer,
+                                previous.bufferRecoverySamples or 0,
+                                stableRequired)
+                elseif production > target + deadband then
+                    local estimate = learnedExposure(previous, profile, exposure,
+                        production, target, rodCount)
+                    proposed = math.max(exposure - maxStep,
+                        math.min(exposure - 0.01, estimate))
+                    local exposureFloor = tonumber(previous.bufferExposureFloor)
+                    if exposureFloor ~= nil then
+                        proposed = math.max(proposed, exposureFloor)
+                    end
+                    if proposed < exposure - 0.005 then
+                        state, action = "STEAM HIGH", "REDUCE EXPOSURE"
+                        reason = ("Formula estimate %.2f rod-equivalents; reduce gradually"):
+                            format(estimate)
+                    else
+                        proposed = exposure
+                        state = "BUFFER RESERVE"
+                        reason = ("Holding %.2f rod-equivalents learned from turbine buffer loss"):
+                            format(exposureFloor or exposure)
+                    end
+                elseif primeRequested then
+                    state = "PRIMING STEAM"
+                    reason = ("Holding elevated %.0f mB/t output until steam buffers are ready"):
+                        format(target)
+                else
+                    calibrationCompleted = previous.recalibrating == true
+                    -- A drained hot-fluid buffer is normal when reactor output
+                    -- closely matches live turbine demand. Stable production is
+                    -- sufficient to learn the operating point; only the high
+                    -- buffer branch above must prevent saving.
+                    saveProfile(memory, control, name, exposure, production, target,
+                        context)
+                    previous.recalibrating = false
+                    previous.calibrationPhase = nil
+                    previous.previousProfile = nil
+                    state = "LEARNED"
+                    reason = ("Holding %.2f exposed rod-equivalents for %.0f mB/t"):
+                        format(exposure, target)
+                end
+            end
+
+            proposed = round(clamp(proposed, 0, rodCount), 2)
+            local changing = action ~= "HOLD" and
+                (math.abs(proposed - exposure) >= 0.005 or not balanced)
+            if changing then
+                previous.actionSamples = previous.action == action and
+                    ((previous.actionSamples or 0) + 1) or 1
+                previous.action = action
+            else
+                previous.actionSamples, previous.action = 0, nil
+            end
+
+            result = {
+                mode = "automatic",
+                state = state,
+                action = action,
+                reason = reason,
+                trusted = true,
+                managed = true,
+                activeTurbines = activeTurbines or 0,
+                requestedSteam = requestedSteam,
+                targetSteam = target,
+                normalTargetSteam = normalTarget,
+                steamPriming = primeRequested,
+                steamProduction = rawProduction,
+                averageSteamProduction = round(production, 1),
+                averageSteamSamples = averageSamples,
+                steamError = target - production,
+                steamDeadband = deadband,
+                rodCount = rodCount,
+                currentRodExposure = round(exposure, 2),
+                recommendedRodExposure = proposed,
+                rodExposureChange = round(proposed - exposure, 2),
+                actionSamples = previous.actionSamples,
+                stableSamples = previous.stableSamples or 0,
+                processStableSamples = previous.processStableSamples or 0,
+                temperatureMoving = response.temperatureMoving == true,
+                hotFluidPercent = hotFluid,
+                turbineBufferPercent = turbineBuffer,
+                turbineBufferReady = turbineBufferReady,
+                turbineBufferFeedback = bufferFeedbackEnabled,
+                bufferFilling = bufferFilling,
+                bufferRecoverySamples = previous.bufferRecoverySamples or 0,
+                bufferRecoveryRequested = state == "BUFFER RECOVERY" and
+                    action == "INCREASE EXPOSURE",
+                bufferExposureFloor = previous.bufferExposureFloor,
+                bufferDefaultSaved = bufferDefaultSaved,
+                learnedProfile = profile,
+                recalibrating = previous.recalibrating == true,
+                calibrationPhase = previous.calibrationPhase,
+                calibrationCompleted = calibrationCompleted,
+                coolingSince = previous.cooldownStartedAt,
+                coolingLastProgressAt = previous.cooldownLastProgressAt,
+            }
+        end
+    end
+
+    if result.trusted == false or result.action == "HOLD" then
+        previous.actionSamples, previous.action = 0, nil
+    end
+    memory.reactors[name] = previous
+    return result
+end
+
+function governor.evaluateAll(memory, reactors, turbines, control, context)
+    local demand, activeTurbines, demandError = governor.steamDemand(turbines, control)
+    local turbineBufferPercent, bufferReadings = nil, 0
+    for _, turbine in ipairs(turbines or {}) do
+        if turbine.active == true and not turbine.error and
+           not (turbine.governor and turbine.governor.trusted == false) then
+            local buffer = tonumber(turbine.inputPercent)
+            if buffer ~= nil then
+                turbineBufferPercent = turbineBufferPercent and
+                    math.min(turbineBufferPercent, buffer) or buffer
+                bufferReadings = bufferReadings + 1
+            end
+        end
+    end
+    local steamReactors = 0
+    for _, reactor in ipairs(reactors or {}) do
+        if reactor.mode == "steam" and not reactor.error then
+            steamReactors = steamReactors + 1
+        end
+    end
+    if steamReactors > 1 then
+        demand = nil
+        demandError = "Multiple steam reactors require routing assignments"
+    end
+    local present = {}
+    for _, reactor in ipairs(reactors or {}) do
+        present[tostring(reactor.name)] = true
+        local reactorContext = {}
+        for key, value in pairs(context or {}) do reactorContext[key] = value end
+        reactorContext.demandError = demandError
+        reactorContext.turbineBufferPercent = turbineBufferPercent
+        reactorContext.turbineBufferTelemetryComplete = activeTurbines > 0 and
+            bufferReadings == activeTurbines
+        reactor.governor = governor.evaluate(memory, reactor, control, reactorContext,
+            demand, activeTurbines)
+    end
+    for name in pairs(memory.reactors or {}) do
+        if not present[name] then memory.reactors[name] = nil end
+    end
+    return reactors, demand, activeTurbines, demandError
+end
+
+function governor.apply(memory, reactor, control, context, writers)
+    control, context = control or {}, context or {}
+    local plan = reactor and reactor.governor
+    if not plan then return nil end
+    local name = tostring(reactor.name or "unknown")
+    local previous = memory.reactors[name] or {}
+    local now = tonumber(context.now) or 0
+    local interval = math.max(2, tonumber(control.reactorAdjustmentInterval) or 5)
+    local samples = math.max(2,
+        math.floor(tonumber(control.reactorCommandSamples) or 3))
+    local current, proposed = tonumber(plan.currentRodExposure),
+        tonumber(plan.recommendedRodExposure)
+    local needsWrite = current ~= nil and proposed ~= nil and
+        math.abs(current - proposed) >= 0.005
+    local needsActive = type(plan.recommendedActive) == "boolean" and
+        plan.recommendedActive ~= reactor.active
+
+    if control.actuatorsEnabled ~= true then
+        plan.actuatorState = "DISABLED"
+        previous.actionSamples, previous.action = 0, nil
+    elseif context.maintenance then
+        plan.actuatorState = "PAUSED"
+        previous.actionSamples, previous.action = 0, nil
+    elseif plan.managed == false then
+        plan.actuatorState = "MONITOR"
+    elseif plan.trusted == false then
+        plan.actuatorState = "UNTRUSTED"
+        previous.actionSamples, previous.action = 0, nil
+    elseif not needsWrite and not needsActive then
+        plan.actuatorState = "HOLD"
+    elseif not needsActive and (tonumber(plan.actionSamples) or 0) < samples then
+        plan.actuatorState = "VERIFYING"
+    elseif type(writers) ~= "table" or
+           (needsActive and type(writers.setActive) ~= "function") or
+           (needsWrite and type(writers.setControlRodExposure) ~= "function") then
+        plan.actuatorState = "FAULT"
+        plan.actuatorError = needsActive and
+            "Required reactor activation adapter is unavailable" or
+            "Required individual control-rod adapter is unavailable"
+    elseif previous.lastAttemptAt and now - previous.lastAttemptAt < interval then
+        plan.actuatorState = previous.lastError and "FAULT" or "WAITING"
+        plan.actuatorError = previous.lastError
+        plan.nextAdjustmentIn = interval - (now - previous.lastAttemptAt)
+    else
+        previous.lastAttemptAt = now
+        local ok, applied, reason
+        if needsActive then
+            ok, applied, reason = writers.setActive(reactor, plan.recommendedActive)
+        else
+            ok, applied, reason = writers.setControlRodExposure(reactor, proposed)
+        end
+        if ok then
+            previous.lastAppliedAt = now
+            if needsActive then
+                previous.lastAppliedActive = applied == true
+                plan.appliedActive = previous.lastAppliedActive
+            else
+                previous.lastAppliedRodExposure = tonumber(applied) or proposed
+                plan.appliedRodExposure = previous.lastAppliedRodExposure
+                if plan.bufferRecoveryRequested == true then
+                    previous.bufferExposureFloor = previous.lastAppliedRodExposure
+                    previous.bufferExposureDemand =
+                        tonumber(plan.requestedSteam) or 0
+                    plan.bufferExposureFloor = previous.bufferExposureFloor
+                end
+            end
+            previous.lastError = nil
+            previous.stableSamples = 0
+            previous.processStableSamples = 0
+            previous.productionSamples = {}
+            previous.observation = nil
+            previous.turbineBufferPercent = nil
+            previous.bufferRecoverySamples = 0
+            plan.actuatorState = "APPLIED"
+        else
+            previous.lastError = tostring(reason or (needsActive and
+                "Reactor rejected the activation command" or
+                "Reactor rejected the rod command"))
+            if needsActive then
+                plan.reportedActive = type(applied) == "boolean" and applied or nil
+            else
+                plan.reportedRodExposure = tonumber(applied)
+            end
+            plan.actuatorError = previous.lastError
+            plan.actuatorState = "FAULT"
+        end
+    end
+
+    plan.lastAppliedAt = previous.lastAppliedAt
+    plan.lastAppliedRodExposure = previous.lastAppliedRodExposure
+    plan.lastAppliedActive = previous.lastAppliedActive
+    memory.reactors[name] = previous
+    return plan
+end
+
+function governor.applyAll(memory, reactors, control, context, writers)
+    for _, reactor in ipairs(reactors or {}) do
+        governor.apply(memory, reactor, control, context, writers)
+    end
+    return reactors
+end
+
+return governor
 ]=],
 
     ["mainframe/storage_adapter.lua"] = [=[
@@ -2199,6 +3980,14 @@ local function percent(amount, maximum)
     return math.max(0, math.min(100, amount / maximum * 100))
 end
 
+local function availableMethods(name)
+    local methods = {}
+    for _, method in ipairs(peripheral.getMethods(name) or {}) do
+        methods[method] = true
+    end
+    return methods
+end
+
 function adapter.read(device)
     local name = device.name
     local turbine = { name = name, available = peripheral.isPresent(name) }
@@ -2207,10 +3996,7 @@ function adapter.read(device)
         return turbine
     end
 
-    local availableMethods = {}
-    for _, method in ipairs(peripheral.getMethods(name) or {}) do
-        availableMethods[method] = true
-    end
+    local availableMethods = availableMethods(name)
 
     turbine.connected = readAny(name, availableMethods, { "getConnected", "isConnected", "mbIsConnected", "mbIsAssembled", "connected" })
     turbine.active = readAny(name, availableMethods, { "getActive", "isActive", "active" })
@@ -2220,10 +4006,15 @@ function adapter.read(device)
     turbine.energyMax = number(readAny(name, availableMethods, { "getEnergyCapacity", "getMaxEnergyStored", "energyCapacity" }))
     turbine.flowRate = number(readAny(name, availableMethods, { "getFluidFlowRate", "getFluidFlowRateLastTick", "getInputFlowRate", "fluidFlowRate" }))
     turbine.flowRateMax = number(readAny(name, availableMethods, { "getFluidFlowRateMax", "getMaxFluidFlowRate", "getMaxIntakeRate", "fluidFlowRateMax" }))
+    turbine.flowRateLimit = number(readAny(name, availableMethods, { "getFluidFlowRateMaxMax", "getFluidFlowRateLimit", "getMaxPermittedFlow", "flowRateLimit" }))
     turbine.inputAmount = number(readAny(name, availableMethods, { "getInputAmount", "getInputFluidAmount", "inputAmount" }))
-    turbine.inputMax = number(readAny(name, availableMethods, { "getInputAmountMax", "getInputCapacity", "inputAmountMax" }))
+    turbine.inputMax = number(readAny(name, availableMethods, {
+        "getInputAmountMax", "getInputCapacity", "getFluidAmountMax", "inputAmountMax",
+    }))
     turbine.outputAmount = number(readAny(name, availableMethods, { "getOutputAmount", "getOutputFluidAmount", "outputAmount" }))
-    turbine.outputMax = number(readAny(name, availableMethods, { "getOutputAmountMax", "getOutputCapacity", "outputAmountMax" }))
+    turbine.outputMax = number(readAny(name, availableMethods, {
+        "getOutputAmountMax", "getOutputCapacity", "getFluidAmountMax", "outputAmountMax",
+    }))
     turbine.inductorEngaged = readAny(name, availableMethods, { "getInductorEngaged", "isInductorEngaged", "inductorEngaged" })
     turbine.ventMode = readAny(name, availableMethods, { "getVentMode", "ventMode" })
     turbine.bladeCount = number(readAny(name, availableMethods, { "getBladeCount", "getNumberOfBlades", "bladeCount" }))
@@ -2241,6 +4032,97 @@ function adapter.read(device)
         turbine.error = "No supported telemetry methods"
     end
     return turbine
+end
+
+function adapter.setFlowLimit(turbine, requested)
+    if type(turbine) ~= "table" or type(turbine.name) ~= "string" then
+        return false, nil, "Invalid turbine identity"
+    end
+    if not peripheral.isPresent(turbine.name) then
+        return false, nil, "Peripheral unavailable"
+    end
+
+    local methods = availableMethods(turbine.name)
+    if not methods.setFluidFlowRateMax or not methods.getFluidFlowRateMax then
+        return false, nil, "Verified flow-limit control is unavailable"
+    end
+
+    requested = tonumber(requested)
+    if not requested then return false, nil, "Invalid flow limit" end
+    local hardLimit = tonumber(turbine.flowRateLimit)
+    if hardLimit then requested = math.min(requested, hardLimit) end
+    requested = math.max(0, math.floor(requested + 0.5))
+
+    local ok, reason = pcall(peripheral.call, turbine.name, "setFluidFlowRateMax", requested)
+    if not ok then return false, nil, tostring(reason) end
+
+    local readOk, actual = pcall(peripheral.call, turbine.name, "getFluidFlowRateMax")
+    actual = tonumber(actual)
+    if not readOk or actual == nil then
+        return false, nil, "Flow-limit verification failed"
+    end
+    local verified = math.floor(actual + 0.5)
+    if verified ~= requested then
+        return false, verified, ("Requested %d mB/t; turbine reports %d mB/t"):format(
+            requested, verified)
+    end
+    return true, verified
+end
+
+function adapter.setActive(turbine, requested)
+    if type(turbine) ~= "table" or type(turbine.name) ~= "string" then
+        return false, nil, "Invalid turbine identity"
+    end
+    if not peripheral.isPresent(turbine.name) then
+        return false, nil, "Peripheral unavailable"
+    end
+
+    local methods = availableMethods(turbine.name)
+    if not methods.setActive or not methods.getActive then
+        return false, nil, "Verified turbine power control is unavailable"
+    end
+
+    requested = requested == true
+    local ok, reason = pcall(peripheral.call, turbine.name, "setActive", requested)
+    if not ok then return false, nil, tostring(reason) end
+
+    local readOk, actual = pcall(peripheral.call, turbine.name, "getActive")
+    if not readOk or type(actual) ~= "boolean" then
+        return false, nil, "Turbine power-state verification failed"
+    end
+    if actual ~= requested then
+        return false, actual, ("Requested turbine %s; turbine reports %s"):format(
+            requested and "active" or "inactive", actual and "active" or "inactive")
+    end
+    return true, actual
+end
+
+function adapter.setInductor(turbine, engaged)
+    if type(turbine) ~= "table" or type(turbine.name) ~= "string" then
+        return false, nil, "Invalid turbine identity"
+    end
+    if not peripheral.isPresent(turbine.name) then
+        return false, nil, "Peripheral unavailable"
+    end
+
+    local methods = availableMethods(turbine.name)
+    if not methods.setInductorEngaged or not methods.getInductorEngaged then
+        return false, nil, "Verified inductor control is unavailable"
+    end
+
+    engaged = engaged == true
+    local ok, reason = pcall(peripheral.call, turbine.name, "setInductorEngaged", engaged)
+    if not ok then return false, nil, tostring(reason) end
+
+    local readOk, actual = pcall(peripheral.call, turbine.name, "getInductorEngaged")
+    if not readOk or type(actual) ~= "boolean" then
+        return false, nil, "Inductor verification failed"
+    end
+    if actual ~= engaged then
+        return false, actual, ("Requested inductor %s; turbine reports %s"):format(
+            engaged and "engaged" or "disengaged", actual and "engaged" or "disengaged")
+    end
+    return true, actual
 end
 
 function adapter.readAll(devices)
@@ -2276,6 +4158,8 @@ function adapter.printReport(turbines, config, formatter)
             print("  Power: " .. formatter.power(turbine.energyProduction, config.power, true))
             print("  Buffer: " .. value(turbine.energyPercent, "%"))
             print("  Flow: " .. value(turbine.flowRate, " mB/t"))
+            print("  Flow setting: " .. value(turbine.flowRateMax, " mB/t"))
+            print("  Flow limit: " .. value(turbine.flowRateLimit, " mB/t"))
             print("  Inductor: " .. (turbine.inductorEngaged == true and "ENGAGED" or turbine.inductorEngaged == false and "DISENGAGED" or "N/A"))
         end
         print("")
@@ -2285,6 +4169,912 @@ end
 return adapter
 ]=],
 
+    ["mainframe/turbine_governor.lua"] = [=[
+local governor = {}
+
+local function clamp(value, minimum, maximum)
+    return math.max(minimum, math.min(maximum, value))
+end
+
+local function round(value)
+    return math.floor(value + 0.5)
+end
+
+local function contains(list, wanted)
+    for _, value in ipairs(list or {}) do
+        if tonumber(value) == tonumber(wanted) then return true end
+    end
+    return false
+end
+
+local function hold(state, reason, trusted)
+    return {
+        mode = "automatic",
+        state = state,
+        action = "HOLD",
+        reason = reason,
+        trusted = trusted ~= false,
+    }
+end
+
+local function profileFor(control, name)
+    control.turbineProfiles = control.turbineProfiles or {}
+    local profile = control.turbineProfiles[name]
+    if type(profile) ~= "table" or tonumber(profile.targetRpm) == nil then return nil end
+    return profile
+end
+
+local function isSteamSupplyFailure(reason)
+    reason = tostring(reason or "")
+    return string.find(reason, "Cannot maintain calibration steam", 1, true) == 1 or
+        string.find(reason, "Steam supply lost", 1, true) == 1 or
+        string.find(reason, "Actual steam telemetry", 1, true) == 1
+end
+
+local function saveProfile(memory, control, name, learnedRpm, learnedFlow)
+    local lowBand = tonumber(control.lowBandRpm) or 900
+    local highBand = tonumber(control.highBandRpm) or 1800
+    local target = math.abs(learnedRpm - lowBand) <= math.abs(learnedRpm - highBand)
+        and lowBand or highBand
+    control.turbineProfiles = control.turbineProfiles or {}
+    control.turbineProfiles[name] = {
+        targetRpm = target,
+        learnedRpm = learnedRpm,
+        flowLimit = learnedFlow and round(learnedFlow) or nil,
+        calibrated = true,
+    }
+    memory.profileDirty = true
+    return control.turbineProfiles[name]
+end
+
+function governor.new()
+    return { turbines = {}, profileDirty = false }
+end
+
+function governor.requestSteamPrime(memory)
+    memory.turbines = memory.turbines or {}
+    for _, previous in pairs(memory.turbines) do
+        previous.primeRequested = true
+    end
+end
+
+function governor.needsSteamPrime(memory, turbines)
+    memory.turbines = memory.turbines or {}
+    for _, turbine in ipairs(turbines or {}) do
+        if turbine.active == true then
+            local previous = memory.turbines[tostring(turbine.name or "unknown")]
+            if previous == nil or previous.primeRequested == true or
+               previous.phase == "CHARGE_STEAM" then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+function governor.consumeProfileChanges(memory)
+    local changed = memory.profileDirty == true
+    memory.profileDirty = false
+    return changed
+end
+
+function governor.resetCalibration(memory, control, name)
+    name = tostring(name or "")
+    control.turbineProfiles = control.turbineProfiles or {}
+    local hadProfile = control.turbineProfiles[name] ~= nil
+    control.turbineProfiles[name] = nil
+    memory.turbines[name] = {
+        overspeedCount = 0,
+        primeRequested = true,
+        startRequested = true,
+    }
+    if hadProfile then memory.profileDirty = true end
+    return true
+end
+
+function governor.evaluate(memory, turbine, control, context)
+    control = control or {}
+    context = context or {}
+    memory.turbines = memory.turbines or {}
+
+    local name = tostring(turbine.name or "unknown")
+    local previous = memory.turbines[name] or {
+        overspeedCount = 0,
+        primeRequested = true,
+    }
+    local profile = profileFor(control, name)
+    local lowBand = tonumber(control.lowBandRpm) or 900
+    local highBand = tonumber(control.highBandRpm) or 1800
+    local target = profile and tonumber(profile.targetRpm) or highBand
+    local deadband = math.max(1, tonumber(control.rpmDeadband) or 25)
+    local overspeedMargin = math.max(deadband, tonumber(control.overspeedMargin) or 200)
+    local overspeedRpm = profile and (target + overspeedMargin) or
+        math.max(highBand + deadband, tonumber(control.overspeedRpm) or 2000)
+    local overspeedSamples = math.max(1, math.floor(tonumber(control.overspeedSamples) or 3))
+    local maxStep = math.max(1, tonumber(control.maxFlowStep) or 100)
+    local lowEscapeRpm = math.max(lowBand + deadband,
+        tonumber(control.calibrationLowEscapeRpm) or (lowBand + 100))
+    local coldStartRpm = math.max(0, tonumber(control.coldStartRpm) or 100)
+    local settleDelta = math.max(0.1, tonumber(control.calibrationSettleDelta) or 2)
+    local settleSamples = math.max(3,
+        math.floor(tonumber(control.calibrationSettleSamples) or 8))
+    local minimumCalibrationRpm = math.max(0,
+        tonumber(control.calibrationMinimumRpm) or (lowBand - deadband * 2))
+    local steamRatio = clamp(tonumber(control.calibrationSteamRatio) or 0.98, 0.1, 1)
+    local steamSamples = math.max(3,
+        math.floor(tonumber(control.calibrationSteamSamples) or 5))
+    local failureSamples = math.max(3,
+        math.floor(tonumber(control.calibrationFailureSamples) or 10))
+    local spoolFailureSamples = math.max(1,
+        math.floor(tonumber(control.calibrationSpoolFailureSamples) or 2))
+    local escapeSamples = math.max(2,
+        math.floor(tonumber(control.calibrationBandEscapeSamples) or 3))
+    local stallTimeout = math.max(30,
+        tonumber(control.calibrationStallTimeout) or 180)
+    local bufferReady = math.max(50, math.min(
+        tonumber(control.reactorHotFluidHigh) or 85,
+        tonumber(control.calibrationBufferReady) or 85))
+    local now = tonumber(context.now) or 0
+
+    local result
+    if context.maintenance then
+        result = hold("MAINTENANCE", "Automatic decisions paused during maintenance")
+    elseif context.mainframeId and contains(context.idConflicts, context.mainframeId) then
+        result = hold("NO TRUSTED DATA", "Mainframe computer ID is conflicting", false)
+    elseif turbine.error then
+        result = hold("NO TRUSTED DATA", tostring(turbine.error), false)
+    elseif turbine.active == false then
+        if previous.startRequested == true then
+            result = {
+                mode = "automatic",
+                state = "STARTING",
+                action = "START TURBINE",
+                reason = "Calibration requested; activate and verify this turbine",
+                trusted = true,
+                currentActive = false,
+                recommendedActive = true,
+                activeChange = true,
+                actionSamples = 1,
+            }
+        else
+            result = hold("OFFLINE", "Turbine is not active")
+        end
+    elseif turbine.active ~= true then
+        result = hold("NO STATE DATA", "Turbine active-state telemetry is unavailable", false)
+    elseif turbine.rotorSpeed == nil then
+        result = hold("NO RPM DATA", "Rotor-speed telemetry is unavailable", false)
+    elseif turbine.flowRateMax == nil then
+        result = hold("NO FLOW SETTING", "Configured flow-limit telemetry is unavailable", false)
+    elseif turbine.flowRateLimit == nil then
+        result = hold("NO HARD LIMIT", "Turbine hard flow limit is unavailable", false)
+    elseif type(turbine.inductorEngaged) ~= "boolean" then
+        result = hold("NO INDUCTOR STATE", "Inductor-state telemetry is unavailable", false)
+    else
+        previous.startRequested = false
+        local rpm = tonumber(turbine.rotorSpeed)
+        local currentFlow = tonumber(turbine.flowRateMax)
+        local flowMaximum = tonumber(turbine.flowRateLimit)
+        local rpmTrend = previous.rpm and (rpm - previous.rpm) or 0
+        local overspeedCount = rpm >= overspeedRpm and (previous.overspeedCount + 1) or 0
+        local recommendedFlow = currentFlow
+        local recommendedInductor = turbine.inductorEngaged
+        local state, action, reason = "STABLE", "HOLD", "Rotor is inside the target deadband"
+        local sourceBuffer = tonumber(context.steamSourceBufferPercent)
+        local turbineBuffer = tonumber(turbine.inputPercent)
+        local canPrimeSteam = context.steamSourceManaged == true and
+            sourceBuffer ~= nil and turbineBuffer ~= nil
+
+        local function beginPhase(phase)
+            previous.phase = phase
+            previous.phaseStartedAt = now
+            previous.progressAt = now
+            previous.progressRpm = rpm
+            previous.settleCount = 0
+            previous.settleSum = 0
+            previous.escapeCount = 0
+            previous.failureCount = 0
+            previous.lowSteamCount = 0
+            previous.fallbackTuning = false
+        end
+
+        local function beginInputPhase()
+            beginPhase(canPrimeSteam and "CHARGE_STEAM" or "PREFLIGHT")
+        end
+
+        local function updateProgress(direction)
+            if previous.progressRpm == nil then
+                previous.progressRpm = rpm
+                previous.progressAt = now
+            end
+            local delta = rpm - previous.progressRpm
+            if (direction > 0 and delta >= settleDelta) or
+               (direction < 0 and delta <= -settleDelta) or
+               (direction == 0 and math.abs(delta) >= settleDelta) then
+                previous.progressRpm = rpm
+                previous.progressAt = now
+            end
+            return now > 0 and previous.progressAt and
+                now - previous.progressAt >= stallTimeout
+        end
+
+        local function fullSteam(required)
+            local actual = tonumber(turbine.flowRate)
+            required = math.max(0, tonumber(required) or 0)
+            return actual ~= nil and (required == 0 or actual >= required * steamRatio), actual
+        end
+
+        local function countStable(wanted)
+            local stable = math.abs(rpm - wanted) <= deadband and previous.rpm and
+                math.abs(rpmTrend) <= settleDelta
+            previous.settleCount = stable and ((previous.settleCount or 0) + 1) or 0
+            previous.settleSum = stable and ((previous.settleSum or 0) + rpm) or 0
+            return previous.settleCount >= settleSamples
+        end
+
+        local function countStableRange(minimum, maximum)
+            local stable = rpm >= minimum and rpm <= maximum and previous.rpm and
+                math.abs(rpmTrend) <= settleDelta
+            previous.settleCount = stable and ((previous.settleCount or 0) + 1) or 0
+            previous.settleSum = stable and ((previous.settleSum or 0) + rpm) or 0
+            return previous.settleCount >= settleSamples
+        end
+
+        local function learnBand(wanted, flow)
+            local learned = previous.settleCount > 0 and
+                previous.settleSum / previous.settleCount or rpm
+            profile = saveProfile(memory, control, name, learned, flow)
+            target = wanted
+            overspeedRpm = target + overspeedMargin
+            previous.phase = "OPERATING"
+            previous.primeRequested = false
+            previous.settleCount, previous.settleSum = 0, 0
+            return learned
+        end
+
+        if profile then
+            if previous.phase == "CHARGE_STEAM" or
+               previous.phase == "RESTORE_PROFILE" then
+                -- Preserve an active one-shot prime and its guarded flow restore.
+            elseif previous.primeRequested == true and canPrimeSteam then
+                beginPhase("CHARGE_STEAM")
+            else
+                previous.primeRequested = false
+                previous.phase = "OPERATING"
+            end
+        elseif previous.phase == nil then
+            beginInputPhase()
+        elseif previous.phase == "ENGAGE_LOW" and turbine.inductorEngaged == true then
+            beginPhase("TEST_LOW")
+        elseif previous.phase == "RELEASE_HIGH" and turbine.inductorEngaged == false then
+            beginPhase("SPOOL_HIGH")
+        elseif previous.phase == "ENGAGE_HIGH" and turbine.inductorEngaged == true then
+            beginPhase("TEST_HIGH")
+        end
+
+        if rpm >= overspeedRpm then
+            recommendedInductor = true
+            if overspeedCount >= overspeedSamples then
+                state, action = "OVERSPEED", "CUT FLOW"
+                reason = "Confirmed overspeed: engage inductor and cut steam"
+                recommendedFlow = 0
+            else
+                state = "VERIFYING OVERSPEED"
+                action = turbine.inductorEngaged and "HOLD" or "ENGAGE INDUCTOR"
+                reason = ("Overspeed sample %d/%d"):format(overspeedCount, overspeedSamples)
+            end
+        elseif previous.phase == "CHARGE_STEAM" then
+            previous.calibrationError = nil
+            previous.fullSteamCount = 0
+            previous.lowSteamCount = 0
+            previous.settleCount = 0
+            previous.settleSum = 0
+            recommendedInductor = true
+            if not canPrimeSteam then
+                previous.primeRequested = false
+                if profile then
+                    beginPhase("RESTORE_PROFILE")
+                    recommendedFlow = tonumber(profile.flowLimit) or currentFlow
+                    state = "RESTORING PROFILE"
+                    action = turbine.inductorEngaged and "RESTORE FLOW" or
+                        "ENGAGE INDUCTOR"
+                    reason = "Buffer telemetry unavailable; resume saved turbine profile"
+                else
+                    beginPhase("PREFLIGHT")
+                    state = "CALIBRATION PREFLIGHT"
+                    recommendedFlow = flowMaximum
+                    action = turbine.inductorEngaged and "MAXIMIZE FLOW" or
+                        "ENGAGE INDUCTOR"
+                    reason = "Buffer telemetry unavailable; using full-steam preflight"
+                end
+            elseif sourceBuffer >= bufferReady and turbineBuffer >= bufferReady then
+                previous.primeRequested = false
+                if profile then
+                    beginPhase("RESTORE_PROFILE")
+                    recommendedFlow = tonumber(profile.flowLimit) or currentFlow
+                    state = "STEAM PRIMED"
+                    if turbine.inductorEngaged == false then
+                        action = "ENGAGE INDUCTOR"
+                    elseif currentFlow ~= recommendedFlow then
+                        action = "RESTORE FLOW"
+                    else
+                        action = "HOLD"
+                    end
+                    reason = ("Steam buffers primed at reactor %.0f%% / turbine %.0f%%; resume saved flow"):
+                        format(sourceBuffer, turbineBuffer)
+                else
+                    beginPhase("PREFLIGHT")
+                    state = "CALIBRATION PREFLIGHT"
+                    recommendedFlow = flowMaximum
+                    action = turbine.inductorEngaged and "MAXIMIZE FLOW" or
+                        "ENGAGE INDUCTOR"
+                    reason = ("Steam buffers primed at reactor %.0f%% / turbine %.0f%%; open full flow"):
+                        format(sourceBuffer, turbineBuffer)
+                end
+            elseif context.steamSourceReady ~= true then
+                local waitingFlow = profile and tonumber(profile.flowLimit) or flowMaximum
+                recommendedFlow = waitingFlow or currentFlow
+                state = "WAITING FOR STEAM SOURCE"
+                if turbine.inductorEngaged == false then
+                    action = "ENGAGE INDUCTOR"
+                elseif currentFlow ~= recommendedFlow then
+                    action = "RESTORE FLOW"
+                else
+                    action = "WAIT FOR STEAM SOURCE"
+                end
+                reason = tostring(context.steamSourceReason or
+                    "Preparing managed steam before buffer priming")
+            else
+                state = "CHARGING STEAM"
+                recommendedFlow = profile and tonumber(profile.flowLimit) or flowMaximum
+                recommendedFlow = recommendedFlow or currentFlow
+                if turbine.inductorEngaged == false then
+                    action = "ENGAGE INDUCTOR"
+                elseif currentFlow ~= recommendedFlow then
+                    action = "RESTORE FLOW"
+                else
+                    action = "PRIME BUFFERS"
+                end
+                reason = ("Reactor overproducing to prime buffers to %.0f%%: reactor %.0f%% / turbine %.0f%%"):
+                    format(bufferReady, sourceBuffer, turbineBuffer)
+            end
+        elseif profile and previous.phase == "RESTORE_PROFILE" then
+            recommendedInductor = true
+            recommendedFlow = tonumber(profile.flowLimit) or currentFlow
+            if turbine.inductorEngaged == false then
+                state, action = "RESTORING PROFILE", "ENGAGE INDUCTOR"
+                reason = "Re-engage generator load before restoring saved steam flow"
+            elseif currentFlow ~= recommendedFlow then
+                state, action = "RESTORING PROFILE", "RESTORE FLOW"
+                reason = ("Restore learned turbine flow at %.0f mB/t"):
+                    format(recommendedFlow)
+            else
+                beginPhase("OPERATING")
+                state, action = "STABLE", "HOLD"
+                reason = "Steam buffers primed; saved turbine profile restored"
+            end
+        elseif not profile and context.steamSourceManaged == true and
+               context.steamSourceReady ~= true then
+            previous.phase = "PREFLIGHT"
+            previous.calibrationError = nil
+            previous.fullSteamCount = 0
+            previous.lowSteamCount = 0
+            previous.settleCount = 0
+            previous.settleSum = 0
+            state = "WAITING FOR STEAM SOURCE"
+            recommendedInductor = true
+            recommendedFlow = flowMaximum
+            if turbine.inductorEngaged == false then
+                action = "ENGAGE INDUCTOR"
+            elseif currentFlow < flowMaximum then
+                action = "MAXIMIZE FLOW"
+            else
+                action = "WAIT FOR STEAM SOURCE"
+            end
+            reason = tostring(context.steamSourceReason or
+                "Preparing managed steam supply before turbine calibration")
+        elseif not profile and previous.phase == "FAILED" and
+               context.steamSourceManaged == true and
+               isSteamSupplyFailure(previous.calibrationError) then
+            beginInputPhase()
+            previous.calibrationError = nil
+            previous.fullSteamCount = 0
+            previous.lowSteamCount = 0
+            recommendedInductor = true
+            if canPrimeSteam then
+                state = "CHARGING STEAM"
+                action = turbine.inductorEngaged and "CLOSE FLOW" or "ENGAGE INDUCTOR"
+                reason = "Managed steam restored; recharging buffers before retry"
+                recommendedFlow = 0
+            else
+                state = "CALIBRATION PREFLIGHT"
+                action = turbine.inductorEngaged and "VERIFY STEAM" or "ENGAGE INDUCTOR"
+                reason = "Managed steam restored; retrying turbine calibration"
+                recommendedFlow = flowMaximum
+            end
+        elseif previous.phase == "FAILED" then
+            state = "CALIBRATION FAILED"
+            action = turbine.inductorEngaged and "HOLD" or "ENGAGE INDUCTOR"
+            reason = previous.calibrationError or "Calibration conditions were invalid"
+            recommendedInductor = true
+        elseif not profile and previous.phase == "PREFLIGHT" then
+            local actualFlow = tonumber(turbine.flowRate)
+            local fullSteam = actualFlow ~= nil and flowMaximum > 0 and
+                actualFlow >= flowMaximum * steamRatio
+            previous.fullSteamCount = fullSteam and
+                ((previous.fullSteamCount or 0) + 1) or 0
+            previous.lowSteamCount = fullSteam and 0 or
+                ((previous.lowSteamCount or 0) + 1)
+            state = "CALIBRATION PREFLIGHT"
+            recommendedInductor = true
+            recommendedFlow = flowMaximum
+            if turbine.inductorEngaged == false then
+                action = "ENGAGE INDUCTOR"
+                reason = "Steam preflight runs with generator load engaged"
+                previous.fullSteamCount = 0
+            elseif currentFlow < flowMaximum then
+                action = "MAXIMIZE FLOW"
+                reason = "Request full steam before calibration spool"
+                previous.fullSteamCount = 0
+            elseif previous.lowSteamCount >= failureSamples then
+                previous.phase = "FAILED"
+                previous.calibrationError = actualFlow == nil and
+                    "Actual steam telemetry is unavailable" or
+                    ("Cannot maintain calibration steam: %.0f of %.0f mB/t"):format(
+                        actualFlow, flowMaximum)
+                state = "CALIBRATION FAILED"
+                action = turbine.inductorEngaged and "HOLD" or "ENGAGE INDUCTOR"
+                reason = previous.calibrationError
+                recommendedFlow = currentFlow
+            elseif previous.fullSteamCount >= steamSamples then
+                beginPhase("SPOOL_LOW")
+                action = "DISENGAGE INDUCTOR"
+                recommendedInductor = false
+                reason = ("Full steam verified %d/%d; test 900 RPM band first"):format(
+                    previous.fullSteamCount, steamSamples)
+            else
+                action = "VERIFY STEAM"
+                reason = ("Full-steam sample %d/%d"):format(
+                    previous.fullSteamCount, steamSamples)
+            end
+        elseif not profile and (previous.phase == "SPOOL_LOW" or
+               previous.phase == "SPOOL_HIGH") then
+            local spoolTarget = previous.phase == "SPOOL_LOW" and lowBand or highBand
+            local steamOk, actualFlow = fullSteam(flowMaximum)
+            local steamStarved = not steamOk
+            previous.lowSteamCount = steamStarved and
+                ((previous.lowSteamCount or 0) + 1) or 0
+            state = previous.phase == "SPOOL_LOW" and "CALIBRATION SPOOL 900" or
+                "CALIBRATION SPOOL 1800"
+            recommendedFlow = flowMaximum
+            if previous.lowSteamCount >= spoolFailureSamples then
+                previous.phase = "FAILED"
+                previous.calibrationError = actualFlow == nil and
+                    "Actual steam telemetry was lost during calibration spool" or
+                    ("Steam supply lost during spool: requested %.0f, received %.0f mB/t"):format(
+                        flowMaximum, actualFlow)
+                state = "CALIBRATION FAILED"
+                action = turbine.inductorEngaged and "HOLD" or "ENGAGE INDUCTOR"
+                reason = previous.calibrationError
+                recommendedInductor = true
+                recommendedFlow = currentFlow
+            elseif rpm >= spoolTarget then
+                previous.phase = previous.phase == "SPOOL_LOW" and
+                    "ENGAGE_LOW" or "ENGAGE_HIGH"
+                recommendedInductor = true
+                action = "ENGAGE INDUCTOR"
+                reason = ("Reached %.0f RPM; apply generator load"):format(spoolTarget)
+            elseif updateProgress(1) then
+                previous.phase = "FAILED"
+                previous.calibrationError = ("Rotor stopped gaining speed before %.0f RPM"):format(
+                    spoolTarget)
+                state = "CALIBRATION FAILED"
+                action = turbine.inductorEngaged and "HOLD" or "ENGAGE INDUCTOR"
+                reason = previous.calibrationError
+                recommendedInductor = true
+            else
+                recommendedInductor = false
+                action = turbine.inductorEngaged and "DISENGAGE INDUCTOR" or
+                    (currentFlow < flowMaximum and "MAXIMIZE FLOW" or "WAIT FOR SPEED")
+                reason = ("Unloaded spool to %.0f RPM"):format(spoolTarget)
+            end
+        elseif not profile and (previous.phase == "ENGAGE_LOW" or
+               previous.phase == "ENGAGE_HIGH") then
+            local band = previous.phase == "ENGAGE_LOW" and lowBand or highBand
+            state = ("CALIBRATION ENGAGE %.0f"):format(band)
+            action = "ENGAGE INDUCTOR"
+            reason = ("Engage generator load and observe %.0f RPM band"):format(band)
+            recommendedInductor = true
+            recommendedFlow = flowMaximum
+        elseif not profile and previous.phase == "RELEASE_HIGH" then
+            state = "CALIBRATION ESCALATE"
+            action = "DISENGAGE INDUCTOR"
+            reason = "900 RPM band was overpowered; continue unloaded to 1800 RPM"
+            recommendedInductor = false
+            recommendedFlow = flowMaximum
+        elseif not profile and previous.phase == "TEST_LOW" then
+            state = "CALIBRATION TEST 900"
+            recommendedInductor = true
+            recommendedFlow = flowMaximum
+            local steamOk, actualFlow = fullSteam(flowMaximum)
+            previous.lowSteamCount = not steamOk and
+                ((previous.lowSteamCount or 0) + 1) or 0
+            if turbine.inductorEngaged == false then
+                action = "ENGAGE INDUCTOR"
+                reason = "900 RPM test requires generator load"
+                previous.settleCount, previous.settleSum = 0, 0
+            elseif previous.lowSteamCount >= spoolFailureSamples then
+                previous.phase = "FAILED"
+                previous.calibrationError = ("Steam supply lost during 900 RPM test: requested %.0f, received %.0f mB/t"):format(
+                    flowMaximum, actualFlow or 0)
+                state, action, reason = "CALIBRATION FAILED", "HOLD", previous.calibrationError
+                recommendedFlow = currentFlow
+            elseif rpm > lowEscapeRpm and rpmTrend > 0 then
+                previous.escapeCount = (previous.escapeCount or 0) + 1
+                previous.settleCount, previous.settleSum = 0, 0
+                action = "VERIFY HIGH BAND"
+                reason = ("Rotor climbing past %.0f RPM: %d/%d"):format(
+                    lowEscapeRpm, previous.escapeCount, escapeSamples)
+                if previous.escapeCount >= escapeSamples then
+                    previous.phase = "RELEASE_HIGH"
+                    action = "DISENGAGE INDUCTOR"
+                    recommendedInductor = false
+                    reason = "900 RPM band cannot absorb full steam; test 1800 RPM"
+                end
+            elseif countStableRange(minimumCalibrationRpm, lowEscapeRpm) then
+                local learned = learnBand(lowBand, currentFlow)
+                state, action = "CALIBRATED", "HOLD"
+                reason = ("Stable at %.1f RPM; saved 900 RPM profile"):format(learned)
+            elseif rpm < minimumCalibrationRpm and rpmTrend < -settleDelta then
+                previous.failureCount = (previous.failureCount or 0) + 1
+                action = "VERIFY LOW BAND"
+                reason = ("Rotor falling below valid 900 RPM band: %d/%d"):format(
+                    previous.failureCount, failureSamples)
+                if previous.failureCount >= failureSamples then
+                    previous.phase = "FAILED"
+                    previous.calibrationError = "No sustainable 900 RPM operating band"
+                    state, action, reason = "CALIBRATION FAILED", "HOLD",
+                        previous.calibrationError
+                end
+            elseif updateProgress(0) then
+                previous.phase = "FAILED"
+                previous.calibrationError = ("Rotor stalled at %.1f RPM outside the 900 RPM band"):format(rpm)
+                state, action, reason = "CALIBRATION FAILED", "HOLD", previous.calibrationError
+                recommendedFlow = currentFlow
+            else
+                previous.escapeCount = 0
+                previous.failureCount = 0
+                action = "OBSERVE 900 BAND"
+                reason = "Generator loaded at full steam; watching RPM trend"
+            end
+        elseif not profile and previous.phase == "TEST_HIGH" then
+            state = "CALIBRATION TEST 1800"
+            recommendedInductor = true
+            local requiredFlow = currentFlow
+            local steamOk, actualFlow = fullSteam(requiredFlow)
+            previous.lowSteamCount = not steamOk and
+                ((previous.lowSteamCount or 0) + 1) or 0
+            if turbine.inductorEngaged == false then
+                action = "ENGAGE INDUCTOR"
+                reason = "1800 RPM test requires generator load"
+                previous.settleCount, previous.settleSum = 0, 0
+            elseif previous.lowSteamCount >= spoolFailureSamples then
+                previous.phase = "FAILED"
+                previous.calibrationError = ("Steam supply lost during 1800 RPM test: requested %.0f, received %.0f mB/t"):format(
+                    requiredFlow, actualFlow or 0)
+                state, action, reason = "CALIBRATION FAILED", "HOLD", previous.calibrationError
+            elseif countStable(highBand) then
+                local learned = learnBand(highBand, currentFlow)
+                state, action = "CALIBRATED", "HOLD"
+                reason = ("Stable at %.1f RPM; saved 1800 RPM at %.0f mB/t"):format(
+                    learned, currentFlow)
+            elseif rpm > highBand + deadband and rpmTrend > 0 then
+                action = "DECREASE FLOW"
+                reason = "Rotor still climbing above 1800 RPM; trim steam"
+                recommendedFlow = currentFlow - maxStep
+                previous.settleCount, previous.settleSum = 0, 0
+            elseif rpm < highBand - deadband and rpmTrend <= settleDelta then
+                previous.escapeCount = (previous.escapeCount or 0) + 1
+                action = "VERIFY FALLBACK"
+                reason = ("1800 RPM band losing speed: %d/%d"):format(
+                    previous.escapeCount, escapeSamples)
+                recommendedFlow = flowMaximum
+                if previous.escapeCount >= escapeSamples then
+                    beginPhase("FALLBACK_LOW")
+                    state = "CALIBRATION FALLBACK 900"
+                    action = "MAXIMIZE FLOW"
+                    reason = "1800 RPM unsustainable; keep full steam and test 900 RPM"
+                end
+            elseif updateProgress(0) then
+                previous.phase = "FAILED"
+                previous.calibrationError = ("Rotor stalled at %.1f RPM outside the 1800 RPM band"):format(rpm)
+                state, action, reason = "CALIBRATION FAILED", "HOLD", previous.calibrationError
+            else
+                previous.escapeCount = 0
+                action = "OBSERVE 1800 BAND"
+                reason = "Generator loaded; watching RPM trend"
+            end
+        elseif not profile and previous.phase == "FALLBACK_LOW" then
+            state = "CALIBRATION FALLBACK 900"
+            recommendedInductor = true
+            local steamOk, actualFlow = fullSteam(currentFlow)
+            previous.lowSteamCount = not steamOk and
+                ((previous.lowSteamCount or 0) + 1) or 0
+            if turbine.inductorEngaged == false then
+                action = "ENGAGE INDUCTOR"
+                reason = "Fallback test keeps generator load engaged"
+            elseif previous.lowSteamCount >= spoolFailureSamples then
+                previous.phase = "FAILED"
+                previous.calibrationError = ("Steam supply lost during 900 RPM fallback: requested %.0f, received %.0f mB/t"):format(
+                    flowMaximum, actualFlow or 0)
+                state, action, reason = "CALIBRATION FAILED", "HOLD", previous.calibrationError
+            elseif countStableRange(minimumCalibrationRpm, lowBand + deadband) then
+                local learned = learnBand(lowBand, currentFlow)
+                state, action = "CALIBRATED", "HOLD"
+                reason = ("1800 RPM failed; stable at %.1f RPM, saved 900 RPM profile"):format(
+                    learned)
+            elseif rpm < minimumCalibrationRpm and rpmTrend < -settleDelta and
+                   currentFlow >= flowMaximum then
+                previous.failureCount = (previous.failureCount or 0) + 1
+                action = "VERIFY FAILURE"
+                reason = ("Rotor falling below both operating bands: %d/%d"):format(
+                    previous.failureCount, failureSamples)
+                if previous.failureCount >= failureSamples then
+                    previous.phase = "FAILED"
+                    previous.calibrationError = "No sustainable 900 or 1800 RPM operating band"
+                    state, action, reason = "CALIBRATION FAILED", "HOLD",
+                        previous.calibrationError
+                end
+            elseif rpm >= highBand - deadband and rpmTrend > settleDelta then
+                beginPhase("TEST_HIGH")
+                state = "CALIBRATION TEST 1800"
+                action = "OBSERVE 1800 BAND"
+                reason = "Rotor recovered toward the 1800 RPM band"
+            elseif rpm > lowBand + deadband and rpmTrend < -settleDelta then
+                if previous.fallbackTuning then
+                    recommendedFlow = currentFlow
+                    action = "WAIT FOR 900 BAND"
+                    reason = "Hold the tuned flow while rotor falls toward 900 RPM"
+                else
+                    recommendedFlow = flowMaximum
+                    action = currentFlow < flowMaximum and "MAXIMIZE FLOW" or
+                        "WAIT FOR 900 BAND"
+                    reason = "Rotor is naturally falling; maintain full steam toward 900 RPM"
+                end
+                updateProgress(-1)
+            elseif rpm > lowBand + deadband then
+                previous.fallbackTuning = true
+                recommendedFlow = currentFlow - maxStep
+                action = "DECREASE FLOW"
+                reason = "Rotor settled above 900 RPM; trim steam toward low band"
+                updateProgress(0)
+            elseif rpm < minimumCalibrationRpm and currentFlow < flowMaximum then
+                recommendedFlow = flowMaximum
+                action = "MAXIMIZE FLOW"
+                reason = "Restore full steam before rejecting the 900 RPM band"
+            elseif updateProgress(0) then
+                previous.phase = "FAILED"
+                previous.calibrationError = ("Rotor stalled at %.1f RPM outside either operating band"):format(rpm)
+                state, action, reason = "CALIBRATION FAILED", "HOLD", previous.calibrationError
+            else
+                previous.failureCount = 0
+                action = "OBSERVE 900 BAND"
+                reason = "Watching the fallback RPM trend"
+            end
+        else
+            recommendedInductor = true
+            if turbine.inductorEngaged == false then
+                state, action = "RESTORING LOAD", "ENGAGE INDUCTOR"
+                reason = "Calibrated operation keeps the inductor engaged"
+            else
+                local rpmError = target - rpm
+                if math.abs(rpmError) <= deadband then
+                    if math.abs(rpmTrend) > deadband / 5 then
+                        state = "SETTLING"
+                        reason = rpmTrend > 0 and "Inside target band and still accelerating" or
+                            "Inside target band and still decelerating"
+                    end
+                else
+                    local scale = clamp(math.abs(rpmError) / (deadband * 4), 0.25, 1)
+                    local step = math.max(1, round(maxStep * scale))
+                    if rpmError > 0 then
+                        state = rpmTrend > 1 and "ACCELERATING" or "BELOW TARGET"
+                        action = "INCREASE FLOW"
+                        reason = "Rotor is below the learned target band"
+                        recommendedFlow = currentFlow + step
+                    else
+                        state = rpmTrend < -1 and "DECELERATING" or "ABOVE TARGET"
+                        action = "DECREASE FLOW"
+                        reason = "Rotor is above the learned target band"
+                        recommendedFlow = currentFlow - step
+                    end
+                end
+            end
+        end
+
+        recommendedFlow = round(clamp(recommendedFlow, 0, flowMaximum))
+        result = {
+            mode = "automatic",
+            state = state,
+            action = action,
+            reason = reason,
+            trusted = true,
+            calibrationPhase = previous.phase,
+            calibrated = profile ~= nil,
+            learnedRpm = profile and tonumber(profile.learnedRpm) or nil,
+            learnedFlow = profile and tonumber(profile.flowLimit) or nil,
+            targetRpm = target,
+            rpmDeadband = deadband,
+            overspeedRpm = overspeedRpm,
+            overspeedCount = overspeedCount,
+            overspeedSamples = overspeedSamples,
+            rpmError = target - rpm,
+            rpmTrend = rpmTrend,
+            currentFlow = currentFlow,
+            actualFlow = tonumber(turbine.flowRate),
+            recommendedFlow = recommendedFlow,
+            flowChange = recommendedFlow - currentFlow,
+            currentInductor = turbine.inductorEngaged,
+            recommendedInductor = recommendedInductor,
+            inductorChange = recommendedInductor ~= turbine.inductorEngaged,
+            calibrationSpoolRpm = previous.phase == "SPOOL_LOW" and lowBand or highBand,
+            calibrationSettleCount = previous.settleCount or 0,
+            calibrationSettleSamples = settleSamples,
+        }
+        if action ~= "HOLD" and action ~= "WAIT FOR SPEED" and
+           action ~= "WAIT FOR STEAM SOURCE" and
+           action ~= "WAIT TO SETTLE" and action ~= "MEASURE SETTLE" then
+            previous.actionSamples = previous.action == action and
+                ((previous.actionSamples or 0) + 1) or 1
+            previous.action = action
+        else
+            previous.actionSamples = 0
+            previous.action = nil
+        end
+        result.actionSamples = previous.actionSamples
+        previous.overspeedCount = overspeedCount
+    end
+
+    if result.state ~= "VERIFYING OVERSPEED" and result.state ~= "OVERSPEED" then
+        previous.overspeedCount = 0
+    end
+    if result.action == "HOLD" then
+        previous.actionSamples = 0
+        previous.action = nil
+    end
+    previous.rpm = tonumber(turbine.rotorSpeed)
+    memory.turbines[name] = previous
+    result.targetRpm = result.targetRpm or target
+    result.rpmDeadband = result.rpmDeadband or deadband
+    result.overspeedRpm = result.overspeedRpm or overspeedRpm
+    result.currentFlow = result.currentFlow or tonumber(turbine.flowRateMax)
+    result.actualFlow = result.actualFlow or tonumber(turbine.flowRate)
+    result.recommendedFlow = result.recommendedFlow or result.currentFlow
+    result.flowChange = result.flowChange or 0
+    if result.currentActive == nil then result.currentActive = turbine.active end
+    if result.recommendedActive == nil then result.recommendedActive = turbine.active end
+    result.activeChange = result.recommendedActive ~= nil and
+        result.currentActive ~= nil and result.recommendedActive ~= result.currentActive
+    if result.currentInductor == nil then result.currentInductor = turbine.inductorEngaged end
+    if result.recommendedInductor == nil then result.recommendedInductor = turbine.inductorEngaged end
+    result.inductorChange = result.recommendedInductor ~= nil and
+        result.currentInductor ~= nil and result.recommendedInductor ~= result.currentInductor
+    return result
+end
+
+function governor.apply(memory, turbine, control, context, writers)
+    control = control or {}
+    context = context or {}
+    local plan = turbine and turbine.governor
+    if not plan then return nil end
+
+    local name = tostring(turbine.name or "unknown")
+    local previous = memory.turbines[name] or {}
+    local now = tonumber(context.now) or 0
+    local interval = math.max(1, tonumber(control.adjustmentInterval) or 2)
+    local commandSamples = math.max(1, math.floor(tonumber(control.commandSamples) or 2))
+    local current = tonumber(plan.currentFlow)
+    local proposed = tonumber(plan.recommendedFlow)
+    local needsActive = plan.activeChange == true
+    local needsFlow = current ~= nil and proposed ~= nil and current ~= proposed
+    local needsInductor = plan.inductorChange == true
+    local emergency = plan.action == "CUT FLOW" or
+        (plan.state == "CALIBRATION FAILED" and needsInductor and
+            plan.recommendedInductor == true)
+
+    plan.mode = control.actuatorsEnabled == true and "automatic" or "observe"
+    if control.actuatorsEnabled ~= true then
+        plan.actuatorState = "DISABLED"
+    elseif context.maintenance then
+        plan.actuatorState = "PAUSED"
+    elseif plan.trusted == false then
+        plan.actuatorState = "UNTRUSTED"
+    elseif not needsActive and not needsFlow and not needsInductor then
+        plan.actuatorState = "HOLD"
+    elseif plan.action ~= "START TURBINE" and not emergency and
+           (tonumber(plan.actionSamples) or 0) < commandSamples then
+        plan.actuatorState = "VERIFYING"
+    elseif type(writers) ~= "table" or
+           (needsActive and type(writers.setActive) ~= "function") or
+           (needsFlow and type(writers.setFlowLimit) ~= "function") or
+           (needsInductor and type(writers.setInductor) ~= "function") then
+        plan.actuatorState = "FAULT"
+        plan.actuatorError = "Required turbine write adapter is unavailable"
+    elseif not emergency and previous.lastAttemptAt and
+           now - previous.lastAttemptAt < interval then
+        plan.actuatorState = previous.lastError and "FAULT" or "WAITING"
+        plan.actuatorError = previous.lastError
+        plan.nextAdjustmentIn = interval - (now - previous.lastAttemptAt)
+    else
+        previous.lastAttemptAt = now
+        local ok, appliedActive, appliedFlow, appliedInductor, reason =
+            true, nil, nil, nil, nil
+        if needsActive then
+            ok, appliedActive, reason = writers.setActive(
+                turbine, plan.recommendedActive)
+        end
+        if ok and needsInductor then
+            ok, appliedInductor, reason = writers.setInductor(turbine, plan.recommendedInductor)
+        end
+        if ok and needsFlow then
+            ok, appliedFlow, reason = writers.setFlowLimit(turbine, proposed)
+        end
+        if ok then
+            previous.lastAppliedAt = now
+            if needsActive then
+                previous.lastAppliedActive = appliedActive == true
+                previous.startRequested = false
+                plan.appliedActive = previous.lastAppliedActive
+            end
+            if needsFlow then
+                previous.lastAppliedFlow = tonumber(appliedFlow) or proposed
+                plan.appliedFlow = previous.lastAppliedFlow
+            end
+            if needsInductor then
+                previous.lastAppliedInductor = appliedInductor == true
+                plan.appliedInductor = previous.lastAppliedInductor
+            end
+            previous.lastError = nil
+            plan.actuatorState = "APPLIED"
+        else
+            previous.lastError = tostring(reason or "Turbine rejected the actuator command")
+            plan.actuatorState = "FAULT"
+            plan.actuatorError = previous.lastError
+            if needsActive then plan.reportedActive = appliedActive end
+            if needsFlow then plan.reportedFlow = tonumber(appliedFlow) end
+            if needsInductor then plan.reportedInductor = appliedInductor end
+        end
+    end
+
+    plan.lastAppliedAt = previous.lastAppliedAt
+    plan.lastAppliedActive = previous.lastAppliedActive
+    plan.lastAppliedFlow = previous.lastAppliedFlow
+    plan.lastAppliedInductor = previous.lastAppliedInductor
+    memory.turbines[name] = previous
+    return plan
+end
+
+function governor.applyAll(memory, turbines, control, context, writers)
+    for _, turbine in ipairs(turbines or {}) do
+        governor.apply(memory, turbine, control, context, writers)
+    end
+    return turbines
+end
+
+function governor.evaluateAll(memory, turbines, control, context)
+    local present = {}
+    for _, turbine in ipairs(turbines or {}) do
+        present[tostring(turbine.name)] = true
+        turbine.governor = governor.evaluate(memory, turbine, control, context)
+    end
+    for name in pairs(memory.turbines or {}) do
+        if not present[name] then memory.turbines[name] = nil end
+    end
+    return turbines
+end
+
+return governor
+]=],
+
     ["terminal/main.lua"] = [=[
 local terminal = {}
 
@@ -2292,6 +5082,7 @@ function terminal.run(config)
     local display = dofile("/helios/core/display.lua")
     display.start(config)
     local ui = dofile("/helios/core/ui.lua")
+    ui.setVersion(config.version)
     local configStore = dofile("/helios/core/config.lua")
     local network = dofile("/helios/core/network.lua")
     local powerFormat = dofile("/helios/core/power_format.lua")
@@ -2425,19 +5216,49 @@ function terminal.run(config)
         return ("%.1f%s"):format(value, suffix or "")
     end
 
+    local function formatRodLayout(reactor, exposure)
+        local minimum = tonumber(reactor.controlRodMinimum)
+        local maximum = tonumber(reactor.controlRodMaximum)
+        local range
+        if minimum == nil or maximum == nil then
+            range = "N/A"
+        elseif math.abs(maximum - minimum) < 0.05 then
+            range = ("%.0f%%"):format(minimum)
+        else
+            range = ("%.0f-%.0f%%"):format(minimum, maximum)
+        end
+        return ("%s / %s eq"):format(range,
+            exposure ~= nil and ("%.2f"):format(exposure) or "N/A")
+    end
+
     local function renderReactors(state)
         renderList("REACTORS", state.reactors, state, function(item)
             ui.status("Mode", string.upper(item.mode or "unknown"))
             if item.error then ui.status("Telemetry", item.error, colors.red) return end
             ui.status("State", item.active == true and "ACTIVE" or item.active == false and "OFFLINE" or "UNKNOWN")
-            ui.status("Fuel", formatValue(item.fuelPercent, "%"))
-            ui.status("Fuel use", formatValue(item.fuelUse, " mB/t"))
-            ui.status("Fuel temp", formatValue(item.fuelTemperature, " C"))
-            ui.status("Casing temp", formatValue(item.casingTemperature, " C"))
+            ui.status("Fuel / use", ("%s / %s"):format(
+                formatValue(item.fuelPercent, "%"),
+                formatValue(item.fuelUse, " mB/t")))
+            ui.status("Temps fuel/case", ("%s / %s"):format(
+                formatValue(item.fuelTemperature, " C"),
+                formatValue(item.casingTemperature, " C")))
             if item.mode == "steam" then
-                ui.status("Steam output", formatValue(item.steamProduction, " mB/t"), colors.cyan)
-                ui.status("Coolant", formatValue(item.coolantPercent, "%"))
-                ui.status("Hot fluid", formatValue(item.hotFluidPercent, "%"))
+                local plan = item.governor or {}
+                ui.status("Steam avg/target", ("%s / %s"):format(
+                    formatValue(plan.averageSteamProduction or
+                        item.steamProduction, ""),
+                    formatValue(plan.targetSteam, " mB/t")), colors.cyan)
+                ui.status("Coolant / hot", ("%s / %s"):format(
+                    formatValue(item.coolantPercent, "%"),
+                    formatValue(item.hotFluidPercent, "%")))
+                ui.status("Rods range / exposed",
+                    formatRodLayout(item, plan.currentRodExposure))
+                ui.status("Governor", (plan.state or "WAITING") .. " / " ..
+                    (plan.actuatorState or "WAITING"),
+                    (plan.trusted == false or plan.actuatorState == "FAULT") and
+                        colors.red or
+                    ((plan.state == "STEAM DEFICIT" or
+                      plan.state == "STEAM SURPLUS") and colors.orange or colors.lime))
             else
                 ui.status("Power output", powerFormat.power(item.energyProduction, state.power, true), colors.cyan)
                 ui.status("Energy buffer", formatValue(item.energyPercent, "%"))
@@ -2450,10 +5271,19 @@ function terminal.run(config)
             if item.error then ui.status("Telemetry", item.error, colors.red) return end
             ui.status("State", item.active == true and "ACTIVE" or item.active == false and "OFFLINE" or "UNKNOWN")
             ui.status("Rotor speed", formatValue(item.rotorSpeed, " RPM"), colors.cyan)
+            local plan = item.governor or {}
+            ui.status("Governor", (plan.state or "WAITING") .. " / " ..
+                (plan.actuatorState or "WAITING"),
+                (plan.trusted == false or plan.actuatorState == "FAULT") and colors.red or colors.lime)
             ui.status("Power output", powerFormat.power(item.energyProduction, state.power, true), colors.cyan)
             ui.status("Energy buffer", formatValue(item.energyPercent, "%"))
-            ui.status("Fluid flow", formatValue(item.flowRate, " mB/t"))
-            ui.status("Max flow", formatValue(item.flowRateMax, " mB/t"))
+            if plan.currentFlow ~= nil and plan.recommendedFlow ~= nil then
+                ui.status("Flow actual/set/plan", ("%s / %.0f -> %.0f"):format(
+                    plan.actualFlow and ("%.0f"):format(plan.actualFlow) or "N/A",
+                    plan.currentFlow, plan.recommendedFlow), colors.cyan)
+            else
+                ui.status("Flow actual/set/plan", "N/A / HOLD", colors.gray)
+            end
             ui.status("Inductor", item.inductorEngaged == true and "ENGAGED" or item.inductorEngaged == false and "DISENGAGED" or "N/A")
         end)
     end
@@ -2589,7 +5419,6 @@ end
 
 return terminal
 ]=],
-
 }
 
 local function installStartup()
@@ -2661,13 +5490,96 @@ local function buildConfig(role, display, existing)
         },
         control = {
             mode = "automatic",
-            actuatorsEnabled = false,
+            actuatorsEnabled = role == "mainframe",
             targetRpm = tonumber(control.targetRpm) or 1800,
+            rpmDeadband = math.max(1, tonumber(control.rpmDeadband) or 25),
+            overspeedRpm = math.max((tonumber(control.targetRpm) or 1800) +
+                math.max(1, tonumber(control.rpmDeadband) or 25),
+                tonumber(control.overspeedRpm) or 2000),
+            overspeedSamples = math.max(1,
+                math.floor(tonumber(control.overspeedSamples) or 3)),
             storageLow = tonumber(control.storageLow) or 25,
             storageHigh = tonumber(control.storageHigh) or 85,
             maxRodStep = tonumber(control.maxRodStep) or 5,
+            reactorAdjustmentInterval = math.max(2,
+                tonumber(control.reactorAdjustmentInterval) or 5),
+            reactorCommandSamples = math.max(2,
+                math.floor(tonumber(control.reactorCommandSamples) or 3)),
+            reactorSteamDeadband = math.max(0.005, math.min(0.25,
+                tonumber(control.reactorSteamDeadband) or 0.01)),
+            reactorSteamDeadbandMin = math.max(1,
+                tonumber(control.reactorSteamDeadbandMin) or 25),
+            reactorSteamReserveMargin = 0.15,
+            reactorSteamPrimeMargin = math.max(0.15, math.min(2,
+                tonumber(control.reactorSteamPrimeMargin) or 0.90)),
+            reactorSteamAverageSamples = math.max(3,
+                math.floor(tonumber(control.reactorSteamAverageSamples) or 10)),
+            reactorHotFluidHigh = math.max(50, math.min(99,
+                tonumber(control.reactorHotFluidHigh) or 85)),
+            calibrationBufferReady = math.max(50, math.min(
+                math.max(50, math.min(99,
+                    tonumber(control.reactorHotFluidHigh) or 85)),
+                tonumber(control.calibrationBufferReady) or 85)),
+            reactorHotFluidLow = math.max(1, math.min(84,
+                tonumber(control.reactorHotFluidLow) or 15)),
+            maxRodEquivalentStep = math.max(0.01, math.min(1,
+                tonumber(control.maxRodEquivalentStep) or 0.25)),
+            reactorLearningSamples = math.max(3,
+                math.floor(tonumber(control.reactorLearningSamples) or 8)),
+            reactorLearningSteamDelta = math.max(1,
+                tonumber(control.reactorLearningSteamDelta) or 10),
+            reactorLearningTemperatureDelta = math.max(0.01,
+                tonumber(control.reactorLearningTemperatureDelta) or 0.1),
+            reactorLearningBufferDelta = math.max(0.01,
+                tonumber(control.reactorLearningBufferDelta) or 0.1),
+            reactorMinimumResponseTime = math.max(5,
+                tonumber(control.reactorMinimumResponseTime) or 15),
+            reactorCooldownWindow = math.max(5,
+                tonumber(control.reactorCooldownWindow) or 10),
+            reactorCooldownStallTimeout = math.max(60,
+                tonumber(control.reactorCooldownStallTimeout) or 180),
+            reactorCooldownSteamDelta = math.max(0.1,
+                tonumber(control.reactorCooldownSteamDelta) or 2),
+            reactorCooldownTemperatureDelta = math.max(0.01,
+                tonumber(control.reactorCooldownTemperatureDelta) or 0.05),
+            reactorCalibrationMaxTemperature = math.max(50,
+                tonumber(control.reactorCalibrationMaxTemperature) or 150),
+            reactorProfiles = type(control.reactorProfiles) == "table" and
+                control.reactorProfiles or {},
             maxFlowStep = tonumber(control.maxFlowStep) or 100,
             adjustmentInterval = tonumber(control.adjustmentInterval) or 2,
+            commandSamples = math.max(1,
+                math.floor(tonumber(control.commandSamples) or 2)),
+            lowBandRpm = tonumber(control.lowBandRpm) or 900,
+            highBandRpm = tonumber(control.highBandRpm) or 1800,
+            calibrationLowEscapeRpm = math.max(
+                (tonumber(control.lowBandRpm) or 900) +
+                    math.max(1, tonumber(control.rpmDeadband) or 25),
+                tonumber(control.calibrationLowEscapeRpm) or
+                    ((tonumber(control.lowBandRpm) or 900) + 100)),
+            coldStartRpm = math.max(0, tonumber(control.coldStartRpm) or 100),
+            calibrationSettleDelta = math.max(0.1,
+                tonumber(control.calibrationSettleDelta) or 2),
+            calibrationSettleSamples = math.max(3,
+                math.floor(tonumber(control.calibrationSettleSamples) or 8)),
+            calibrationMinimumRpm = math.max(0,
+                tonumber(control.calibrationMinimumRpm) or 850),
+            calibrationSteamRatio = math.max(0.1, math.min(1,
+                tonumber(control.calibrationSteamRatio) or 0.98)),
+            calibrationSteamSamples = math.max(3,
+                math.floor(tonumber(control.calibrationSteamSamples) or 5)),
+            calibrationFailureSamples = math.max(3,
+                math.floor(tonumber(control.calibrationFailureSamples) or 10)),
+            calibrationSpoolFailureSamples = math.max(1,
+                math.floor(tonumber(control.calibrationSpoolFailureSamples) or 2)),
+            calibrationBandEscapeSamples = math.max(2,
+                math.floor(tonumber(control.calibrationBandEscapeSamples) or 3)),
+            calibrationStallTimeout = math.max(30,
+                tonumber(control.calibrationStallTimeout) or 180),
+            overspeedMargin = math.max(25,
+                tonumber(control.overspeedMargin) or 200),
+            turbineProfiles = type(control.turbineProfiles) == "table" and
+                control.turbineProfiles or {},
         },
         deviceAliases = aliases,
     }

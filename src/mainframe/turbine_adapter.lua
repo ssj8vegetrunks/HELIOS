@@ -22,6 +22,14 @@ local function percent(amount, maximum)
     return math.max(0, math.min(100, amount / maximum * 100))
 end
 
+local function availableMethods(name)
+    local methods = {}
+    for _, method in ipairs(peripheral.getMethods(name) or {}) do
+        methods[method] = true
+    end
+    return methods
+end
+
 function adapter.read(device)
     local name = device.name
     local turbine = { name = name, available = peripheral.isPresent(name) }
@@ -30,10 +38,7 @@ function adapter.read(device)
         return turbine
     end
 
-    local availableMethods = {}
-    for _, method in ipairs(peripheral.getMethods(name) or {}) do
-        availableMethods[method] = true
-    end
+    local availableMethods = availableMethods(name)
 
     turbine.connected = readAny(name, availableMethods, { "getConnected", "isConnected", "mbIsConnected", "mbIsAssembled", "connected" })
     turbine.active = readAny(name, availableMethods, { "getActive", "isActive", "active" })
@@ -43,10 +48,15 @@ function adapter.read(device)
     turbine.energyMax = number(readAny(name, availableMethods, { "getEnergyCapacity", "getMaxEnergyStored", "energyCapacity" }))
     turbine.flowRate = number(readAny(name, availableMethods, { "getFluidFlowRate", "getFluidFlowRateLastTick", "getInputFlowRate", "fluidFlowRate" }))
     turbine.flowRateMax = number(readAny(name, availableMethods, { "getFluidFlowRateMax", "getMaxFluidFlowRate", "getMaxIntakeRate", "fluidFlowRateMax" }))
+    turbine.flowRateLimit = number(readAny(name, availableMethods, { "getFluidFlowRateMaxMax", "getFluidFlowRateLimit", "getMaxPermittedFlow", "flowRateLimit" }))
     turbine.inputAmount = number(readAny(name, availableMethods, { "getInputAmount", "getInputFluidAmount", "inputAmount" }))
-    turbine.inputMax = number(readAny(name, availableMethods, { "getInputAmountMax", "getInputCapacity", "inputAmountMax" }))
+    turbine.inputMax = number(readAny(name, availableMethods, {
+        "getInputAmountMax", "getInputCapacity", "getFluidAmountMax", "inputAmountMax",
+    }))
     turbine.outputAmount = number(readAny(name, availableMethods, { "getOutputAmount", "getOutputFluidAmount", "outputAmount" }))
-    turbine.outputMax = number(readAny(name, availableMethods, { "getOutputAmountMax", "getOutputCapacity", "outputAmountMax" }))
+    turbine.outputMax = number(readAny(name, availableMethods, {
+        "getOutputAmountMax", "getOutputCapacity", "getFluidAmountMax", "outputAmountMax",
+    }))
     turbine.inductorEngaged = readAny(name, availableMethods, { "getInductorEngaged", "isInductorEngaged", "inductorEngaged" })
     turbine.ventMode = readAny(name, availableMethods, { "getVentMode", "ventMode" })
     turbine.bladeCount = number(readAny(name, availableMethods, { "getBladeCount", "getNumberOfBlades", "bladeCount" }))
@@ -64,6 +74,97 @@ function adapter.read(device)
         turbine.error = "No supported telemetry methods"
     end
     return turbine
+end
+
+function adapter.setFlowLimit(turbine, requested)
+    if type(turbine) ~= "table" or type(turbine.name) ~= "string" then
+        return false, nil, "Invalid turbine identity"
+    end
+    if not peripheral.isPresent(turbine.name) then
+        return false, nil, "Peripheral unavailable"
+    end
+
+    local methods = availableMethods(turbine.name)
+    if not methods.setFluidFlowRateMax or not methods.getFluidFlowRateMax then
+        return false, nil, "Verified flow-limit control is unavailable"
+    end
+
+    requested = tonumber(requested)
+    if not requested then return false, nil, "Invalid flow limit" end
+    local hardLimit = tonumber(turbine.flowRateLimit)
+    if hardLimit then requested = math.min(requested, hardLimit) end
+    requested = math.max(0, math.floor(requested + 0.5))
+
+    local ok, reason = pcall(peripheral.call, turbine.name, "setFluidFlowRateMax", requested)
+    if not ok then return false, nil, tostring(reason) end
+
+    local readOk, actual = pcall(peripheral.call, turbine.name, "getFluidFlowRateMax")
+    actual = tonumber(actual)
+    if not readOk or actual == nil then
+        return false, nil, "Flow-limit verification failed"
+    end
+    local verified = math.floor(actual + 0.5)
+    if verified ~= requested then
+        return false, verified, ("Requested %d mB/t; turbine reports %d mB/t"):format(
+            requested, verified)
+    end
+    return true, verified
+end
+
+function adapter.setActive(turbine, requested)
+    if type(turbine) ~= "table" or type(turbine.name) ~= "string" then
+        return false, nil, "Invalid turbine identity"
+    end
+    if not peripheral.isPresent(turbine.name) then
+        return false, nil, "Peripheral unavailable"
+    end
+
+    local methods = availableMethods(turbine.name)
+    if not methods.setActive or not methods.getActive then
+        return false, nil, "Verified turbine power control is unavailable"
+    end
+
+    requested = requested == true
+    local ok, reason = pcall(peripheral.call, turbine.name, "setActive", requested)
+    if not ok then return false, nil, tostring(reason) end
+
+    local readOk, actual = pcall(peripheral.call, turbine.name, "getActive")
+    if not readOk or type(actual) ~= "boolean" then
+        return false, nil, "Turbine power-state verification failed"
+    end
+    if actual ~= requested then
+        return false, actual, ("Requested turbine %s; turbine reports %s"):format(
+            requested and "active" or "inactive", actual and "active" or "inactive")
+    end
+    return true, actual
+end
+
+function adapter.setInductor(turbine, engaged)
+    if type(turbine) ~= "table" or type(turbine.name) ~= "string" then
+        return false, nil, "Invalid turbine identity"
+    end
+    if not peripheral.isPresent(turbine.name) then
+        return false, nil, "Peripheral unavailable"
+    end
+
+    local methods = availableMethods(turbine.name)
+    if not methods.setInductorEngaged or not methods.getInductorEngaged then
+        return false, nil, "Verified inductor control is unavailable"
+    end
+
+    engaged = engaged == true
+    local ok, reason = pcall(peripheral.call, turbine.name, "setInductorEngaged", engaged)
+    if not ok then return false, nil, tostring(reason) end
+
+    local readOk, actual = pcall(peripheral.call, turbine.name, "getInductorEngaged")
+    if not readOk or type(actual) ~= "boolean" then
+        return false, nil, "Inductor verification failed"
+    end
+    if actual ~= engaged then
+        return false, actual, ("Requested inductor %s; turbine reports %s"):format(
+            engaged and "engaged" or "disengaged", actual and "engaged" or "disengaged")
+    end
+    return true, actual
 end
 
 function adapter.readAll(devices)
@@ -99,6 +200,8 @@ function adapter.printReport(turbines, config, formatter)
             print("  Power: " .. formatter.power(turbine.energyProduction, config.power, true))
             print("  Buffer: " .. value(turbine.energyPercent, "%"))
             print("  Flow: " .. value(turbine.flowRate, " mB/t"))
+            print("  Flow setting: " .. value(turbine.flowRateMax, " mB/t"))
+            print("  Flow limit: " .. value(turbine.flowRateLimit, " mB/t"))
             print("  Inductor: " .. (turbine.inductorEngaged == true and "ENGAGED" or turbine.inductorEngaged == false and "DISENGAGED" or "N/A"))
         end
         print("")
