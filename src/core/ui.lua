@@ -1,5 +1,10 @@
 local ui = {}
 local idConflicts = {}
+local systemVersion
+
+function ui.setVersion(version)
+    systemVersion = version and tostring(version) or nil
+end
 
 function ui.setIdConflicts(conflicts)
     idConflicts = {}
@@ -48,6 +53,26 @@ function ui.prepare()
     term.setCursorPos(1, 1)
 end
 
+function ui.line(value, colour)
+    local width = select(1, term.getSize())
+    term.setTextColor(colour or colors.white)
+    print(string.sub(tostring(value or ""), 1, width))
+    term.setTextColor(colors.white)
+end
+
+function ui.block(value, colour, maxRows)
+    local width = select(1, term.getSize())
+    local remaining = tostring(value or "")
+    local rows = 0
+    maxRows = math.max(1, math.floor(tonumber(maxRows) or 1))
+    while #remaining > 0 and rows < maxRows do
+        ui.line(string.sub(remaining, 1, width), colour)
+        remaining = string.sub(remaining, width + 1)
+        rows = rows + 1
+    end
+    return rows
+end
+
 function ui.header(role, subtitle)
     ui.prepare()
     if #idConflicts > 0 then
@@ -59,7 +84,20 @@ function ui.header(role, subtitle)
         term.setBackgroundColor(colors.black)
     end
     term.setTextColor(colors.yellow)
-    print("HELIOS // " .. string.upper(role))
+    local width = select(1, term.getSize())
+    local heading = "HELIOS // " .. string.upper(role)
+    local version = systemVersion and ("v" .. systemVersion) or ""
+    local row = select(2, term.getCursorPos())
+    term.setCursorPos(1, row)
+    if #version > 0 and #version < width then
+        local headingWidth = math.max(0, width - #version - 1)
+        write(string.sub(heading, 1, headingWidth))
+        term.setCursorPos(width - #version + 1, row)
+        write(version)
+    else
+        write(string.sub(heading, 1, width))
+    end
+    term.setCursorPos(1, row + 1)
     term.setTextColor(colors.lightGray)
     print(subtitle)
     term.setTextColor(colors.gray)
@@ -68,10 +106,13 @@ function ui.header(role, subtitle)
 end
 
 function ui.status(label, value, colour)
+    local width = select(1, term.getSize())
+    local prefix = tostring(label) .. ": "
     term.setTextColor(colors.lightGray)
-    write(label .. ": ")
+    write(string.sub(prefix, 1, width))
     term.setTextColor(colour or colors.white)
-    print(tostring(value))
+    local x = select(1, term.getCursorPos())
+    print(string.sub(tostring(value), 1, math.max(0, width - x + 1)))
     term.setTextColor(colors.white)
 end
 

@@ -31,13 +31,102 @@ function config.load()
     loaded.ui.monitorTextScale = tonumber(loaded.ui.monitorTextScale) or 0.5
     loaded.control = loaded.control or {}
     loaded.control.mode = "automatic"
-    loaded.control.actuatorsEnabled = false
+    loaded.control.actuatorsEnabled = loaded.role == "mainframe"
     loaded.control.targetRpm = tonumber(loaded.control.targetRpm) or 1800
+    loaded.control.rpmDeadband = math.max(1, tonumber(loaded.control.rpmDeadband) or 25)
+    loaded.control.overspeedRpm = math.max(loaded.control.targetRpm + loaded.control.rpmDeadband,
+        tonumber(loaded.control.overspeedRpm) or 2000)
+    loaded.control.overspeedSamples = math.max(1,
+        math.floor(tonumber(loaded.control.overspeedSamples) or 3))
     loaded.control.storageLow = tonumber(loaded.control.storageLow) or 25
     loaded.control.storageHigh = tonumber(loaded.control.storageHigh) or 85
-    loaded.control.maxRodStep = tonumber(loaded.control.maxRodStep) or 5
+    loaded.control.maxRodStep = math.max(1, math.min(10,
+        tonumber(loaded.control.maxRodStep) or 5))
+    loaded.control.reactorAdjustmentInterval = math.max(2,
+        tonumber(loaded.control.reactorAdjustmentInterval) or 5)
+    loaded.control.reactorCommandSamples = math.max(2,
+        math.floor(tonumber(loaded.control.reactorCommandSamples) or 3))
+    loaded.control.reactorSteamDeadband = math.max(0.005, math.min(0.25,
+        tonumber(loaded.control.reactorSteamDeadband) or 0.01))
+    loaded.control.reactorSteamDeadbandMin = math.max(1,
+        tonumber(loaded.control.reactorSteamDeadbandMin) or 25)
+    loaded.control.reactorSteamReserveMargin = math.max(0, math.min(0.25,
+        tonumber(loaded.control.reactorSteamReserveMargin) or 0.15))
+    loaded.control.reactorSteamPrimeMargin = math.max(
+        loaded.control.reactorSteamReserveMargin, math.min(2,
+            tonumber(loaded.control.reactorSteamPrimeMargin) or 0.90))
+    loaded.control.reactorSteamAverageSamples = math.max(3,
+        math.floor(tonumber(loaded.control.reactorSteamAverageSamples) or 10))
+    loaded.control.reactorHotFluidHigh = math.max(50, math.min(99,
+        tonumber(loaded.control.reactorHotFluidHigh) or 85))
+    loaded.control.calibrationBufferReady = math.max(50, math.min(
+        loaded.control.reactorHotFluidHigh,
+        tonumber(loaded.control.calibrationBufferReady) or 85))
+    loaded.control.reactorHotFluidLow = math.max(1, math.min(
+        loaded.control.reactorHotFluidHigh - 1,
+        tonumber(loaded.control.reactorHotFluidLow) or 15))
+    loaded.control.maxRodEquivalentStep = math.max(0.01, math.min(1,
+        tonumber(loaded.control.maxRodEquivalentStep) or 0.25))
+    loaded.control.reactorLearningSamples = math.max(3,
+        math.floor(tonumber(loaded.control.reactorLearningSamples) or 8))
+    loaded.control.reactorLearningSteamDelta = math.max(1,
+        tonumber(loaded.control.reactorLearningSteamDelta) or 10)
+    loaded.control.reactorLearningSteamTolerance = math.max(0.005, math.min(0.25,
+        tonumber(loaded.control.reactorLearningSteamTolerance) or 0.05))
+    loaded.control.reactorLearningTemperatureDelta = math.max(0.01,
+        tonumber(loaded.control.reactorLearningTemperatureDelta) or 0.1)
+    loaded.control.reactorLearningBufferDelta = math.max(0.01,
+        tonumber(loaded.control.reactorLearningBufferDelta) or 0.1)
+    loaded.control.reactorMinimumResponseTime = math.max(5,
+        tonumber(loaded.control.reactorMinimumResponseTime) or 15)
+    loaded.control.reactorSettleTimeout = math.max(
+        loaded.control.reactorMinimumResponseTime + 5,
+        tonumber(loaded.control.reactorSettleTimeout) or 90)
+    loaded.control.reactorProfiles = loaded.control.reactorProfiles or {}
+    loaded.control.reactorCooldownWindow = math.max(5,
+        tonumber(loaded.control.reactorCooldownWindow) or 10)
+    loaded.control.reactorCooldownStallTimeout = math.max(60,
+        tonumber(loaded.control.reactorCooldownStallTimeout) or 180)
+    loaded.control.reactorCooldownSteamDelta = math.max(0.1,
+        tonumber(loaded.control.reactorCooldownSteamDelta) or 2)
+    loaded.control.reactorCooldownTemperatureDelta = math.max(0.01,
+        tonumber(loaded.control.reactorCooldownTemperatureDelta) or 0.05)
+    loaded.control.reactorCalibrationMaxTemperature = math.max(50,
+        tonumber(loaded.control.reactorCalibrationMaxTemperature) or 150)
     loaded.control.maxFlowStep = tonumber(loaded.control.maxFlowStep) or 100
     loaded.control.adjustmentInterval = tonumber(loaded.control.adjustmentInterval) or 2
+    loaded.control.commandSamples = math.max(1,
+        math.floor(tonumber(loaded.control.commandSamples) or 2))
+    loaded.control.lowBandRpm = tonumber(loaded.control.lowBandRpm) or 900
+    loaded.control.highBandRpm = tonumber(loaded.control.highBandRpm) or 1800
+    loaded.control.calibrationLowEscapeRpm = math.max(
+        loaded.control.lowBandRpm + loaded.control.rpmDeadband,
+        tonumber(loaded.control.calibrationLowEscapeRpm) or
+            (loaded.control.lowBandRpm + 100))
+    loaded.control.coldStartRpm = math.max(0,
+        tonumber(loaded.control.coldStartRpm) or 100)
+    loaded.control.calibrationSettleDelta = math.max(0.1,
+        tonumber(loaded.control.calibrationSettleDelta) or 2)
+    loaded.control.calibrationSettleSamples = math.max(3,
+        math.floor(tonumber(loaded.control.calibrationSettleSamples) or 8))
+    loaded.control.calibrationMinimumRpm = math.max(0,
+        tonumber(loaded.control.calibrationMinimumRpm) or
+            (loaded.control.lowBandRpm - loaded.control.rpmDeadband * 2))
+    loaded.control.calibrationSteamRatio = math.max(0.1, math.min(1,
+        tonumber(loaded.control.calibrationSteamRatio) or 0.98))
+    loaded.control.calibrationSteamSamples = math.max(3,
+        math.floor(tonumber(loaded.control.calibrationSteamSamples) or 5))
+    loaded.control.calibrationFailureSamples = math.max(3,
+        math.floor(tonumber(loaded.control.calibrationFailureSamples) or 10))
+    loaded.control.calibrationSpoolFailureSamples = math.max(1,
+        math.floor(tonumber(loaded.control.calibrationSpoolFailureSamples) or 2))
+    loaded.control.calibrationBandEscapeSamples = math.max(2,
+        math.floor(tonumber(loaded.control.calibrationBandEscapeSamples) or 3))
+    loaded.control.calibrationStallTimeout = math.max(30,
+        tonumber(loaded.control.calibrationStallTimeout) or 180)
+    loaded.control.overspeedMargin = math.max(loaded.control.rpmDeadband,
+        tonumber(loaded.control.overspeedMargin) or 200)
+    loaded.control.turbineProfiles = loaded.control.turbineProfiles or {}
     loaded.power = loaded.power or {}
     local validUnits = { FE = true, RF = true, J = true, EU = true }
     if not validUnits[loaded.power.unit] then loaded.power.unit = "FE" end

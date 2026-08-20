@@ -4,10 +4,13 @@ function mainframe.run(config)
     local display = dofile("/helios/core/display.lua")
     display.start(config)
     local ui = dofile("/helios/core/ui.lua")
+    ui.setVersion(config.version)
     local configStore = dofile("/helios/core/config.lua")
     local registry = dofile("/helios/mainframe/device_registry.lua")
     local reactorAdapter = dofile("/helios/mainframe/reactor_adapter.lua")
+    local reactorGovernor = dofile("/helios/mainframe/reactor_governor.lua")
     local turbineAdapter = dofile("/helios/mainframe/turbine_adapter.lua")
+    local turbineGovernor = dofile("/helios/mainframe/turbine_governor.lua")
     local storageAdapter = dofile("/helios/mainframe/storage_adapter.lua")
     local powerFormat = dofile("/helios/core/power_format.lua")
     local network = dofile("/helios/core/network.lua")
@@ -33,6 +36,8 @@ function mainframe.run(config)
     local identityClaims = {}
     local idConflicts = {}
     local dashboardButtons = {}
+    local governorMemory = turbineGovernor.new()
+    local reactorGovernorMemory = reactorGovernor.new()
 
     local timeoutChoices = { 300, 900, 1800, 3600 }
 
@@ -132,10 +137,26 @@ function mainframe.run(config)
                 candidates[#candidates + 1] = { level = level, key = key, message = message }
             end
         end
+        local function addConfirmed(level, key, message)
+            activeKeys[key] = true
+            conditionSamples[key] = config.alarms.confirmSamples
+            candidates[#candidates + 1] = { level = level, key = key, message = message }
+        end
 
         for _, reactor in ipairs(reactors) do
             if reactor.error and not maintenance then
                 add(3, reactor.name .. ":telemetry", alarmName(reactor.name) .. " TELEMETRY LOST")
+            elseif reactor.governor and reactor.governor.actuatorState == "FAULT" then
+                add(2, reactor.name .. ":control", alarmName(reactor.name) .. " CONTROL FAULT")
+            elseif reactor.governor and reactor.governor.state == "STEAM DEFICIT" then
+                add(2, reactor.name .. ":steam-deficit",
+                    alarmName(reactor.name) .. " CANNOT MEET STEAM DEMAND")
+            elseif reactor.governor and reactor.governor.state == "STEAM SURPLUS" then
+                add(2, reactor.name .. ":steam-surplus",
+                    alarmName(reactor.name) .. " STEAM OUTPUT CANNOT REDUCE")
+            elseif reactor.governor and reactor.governor.state == "RODS NOT UNIFORM" then
+                add(2, reactor.name .. ":rod-levels",
+                    alarmName(reactor.name) .. " CONTROL RODS NOT UNIFORM")
             elseif reactor.fuelPercent then
                 if reactor.fuelPercent <= config.alarms.criticalFuel then
                     add(3, reactor.name .. ":fuel-critical", alarmName(reactor.name) .. " FUEL CRITICAL")
@@ -147,6 +168,14 @@ function mainframe.run(config)
         for _, turbine in ipairs(turbines) do
             if turbine.error and not maintenance then
                 add(3, turbine.name .. ":telemetry", alarmName(turbine.name) .. " TELEMETRY LOST")
+            elseif turbine.governor and turbine.governor.state == "OVERSPEED" then
+                addConfirmed(3, turbine.name .. ":overspeed", alarmName(turbine.name) .. " OVERSPEED")
+            elseif turbine.governor and turbine.governor.state == "CALIBRATION FAILED" then
+                addConfirmed(2, turbine.name .. ":calibration",
+                    alarmName(turbine.name) .. " CALIBRATION FAILED: " ..
+                    tostring(turbine.governor.reason or "invalid operating result"))
+            elseif turbine.governor and turbine.governor.actuatorState == "FAULT" then
+                add(2, turbine.name .. ":control", alarmName(turbine.name) .. " CONTROL FAULT")
             end
         end
         for _, storage in ipairs(storages) do
@@ -202,6 +231,56 @@ function mainframe.run(config)
         reactors = reactorAdapter.readAll(devices)
         turbines = turbineAdapter.readAll(devices)
         storages = storageAdapter.readAll(devices, config.power)
+        local now = os.epoch("utc") / 1000
+        local steamPrimeRequested = turbineGovernor.needsSteamPrime(
+            governorMemory, turbines)
+        local _, steamDemand = reactorGovernor.evaluateAll(reactorGovernorMemory,
+            reactors, turbines, config.control, {
+                maintenance = maintenance,
+                mainframeId = os.getComputerID(),
+                idConflicts = idConflicts,
+                now = now,
+                steamPrimeRequested = steamPrimeRequested,
+            })
+        for _, reactor in ipairs(reactors) do
+            if reactor.governor and reactor.governor.calibrationCompleted == true then
+                turbineGovernor.requestSteamPrime(governorMemory)
+            end
+        end
+        if reactorGovernor.consumeProfileChanges(reactorGovernorMemory) then
+            configStore.save(config)
+        end
+        reactorGovernor.applyAll(reactorGovernorMemory, reactors, config.control, {
+            maintenance = maintenance,
+            now = now,
+        }, {
+            setActive = reactorAdapter.setActive,
+            setControlRodExposure = reactorAdapter.setControlRodExposure,
+        })
+
+        local steamSource = reactorGovernor.steamSourceStatus(reactors,
+            steamDemand, config.control)
+        turbineGovernor.evaluateAll(governorMemory, turbines, config.control, {
+            maintenance = maintenance,
+            mainframeId = os.getComputerID(),
+            idConflicts = idConflicts,
+            now = now,
+            steamSourceManaged = steamSource.managed,
+            steamSourceReady = steamSource.ready,
+            steamSourceReason = steamSource.reason,
+            steamSourceBufferPercent = steamSource.bufferPercent,
+        })
+        if turbineGovernor.consumeProfileChanges(governorMemory) then
+            configStore.save(config)
+        end
+        turbineGovernor.applyAll(governorMemory, turbines, config.control, {
+                maintenance = maintenance,
+                now = now,
+        }, {
+            setActive = turbineAdapter.setActive,
+            setFlowLimit = turbineAdapter.setFlowLimit,
+            setInductor = turbineAdapter.setInductor,
+        })
         updateAlarm()
         local conflictsChanged = refreshIdConflicts()
         if conflictsChanged or #idConflicts > 0 then advertiseIntegrity() end
@@ -330,6 +409,64 @@ function mainframe.run(config)
         return math.max(0, math.ceil((maintenanceEndsAt - os.epoch("utc")) / 1000))
     end
 
+    local function controlStatus()
+        if maintenance then return "MAINTENANCE / ACTUATORS PAUSED", colors.orange end
+        if #idConflicts > 0 then return "CONTROL LOCKED / ID CONFLICT", colors.red end
+
+        for _, turbine in ipairs(turbines) do
+            local plan = turbine.governor or {}
+            if plan.actuatorState == "FAULT" or plan.state == "CALIBRATION FAILED" then
+                return "CONTROL FAULT / ATTENTION REQUIRED", colors.red
+            end
+            if plan.state == "WAITING FOR STEAM SOURCE" then
+                return "AUTOMATIC / PREPARING STEAM", colors.orange
+            end
+            if tostring(plan.state or ""):find("CALIBRATION", 1, true) then
+                return "AUTOMATIC / CALIBRATING TURBINES", colors.orange
+            end
+        end
+        for _, reactor in ipairs(reactors) do
+            local plan = reactor.governor or {}
+            if plan.actuatorState == "FAULT" then
+                return "CONTROL FAULT / ATTENTION REQUIRED", colors.red
+            elseif plan.state == "STARTING" or plan.state == "BASELINING" or
+                   plan.state == "AVERAGING" or plan.state == "RESPONDING" or
+                   plan.state == "STEAM LOW" or plan.state == "STEAM HIGH" or
+                   plan.state == "RECOVERING" or plan.state == "RECALIBRATING" then
+                return "AUTOMATIC / PREPARING STEAM", colors.orange
+            elseif plan.state == "COOLING" then
+                return "AUTOMATIC / REACTOR COOLING", colors.orange
+            elseif plan.state == "STEAM DEFICIT" or plan.state == "STEAM SURPLUS" then
+                return "AUTOMATIC / STEAM CAPACITY LIMIT", colors.orange
+            elseif reactor.active == true and reactor.mode == "steam" and
+                   plan.trusted == false then
+                return "AUTOMATIC / REACTOR CONTROL HELD", colors.orange
+            end
+        end
+
+        local target, count, matching, allStable = nil, 0, true, true
+        for _, turbine in ipairs(turbines) do
+            local plan = turbine.governor or {}
+            if turbine.active == true and plan.calibrated then
+                local wanted = tonumber(plan.targetRpm)
+                if target and wanted and math.abs(target - wanted) > 1 then matching = false end
+                target = target or wanted
+                count = count + 1
+                if plan.state ~= "STABLE" or plan.actuatorState ~= "HOLD" then
+                    allStable = false
+                end
+            end
+        end
+        if count > 0 and matching and target and allStable then
+            return ("AUTOMATIC / HOLDING %.0f RPM"):format(target), colors.lime
+        elseif count > 0 then
+            return "AUTOMATIC / GOVERNORS ACTIVE", colors.lime
+        elseif #turbines > 0 or #reactors > 0 then
+            return "AUTOMATIC / WAITING FOR PLANT", colors.orange
+        end
+        return "AUTOMATIC / NO CONTROLLED PLANT", colors.gray
+    end
+
     local function render()
         ui.setIdConflicts(idConflicts)
         ui.header("MAINFRAME", "Central control authority")
@@ -343,15 +480,13 @@ function mainframe.run(config)
             (function() local count = 0 for _ in pairs(terminals) do count = count + 1 end return count end)()),
             onlineTerminalCount() > 0 and colors.lime or colors.gray)
         ui.status("Discovery", modeName(), maintenance and colors.orange or colors.cyan)
-        ui.status("Control", "AUTOMATIC / ACTUATORS DISABLED", colors.orange)
+        local controlText, controlColour = controlStatus()
+        ui.status("Control", controlText, controlColour)
         if registryStale then
-            term.setTextColor(colors.orange)
-            print("Registry may be outdated")
-            term.setTextColor(colors.white)
+            ui.line("Registry may be outdated", colors.orange)
         elseif maintenance then
-            print(("Auto return in %d:%02d"):format(
-                math.floor(remainingMaintenance() / 60), remainingMaintenance() % 60
-            ))
+            ui.line(("Auto return in %d:%02d"):format(
+                math.floor(remainingMaintenance() / 60), remainingMaintenance() % 60))
         end
 
         local counts = registry.countByCategory(devices)
@@ -359,10 +494,9 @@ function mainframe.run(config)
             counts.reactor, counts.turbine, counts.battery, counts.monitor
         ))
 
+        local width, height = term.getSize()
         if currentAlarm then
-            term.setTextColor(alarmColour())
-            print("!! " .. currentAlarm.message)
-            term.setTextColor(colors.white)
+            ui.block("!! " .. currentAlarm.message, alarmColour(), 3)
             local _, row = term.getCursorPos()
             print("[ SILENCE ALARM ]")
             silenceButton = { y = row, x1 = 1, x2 = 17 }
@@ -372,8 +506,11 @@ function mainframe.run(config)
                 config.alarms.enabled and colors.lime or colors.gray)
         end
 
-        local width, height = term.getSize()
-        local availableRows = math.max(0, height - 18)
+        -- Keep the controls on fixed bottom rows. Alarm and device text may
+        -- consume only the space above this footer, preserving touch hitboxes.
+        local footerRow = math.max(1, height - 2)
+        local contentRow = select(2, term.getCursorPos())
+        local availableRows = math.max(0, footerRow - contentRow)
         if #devices > availableRows then
             availableRows = math.max(0, availableRows - 1)
         end
@@ -385,7 +522,7 @@ function mainframe.run(config)
         if #devices > availableRows then
             print(("+ %d more (run: helios scan)"):format(#devices - availableRows))
         end
-        print("")
+        term.setCursorPos(1, footerRow)
         dashboardButtons = {}
         dashboardButtons.reactors = ui.inlineButton("REACTORS", colors.cyan)
         write(" ")
@@ -400,40 +537,81 @@ function mainframe.run(config)
         dashboardButtons.settings = ui.inlineButton("SETTINGS", colors.cyan)
         print("")
         term.setTextColor(colors.gray)
-        print("Keyboard: V/G/E/C/R/S | Q exit")
+        term.setCursorPos(1, height)
+        write(string.sub("Keyboard: V/G/E/C/R/S | Q exit", 1, width))
         term.setTextColor(colors.white)
     end
 
     local function controlView()
+        local selected = 1
         local buttons = {}
         local function draw()
             ui.setIdConflicts(idConflicts)
-            ui.header("POWER CONTROL", "Automatic governor configuration")
+            ui.header("POWER CONTROL", "Automatic turbine governor")
             ui.status("Mode", "AUTOMATIC", colors.lime)
-            ui.status("Actuators", "DISABLED - INTERFACE TEST", colors.orange)
-            ui.status("Target turbine RPM", config.control.targetRpm .. " RPM", colors.gray)
-            ui.status("Storage demand band", config.control.storageLow .. "% - " .. config.control.storageHigh .. "%", colors.gray)
-            ui.status("Maximum rod step", config.control.maxRodStep .. "%", colors.gray)
-            ui.status("Maximum flow step", config.control.maxFlowStep .. " mB/t", colors.gray)
-            ui.status("Adjustment interval", config.control.adjustmentInterval .. " seconds", colors.gray)
+            ui.status("Actuators", "ENABLED - GUARDED", colors.lime)
+            if #turbines == 0 then
+                ui.status("Status", "NO TURBINES FOUND", colors.orange)
+            else
+                if selected > #turbines then selected = #turbines end
+                local turbine = turbines[selected]
+                local plan = turbine.governor or {}
+                ui.status("Turbine", ("%d/%d %s"):format(selected, #turbines,
+                    deviceName(turbine.name)), colors.cyan)
+                ui.status("Governor", plan.state or "WAITING",
+                    (plan.trusted == false or plan.actuatorState == "FAULT" or
+                        plan.state == "CALIBRATION FAILED") and colors.red or colors.lime)
+                ui.status("Rotor / target", ("%.1f / %d RPM"):format(
+                    tonumber(turbine.rotorSpeed) or 0,
+                    tonumber(plan.targetRpm) or config.control.highBandRpm), colors.cyan)
+                if plan.currentFlow ~= nil and plan.recommendedFlow ~= nil then
+                    ui.status("Flow-limit plan", ("%.0f -> %.0f mB/t"):format(
+                        plan.currentFlow, plan.recommendedFlow), colors.cyan)
+                else
+                    ui.status("Flow-limit plan", "HOLD - TELEMETRY REQUIRED", colors.gray)
+                end
+                ui.status("Action", (plan.action or "HOLD") .. " / " ..
+                    (plan.actuatorState or "WAITING"),
+                    (plan.action == "CUT FLOW" or plan.actuatorState == "FAULT") and colors.red or colors.white)
+            end
             print("")
             term.setTextColor(colors.lime)
-            print("[ AUTOMATIC ]")
+            write("[ AUTOMATIC ] ")
             term.setTextColor(colors.gray)
             print("[ MANUAL - LOCKED ]")
-            print("[ TARGETS - LOCKED ]")
-            print("[ LIMITS - LOCKED ]")
+            print("Targets learned automatically; manual tuning LOCKED")
             term.setTextColor(colors.white)
-            buttons.back = ui.button("BACK", colors.cyan)
+            buttons.previous = ui.inlineButton("< PREVIOUS", colors.cyan)
+            write(" ")
+            buttons.next = ui.inlineButton("NEXT >", colors.cyan)
+            write(" ")
+            buttons.back = ui.inlineButton("BACK", colors.cyan)
+            print("")
+            if #turbines > 0 then
+                local selectedTurbine = turbines[selected]
+                local label = selectedTurbine.active == false and
+                    "START & CALIBRATE" or "RETRY CALIBRATION"
+                buttons.retry = ui.button(label, colors.orange)
+            else
+                buttons.retry = nil
+            end
         end
         while true do
             draw()
-            local event, value, x, y = os.pullEvent()
-            local touch = event == "monitor_touch"
-            if touch then x, y = x, y end
+            local event, value, message, protocol = os.pullEvent()
+            local x, y = ui.eventPoint(event, value, message, protocol)
             if event == "key" and value == keys.b then return
-            elseif (event == "mouse_click" or touch) and ui.hit(buttons.back, x, y) then return
-            elseif event == "rednet_message" then handleNetwork(value, x, y)
+            elseif ((event == "key" and value == keys.left) or ui.hit(buttons.previous, x, y)) and #turbines > 0 then
+                selected = ((selected - 2) % #turbines) + 1
+            elseif ((event == "key" and value == keys.right) or ui.hit(buttons.next, x, y)) and #turbines > 0 then
+                selected = (selected % #turbines) + 1
+            elseif ui.hit(buttons.retry, x, y) and #turbines > 0 then
+                turbineGovernor.resetCalibration(governorMemory, config.control,
+                    turbines[selected].name)
+                configStore.save(config)
+                pollReactors()
+            elseif ui.hit(buttons.back, x, y) then return
+            elseif event == "rednet_message" then handleNetwork(value, message, protocol)
             elseif event == "peripheral" or event == "peripheral_detach" then
                 if maintenance or config.discovery.defaultMode == "manual" then registryStale = true else rescan() end
             elseif event == "timer" and value == reactorTimer then
@@ -444,10 +622,14 @@ function mainframe.run(config)
         end
     end
 
-    local function restoreTimersAfterTextInput()
+    local function restartReactorPolling()
         if reactorTimer then os.cancelTimer(reactorTimer) end
         pollReactors()
         reactorTimer = os.startTimer(1)
+    end
+
+    local function restoreTimersAfterTextInput()
+        restartReactorPolling()
         if maintenance then
             if maintenanceTimer then os.cancelTimer(maintenanceTimer) end
             if countdownTimer then os.cancelTimer(countdownTimer) end
@@ -769,18 +951,262 @@ function mainframe.run(config)
         local previousButton
         local nextButton
         local backButton
+        local calibrationButton
+        local notice
 
         local function formatValue(value, suffix)
             if value == nil then return "N/A" end
             return ("%.1f%s"):format(value, suffix or "")
         end
 
+        local function formatRodLayout(reactor, exposure)
+            local minimum = tonumber(reactor.controlRodMinimum)
+            local maximum = tonumber(reactor.controlRodMaximum)
+            local range
+            if minimum == nil or maximum == nil then
+                range = "N/A"
+            elseif math.abs(maximum - minimum) < 0.05 then
+                range = ("%.0f%%"):format(minimum)
+            else
+                range = ("%.0f-%.0f%%"):format(minimum, maximum)
+            end
+            return ("%s / %s eq"):format(range,
+                exposure ~= nil and ("%.2f"):format(exposure) or "N/A")
+        end
+
+        local function reactorByName(name)
+            for _, candidate in ipairs(reactors) do
+                if candidate.name == name then return candidate end
+            end
+        end
+
+        local function serviceEvent(event, value, message, protocol)
+            if event == "rednet_message" then
+                handleNetwork(value, message, protocol)
+            elseif event == "peripheral" or event == "peripheral_detach" then
+                if maintenance or config.discovery.defaultMode == "manual" then
+                    registryStale = true
+                else
+                    rescan()
+                    updateAlarm()
+                end
+            elseif event == "timer" then
+                if maintenance and value == maintenanceTimer then
+                    stopMaintenance()
+                elseif maintenance and value == countdownTimer then
+                    countdownTimer = os.startTimer(1)
+                elseif value == reactorTimer then
+                    pollReactors()
+                    broadcastSnapshots()
+                    reactorTimer = os.startTimer(1)
+                end
+            end
+        end
+
+        local function confirm(title, lines, yesLabel, noLabel)
+            local yesButton, noButton
+            local function drawConfirm()
+                ui.header(title, "Confirmation required")
+                for _, line in ipairs(lines or {}) do print(line) end
+                print("")
+                yesButton = ui.inlineButton(yesLabel or "YES", colors.lime)
+                write("   ")
+                noButton = ui.inlineButton(noLabel or "NO", colors.orange)
+                print("")
+            end
+            while true do
+                drawConfirm()
+                local event, value, message, protocol = os.pullEvent()
+                local touchX, touchY = ui.eventPoint(event, value, message, protocol)
+                if (event == "key" and value == keys.y) or
+                   ui.hit(yesButton, touchX, touchY) then
+                    return true
+                elseif (event == "key" and (value == keys.n or value == keys.b)) or
+                       ui.hit(noButton, touchX, touchY) then
+                    return false
+                else
+                    serviceEvent(event, value, message, protocol)
+                end
+            end
+        end
+
+        local function calibrationView(reactorName, maintenanceEnabledHere)
+            local buttons = {}
+            local calibrationNotice
+
+            local function formatUpdatedAt(value)
+                value = tonumber(value)
+                if not value or value <= 0 then return "UNKNOWN" end
+                local ok, formatted = pcall(os.date, "!%Y-%m-%d %H:%M UTC", value)
+                return ok and formatted or tostring(value)
+            end
+
+            local function drawCalibration()
+                local reactor = reactorByName(reactorName)
+                ui.header("REACTOR CALIBRATION", deviceName(reactorName))
+                ui.status("Control mode", maintenance and "MAINTENANCE" or "AUTOMATIC",
+                    maintenance and colors.orange or colors.lime)
+                if not reactor then
+                    ui.status("Status", "REACTOR NOT FOUND", colors.red)
+                    buttons = { close = ui.button("CLOSE", colors.cyan) }
+                    return
+                end
+                if reactor.mode ~= "steam" then
+                    ui.status("Status", "POWER REACTOR / CALIBRATION NOT REQUIRED",
+                        colors.orange)
+                    print("")
+                    buttons = { close = ui.button("CLOSE", colors.cyan) }
+                    return
+                end
+
+                local plan = reactor.governor or {}
+                local profile = (config.control.reactorProfiles or {})[reactorName]
+                local phase = plan.calibrationPhase or
+                    (profile and "LEARNED" or "NOT ACTIVE")
+                local state = plan.state or "WAITING FOR GOVERNOR UPDATE"
+                ui.status("Calibration", phase .. " / " .. state,
+                    plan.recalibrating and colors.orange or colors.lime)
+                ui.status("Target output", plan.targetSteam and
+                    ("%.0f mB/t"):format(plan.targetSteam) or
+                    "WAITING FOR TRUSTED DEMAND")
+                local sampleCount = tonumber(plan.averageSteamSamples) or 0
+                local sampleTarget = math.max(3,
+                    math.floor(tonumber(config.control.reactorSteamAverageSamples) or 10))
+                local responseCount = tonumber(plan.processStableSamples) or 0
+                local responseTarget = math.max(3,
+                    math.floor(tonumber(config.control.reactorLearningSamples) or 8))
+                local output = plan.averageSteamProduction and
+                    plan.steamProductionLow and plan.steamProductionHigh and
+                    ("%.0f avg [%.0f-%.0f]"):format(
+                        plan.averageSteamProduction,
+                        plan.steamProductionLow,
+                        plan.steamProductionHigh) or
+                    plan.averageSteamProduction and
+                    ("%.0f mB/t avg"):format(plan.averageSteamProduction) or
+                    reactor.steamProduction and
+                    ("%.0f mB/t raw"):format(reactor.steamProduction) or "N/A"
+                ui.status("Output / progress", ("%s [%d/%d; %d/%d]"):format(
+                    output, sampleCount, sampleTarget, responseCount, responseTarget))
+                local commandTarget = math.max(2,
+                    math.floor(tonumber(config.control.reactorCommandSamples) or 3))
+                ui.status("Actuator", ("%s / %s [%d/%d]"):format(
+                    tostring(plan.action or "HOLD"),
+                    tostring(plan.actuatorState or "WAITING"),
+                    tonumber(plan.actionSamples) or 0, commandTarget),
+                    plan.actuatorState == "FAULT" and colors.red or colors.lightGray)
+                ui.status("Current setting", formatRodLayout(reactor,
+                    plan.currentRodExposure))
+                ui.status("Saved calibration", profile and
+                    (("%.2f eq / %.0f mB/t"):format(
+                        tonumber(profile.exposure) or 0,
+                        tonumber(profile.targetSteam) or 0)) or "NONE")
+                ui.status("Last calibrated", profile and
+                    formatUpdatedAt(profile.updatedAt) or "NEVER")
+                if plan.reason then ui.status("Governor", plan.reason, colors.lightGray) end
+                if calibrationNotice then
+                    print("")
+                    ui.status("Result", calibrationNotice.text, calibrationNotice.colour)
+                end
+                print("")
+                -- Keep the four actions on two rows. A fourth full-width print
+                -- could advance past the mirrored 19-row terminal, scroll the
+                -- display, and leave every recorded touch target one row low.
+                buttons.delete = ui.inlineButton("DELETE CALIBRATION DATA", colors.red)
+                write(" ")
+                buttons.recalibrate = ui.inlineButton("RECALIBRATE", colors.orange)
+                print("")
+                buttons.save = ui.inlineButton("SAVE CURRENT REACTOR SETUP", colors.lime)
+                write(" ")
+                buttons.close = ui.inlineButton("CLOSE", colors.cyan)
+            end
+
+            pollReactors()
+            while true do
+                drawCalibration()
+                local event, value, message, protocol = os.pullEvent()
+                local touchX, touchY = ui.eventPoint(event, value, message, protocol)
+                local reactor = reactorByName(reactorName)
+                if (event == "key" and value == keys.b) or
+                   ui.hit(buttons.close, touchX, touchY) then
+                    if maintenanceEnabledHere and maintenance and confirm(
+                        "MAINTENANCE MODE",
+                        { "Disable Maintenance Mode and", "return control to HELIOS?" },
+                        "YES", "NO") then
+                        stopMaintenance()
+                    end
+                    return
+                elseif reactor and reactor.mode == "steam" and
+                       ui.hit(buttons.delete, touchX, touchY) then
+                    if confirm("DELETE CALIBRATION",
+                        { "Delete the saved calibration for", deviceName(reactorName) .. "?",
+                          "Rod positions will not change immediately." },
+                        "DELETE", "CANCEL") then
+                        reactorGovernor.deleteCalibration(reactorGovernorMemory,
+                            config.control, reactorName)
+                        saveConfig()
+                        calibrationNotice = { text = "CALIBRATION DATA DELETED", colour = colors.orange }
+                    end
+                elseif reactor and reactor.mode == "steam" and
+                       ui.hit(buttons.recalibrate, touchX, touchY) then
+                    if confirm("RECALIBRATE REACTOR",
+                        { "Close all rods and relearn this", "reactor from zero exposure?",
+                          "HELIOS will resume automatic control." },
+                        "RECALIBRATE", "CANCEL") then
+                        -- Recalibration is an explicit operator-confirmed safe
+                        -- insertion. Apply and verify that conservative command
+                        -- immediately, then restart the polling timer so the
+                        -- baseline cannot remain at sample 1 after a modal view.
+                        local prepared, prepareError =
+                            reactorAdapter.prepareRecalibration(reactor, function()
+                                sleep(0.1)
+                            end)
+                        if prepared then
+                            reactorGovernor.beginRecalibration(reactorGovernorMemory,
+                                config.control, reactorName)
+                            saveConfig()
+                            if maintenance then stopMaintenance() end
+                            maintenanceEnabledHere = false
+                            restartReactorPolling()
+                            calibrationNotice = {
+                                text = "RECALIBRATION STARTED - RODS INSERTED",
+                                colour = colors.orange,
+                            }
+                        else
+                            calibrationNotice = {
+                                text = "RECALIBRATION BLOCKED: " ..
+                                    tostring(prepareError or "REACTOR RESET FAILED"),
+                                colour = colors.red,
+                            }
+                        end
+                    end
+                elseif reactor and reactor.mode == "steam" and
+                       ui.hit(buttons.save, touchX, touchY) then
+                    if confirm("SAVE CURRENT SETUP",
+                        { "Save the reactor's current rod layout", "as its learned calibration?" },
+                        "SAVE", "CANCEL") then
+                        local ok, reason = reactorGovernor.saveCurrentCalibration(
+                            reactorGovernorMemory, config.control, reactor,
+                            { now = os.epoch("utc") / 1000 })
+                        if ok then
+                            turbineGovernor.requestSteamPrime(governorMemory)
+                            saveConfig()
+                            calibrationNotice = { text = "CURRENT SETUP SAVED", colour = colors.lime }
+                        else
+                            calibrationNotice = { text = tostring(reason), colour = colors.red }
+                        end
+                    end
+                else
+                    serviceEvent(event, value, message, protocol)
+                end
+            end
+        end
+
         local function draw()
-            ui.header("REACTORS", "Read-only live telemetry")
+            ui.header("REACTORS", "Live telemetry and steam governor")
             if #reactors == 0 then
                 ui.status("Status", "NO REACTORS FOUND", colors.orange)
                 print("")
-                previousButton, nextButton, viewSilenceButton = nil, nil, nil
+                previousButton, nextButton, viewSilenceButton, calibrationButton = nil, nil, nil, nil
                 backButton = ui.button("BACK", colors.cyan)
                 return
             end
@@ -793,14 +1219,29 @@ function mainframe.run(config)
             else
                 ui.status("State", reactor.active == true and "ACTIVE" or reactor.active == false and "OFFLINE" or "UNKNOWN",
                     reactor.active == true and colors.lime or colors.orange)
-                ui.status("Fuel", formatValue(reactor.fuelPercent, "%"))
-                ui.status("Fuel use", formatValue(reactor.fuelUse, " mB/t"))
-                ui.status("Fuel temp", formatValue(reactor.fuelTemperature, " C"))
-                ui.status("Casing temp", formatValue(reactor.casingTemperature, " C"))
+                ui.status("Fuel / use", ("%s / %s"):format(
+                    formatValue(reactor.fuelPercent, "%"),
+                    formatValue(reactor.fuelUse, " mB/t")))
+                ui.status("Temps fuel/case", ("%s / %s"):format(
+                    formatValue(reactor.fuelTemperature, " C"),
+                    formatValue(reactor.casingTemperature, " C")))
                 if reactor.mode == "steam" then
-                    ui.status("Steam output", formatValue(reactor.steamProduction, " mB/t"), colors.cyan)
-                    ui.status("Coolant", formatValue(reactor.coolantPercent, "%"))
-                    ui.status("Hot fluid", formatValue(reactor.hotFluidPercent, "%"))
+                    local plan = reactor.governor or {}
+                    ui.status("Steam avg/target", ("%s / %s"):format(
+                        formatValue(plan.averageSteamProduction or
+                            reactor.steamProduction, ""),
+                        formatValue(plan.targetSteam, " mB/t")), colors.cyan)
+                    ui.status("Coolant / hot", ("%s / %s"):format(
+                        formatValue(reactor.coolantPercent, "%"),
+                        formatValue(reactor.hotFluidPercent, "%")))
+                    ui.status("Rods range / exposed",
+                        formatRodLayout(reactor, plan.currentRodExposure))
+                    ui.status("Governor", (plan.state or "WAITING") .. " / " ..
+                        (plan.actuatorState or "WAITING"),
+                        (plan.trusted == false or plan.actuatorState == "FAULT") and
+                            colors.red or
+                        ((plan.state == "STEAM DEFICIT" or
+                          plan.state == "STEAM SURPLUS") and colors.orange or colors.lime))
                 else
                     ui.status("Power output", powerFormat.power(reactor.energyProduction, config.power, true), colors.cyan)
                     ui.status("Energy buffer", formatValue(reactor.energyPercent, "%"))
@@ -823,6 +1264,10 @@ function mainframe.run(config)
             write(" ")
             backButton = ui.inlineButton("BACK", colors.cyan)
             print("")
+            local selectedReactor = reactors[selected]
+            calibrationButton = selectedReactor and ui.button("CALIBRATION STATUS",
+                selectedReactor.mode == "steam" and colors.lime or colors.gray) or nil
+            if notice then ui.status("Result", notice, colors.orange) end
         end
 
         while true do
@@ -842,6 +1287,18 @@ function mainframe.run(config)
                 selected = (selected % #reactors) + 1
             elseif (event == "mouse_click" or event == "monitor_touch") and ui.hit(backButton, x, y) then
                 return
+            elseif (event == "mouse_click" or event == "monitor_touch") and
+                   ui.hit(calibrationButton, x, y) and #reactors > 0 then
+                local reactor = reactors[selected]
+                local enabledHere = false
+                if reactor.mode == "steam" and not maintenance then
+                    enabledHere = confirm("CALIBRATION STATUS",
+                        { "Enable Maintenance Mode?", "",
+                          "This prevents HELIOS from changing", "the reactor while settings are reviewed." },
+                        "YES", "NO")
+                    if enabledHere then startMaintenance() end
+                end
+                calibrationView(reactor.name, enabledHere)
             elseif event == "rednet_message" then
                 handleNetwork(value, x, y)
             elseif event == "peripheral" or event == "peripheral_detach" then
@@ -875,7 +1332,7 @@ function mainframe.run(config)
         end
 
         local function draw()
-            ui.header("TURBINES", "Read-only live telemetry")
+            ui.header("TURBINES", "Live telemetry and governor plan")
             if #turbines == 0 then
                 ui.status("Status", "NO TURBINES FOUND", colors.orange)
                 print("")
@@ -892,14 +1349,23 @@ function mainframe.run(config)
                 ui.status("State", turbine.active == true and "ACTIVE" or turbine.active == false and "OFFLINE" or "UNKNOWN",
                     turbine.active == true and colors.lime or colors.orange)
                 ui.status("Rotor speed", formatValue(turbine.rotorSpeed, " RPM"), colors.cyan)
+                local plan = turbine.governor or {}
+                ui.status("Governor", (plan.state or "WAITING") .. " / " ..
+                    (plan.actuatorState or "WAITING"),
+                    (plan.trusted == false or plan.actuatorState == "FAULT" or
+                        plan.state == "CALIBRATION FAILED") and colors.red or colors.lime)
                 ui.status("Power output", powerFormat.power(turbine.energyProduction, config.power, true), colors.cyan)
                 ui.status("Energy buffer", formatValue(turbine.energyPercent, "%"))
-                ui.status("Fluid flow", formatValue(turbine.flowRate, " mB/t"))
-                ui.status("Max flow", formatValue(turbine.flowRateMax, " mB/t"))
-                ui.status("Input tank", formatValue(turbine.inputPercent, "%"))
-                ui.status("Output tank", formatValue(turbine.outputPercent, "%"))
+                if plan.currentFlow ~= nil and plan.recommendedFlow ~= nil then
+                    ui.status("Flow actual/set/plan", ("%s / %.0f -> %.0f"):format(
+                        plan.actualFlow and ("%.0f"):format(plan.actualFlow) or "N/A",
+                        plan.currentFlow, plan.recommendedFlow), colors.cyan)
+                else
+                    ui.status("Flow actual/set/plan", "N/A / HOLD", colors.gray)
+                end
+                ui.status("Tanks in / out", formatValue(turbine.inputPercent, "%") .. " / " ..
+                    formatValue(turbine.outputPercent, "%"))
                 ui.status("Inductor", turbine.inductorEngaged == true and "ENGAGED" or turbine.inductorEngaged == false and "DISENGAGED" or "N/A")
-                if turbine.ventMode ~= nil then ui.status("Vent mode", tostring(turbine.ventMode)) end
             end
             print("")
             previousButton = ui.inlineButton("< PREVIOUS", colors.cyan)
