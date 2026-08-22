@@ -1,3 +1,4 @@
+-- @section PERIPHERAL DISCOVERY AND REGISTRY
 local registry = {}
 local REGISTRY_FILE = "/helios/data/devices.lua"
 

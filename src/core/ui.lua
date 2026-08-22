@@ -1,4 +1,5 @@
 local ui = {}
+-- @section UI STATE AND INPUT
 local idConflicts = {}
 local systemVersion
 
@@ -46,6 +47,7 @@ function ui.eventPoint(event, first, second, third)
     return nil, nil
 end
 
+-- @section RENDERING PRIMITIVES
 function ui.prepare()
     term.setBackgroundColor(colors.black)
     term.setTextColor(colors.white)

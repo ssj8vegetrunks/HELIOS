@@ -1,5 +1,6 @@
 local governor = {}
 
+-- @section COMMON FUNCTIONS
 local function clamp(value, minimum, maximum)
     return math.max(minimum, math.min(maximum, value))
 end
@@ -59,6 +60,7 @@ function governor.new()
     return { turbines = {}, profileDirty = false }
 end
 
+-- @section CALIBRATION PROFILE STORAGE
 function governor.requestSteamPrime(memory)
     memory.turbines = memory.turbines or {}
     for _, previous in pairs(memory.turbines) do
@@ -100,6 +102,7 @@ function governor.resetCalibration(memory, control, name)
     return true
 end
 
+-- @section TURBINE GOVERNOR
 function governor.evaluate(memory, turbine, control, context)
     control = control or {}
     context = context or {}
@@ -789,6 +792,7 @@ function governor.evaluate(memory, turbine, control, context)
     return result
 end
 
+-- @section ACTUATOR APPLICATION
 function governor.apply(memory, turbine, control, context, writers)
     control = control or {}
     context = context or {}
@@ -881,6 +885,7 @@ function governor.apply(memory, turbine, control, context, writers)
     return plan
 end
 
+-- @section MULTI-TURBINE EVALUATION
 function governor.applyAll(memory, turbines, control, context, writers)
     for _, turbine in ipairs(turbines or {}) do
         governor.apply(memory, turbine, control, context, writers)

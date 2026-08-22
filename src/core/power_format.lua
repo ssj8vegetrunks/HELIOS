@@ -1,5 +1,6 @@
 local formatter = {}
 
+-- @section POWER UNIT CONVERSION AND FORMATTING
 local function addCommas(value)
     local sign = value < 0 and "-" or ""
     local digits = tostring(math.floor(math.abs(value) + 0.5))

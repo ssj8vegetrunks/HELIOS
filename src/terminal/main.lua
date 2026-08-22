@@ -1,5 +1,6 @@
 local terminal = {}
 
+-- @section REMOTE TERMINAL RUNTIME
 function terminal.run(config)
     local display = dofile("/helios/core/display.lua")
     display.start(config)
@@ -31,6 +32,7 @@ function terminal.run(config)
         return rawName or "UNKNOWN"
     end
 
+    -- @section LOCAL ALARMS
     local function playSound(sound, pitch, volume)
         for _, name in ipairs(peripheral.getNames()) do
             if peripheral.hasType(name, "speaker") then
@@ -61,6 +63,7 @@ function terminal.run(config)
         end
     end
 
+    -- @section MAINFRAME LINK
     local function sendHello()
         network.broadcast({
             helios = true,
@@ -110,6 +113,7 @@ function terminal.run(config)
         term.setTextColor(colors.white)
     end
 
+    -- @section TELEMETRY VIEWS
     local function renderList(title, list, state, drawItem)
         ui.header("REMOTE " .. title, "Read-only mainframe telemetry")
         local link, colour = statusLine()
@@ -247,6 +251,7 @@ function terminal.run(config)
         print("Q exits on the terminal keyboard")
     end
 
+    -- @section EVENT LOOP AND RENDERING
     local function render()
         previousButton, nextButton, silenceButton, testButton = nil, nil, nil, nil
         ui.setIdConflicts(idConflicts)

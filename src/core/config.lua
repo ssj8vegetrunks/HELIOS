@@ -1,5 +1,6 @@
 local config = {}
 
+-- @section CONFIGURATION DEFAULTS AND MIGRATION
 function config.load()
     if not fs.exists("/helios/config.lua") then
         error("HELIOS configuration is missing. Run the installer again.", 0)
@@ -142,6 +143,7 @@ function config.load()
     return loaded
 end
 
+-- @section CONFIGURATION STORAGE
 function config.save(loaded)
     local handle, reason = fs.open("/helios/config.lua", "w")
     if not handle then return false, reason end

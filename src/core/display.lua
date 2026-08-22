@@ -1,5 +1,6 @@
 local display = {}
 
+-- @section MONITOR DISCOVERY AND MIRRORING
 local native = term.current()
 local monitors = {}
 local proxy
@@ -74,6 +75,7 @@ local function buildProxy()
     return target
 end
 
+-- @section DISPLAY LIFECYCLE
 function display.start(config)
     if active then return end
     textScale = tonumber(config and config.ui and config.ui.monitorTextScale) or 0.5

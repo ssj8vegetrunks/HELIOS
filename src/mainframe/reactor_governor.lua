@@ -2,6 +2,7 @@ local governor = {}
 local clearCooldown
 local saveProfile
 
+-- @section COMMON FUNCTIONS
 local function clamp(value, minimum, maximum)
     return math.max(minimum, math.min(maximum, value))
 end
@@ -83,6 +84,7 @@ function governor.new()
     return { reactors = {}, profileDirty = false }
 end
 
+-- @section CALIBRATION PROFILE STORAGE
 function governor.consumeProfileChanges(memory)
     local dirty = memory and memory.profileDirty == true
     if memory then memory.profileDirty = false end
@@ -162,6 +164,7 @@ function governor.saveCurrentCalibration(memory, control, reactor, context)
     return true
 end
 
+-- @section STEAM DEMAND AND SOURCE STATUS
 function governor.steamDemand(turbines, control)
     if #(turbines or {}) == 0 then
         return nil, 0, "No turbine telemetry is available"
@@ -254,6 +257,7 @@ clearCooldown = function(previous)
     previous.cooldownLastProgressAt = nil
 end
 
+-- @section LEARNING AND RESPONSE LOGIC
 local function observeCooldown(previous, reactor, control, context, production)
     local now = tonumber(context and context.now) or 0
     local casingTemperature = tonumber(reactor and reactor.casingTemperature)
@@ -433,6 +437,7 @@ local function saveBufferDefault(memory, control, name, exposure, production,
     return profile, changed
 end
 
+-- @section REACTOR GOVERNOR
 function governor.evaluate(memory, reactor, control, context, targetSteam, activeTurbines)
     memory.reactors = memory.reactors or {}
     control, context = control or {}, context or {}
@@ -913,6 +918,7 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
     return result
 end
 
+-- @section MULTI-REACTOR EVALUATION
 function governor.evaluateAll(memory, reactors, turbines, control, context)
     local demand, activeTurbines, demandError = governor.steamDemand(turbines, control)
     local turbineBufferPercent, bufferReadings = nil, 0
@@ -955,6 +961,7 @@ function governor.evaluateAll(memory, reactors, turbines, control, context)
     return reactors, demand, activeTurbines, demandError
 end
 
+-- @section ACTUATOR APPLICATION
 function governor.apply(memory, reactor, control, context, writers)
     control, context = control or {}, context or {}
     local plan = reactor and reactor.governor

@@ -1,3 +1,4 @@
+-- @section PROGRAM ENTRYPOINT
 local args = { ... }
 local config = dofile("/helios/core/config.lua").load()
 

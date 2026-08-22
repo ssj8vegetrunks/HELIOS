@@ -1,3 +1,4 @@
+-- @section TURBINE PERIPHERAL ADAPTER
 local adapter = {}
 
 local function readAny(name, availableMethods, candidates)

@@ -73,6 +73,7 @@ local FILES = {
     ["core/config.lua"] = [=[
 local config = {}
 
+-- @section CONFIGURATION DEFAULTS AND MIGRATION
 function config.load()
     if not fs.exists("/helios/config.lua") then
         error("HELIOS configuration is missing. Run the installer again.", 0)
@@ -215,6 +216,7 @@ function config.load()
     return loaded
 end
 
+-- @section CONFIGURATION STORAGE
 function config.save(loaded)
     local handle, reason = fs.open("/helios/config.lua", "w")
     if not handle then return false, reason end
@@ -229,6 +231,7 @@ return config
     ["core/display.lua"] = [=[
 local display = {}
 
+-- @section MONITOR DISCOVERY AND MIRRORING
 local native = term.current()
 local monitors = {}
 local proxy
@@ -303,6 +306,7 @@ local function buildProxy()
     return target
 end
 
+-- @section DISPLAY LIFECYCLE
 function display.start(config)
     if active then return end
     textScale = tonumber(config and config.ui and config.ui.monitorTextScale) or 0.5
@@ -330,6 +334,7 @@ return display
     ["core/network.lua"] = [=[
 local network = {}
 
+-- @section MODEM AND REDNET TRANSPORT
 network.protocol = "helios.v1"
 local PEER_FILE = "/helios/data/terminals.lua"
 
@@ -373,6 +378,7 @@ function network.now()
     return os.epoch("utc") / 1000
 end
 
+-- @section SESSION IDENTITY AND PEERS
 function network.sessionId(role)
     local seed = table.concat({
         tostring(role or "helios"),
@@ -405,6 +411,7 @@ return network
     ["core/power_format.lua"] = [=[
 local formatter = {}
 
+-- @section POWER UNIT CONVERSION AND FORMATTING
 local function addCommas(value)
     local sign = value < 0 and "-" or ""
     local digits = tostring(math.floor(math.abs(value) + 0.5))
@@ -455,6 +462,7 @@ return formatter
 
     ["core/ui.lua"] = [=[
 local ui = {}
+-- @section UI STATE AND INPUT
 local idConflicts = {}
 local systemVersion
 
@@ -502,6 +510,7 @@ function ui.eventPoint(event, first, second, third)
     return nil, nil
 end
 
+-- @section RENDERING PRIMITIVES
 function ui.prepare()
     term.setBackgroundColor(colors.black)
     term.setTextColor(colors.white)
@@ -589,6 +598,7 @@ return ui
 ]=],
 
     ["helios.lua"] = [=[
+-- @section PROGRAM ENTRYPOINT
 local args = { ... }
 local config = dofile("/helios/core/config.lua").load()
 
@@ -671,6 +681,7 @@ end
 ]=],
 
     ["mainframe/device_registry.lua"] = [=[
+-- @section PERIPHERAL DISCOVERY AND REGISTRY
 local registry = {}
 local REGISTRY_FILE = "/helios/data/devices.lua"
 
@@ -778,6 +789,7 @@ return registry
     ["mainframe/main.lua"] = [=[
 local mainframe = {}
 
+-- @section STARTUP AND RUNTIME STATE
 function mainframe.run(config)
     local display = dofile("/helios/core/display.lua")
     display.start(config)
@@ -819,6 +831,7 @@ function mainframe.run(config)
 
     local timeoutChoices = { 300, 900, 1800, 3600 }
 
+    -- @section DISCOVERY AND NETWORK IDENTITY
     local function sameList(a, b)
         if #a ~= #b then return false end
         for index = 1, #a do if a[index] ~= b[index] then return false end end
@@ -889,6 +902,7 @@ function mainframe.run(config)
         registryStale = false
     end
 
+    -- @section ALARMS
     local function playSound(sound, pitch, force)
         if not config.alarms.enabled and not force then return end
         for _, name in ipairs(peripheral.getNames()) do
@@ -1005,6 +1019,7 @@ function mainframe.run(config)
         end
     end
 
+    -- @section TELEMETRY AND GOVERNORS
     local function pollReactors()
         reactors = reactorAdapter.readAll(devices)
         turbines = turbineAdapter.readAll(devices)
@@ -1068,6 +1083,7 @@ function mainframe.run(config)
         return currentAlarm and (currentAlarm.level .. ":" .. currentAlarm.key) or nil
     end
 
+    -- @section REMOTE TELEMETRY
     local function snapshotFor(assignment)
         local includeAll = assignment == "all"
         return {
@@ -1245,6 +1261,7 @@ function mainframe.run(config)
         return "AUTOMATIC / NO CONTROLLED PLANT", colors.gray
     end
 
+    -- @section MAIN DASHBOARD
     local function render()
         ui.setIdConflicts(idConflicts)
         ui.header("MAINFRAME", "Central control authority")
@@ -1320,6 +1337,7 @@ function mainframe.run(config)
         term.setTextColor(colors.white)
     end
 
+    -- @section CONTROL VIEW
     local function controlView()
         local selected = 1
         local buttons = {}
@@ -1421,6 +1439,7 @@ function mainframe.run(config)
         end
     end
 
+    -- @section SETTINGS
     local function namingSettings()
         local selected = 1
         local buttons = {}
@@ -1723,6 +1742,7 @@ function mainframe.run(config)
         end
     end
 
+    -- @section REACTOR VIEW AND CALIBRATION
     local function reactorView()
         local selected = 1
         local viewSilenceButton
@@ -2100,6 +2120,7 @@ function mainframe.run(config)
         end
     end
 
+    -- @section TURBINE VIEW
     local function turbineView()
         local selected = 1
         local previousButton, nextButton, backButton
@@ -2188,6 +2209,7 @@ function mainframe.run(config)
         end
     end
 
+    -- @section STORAGE VIEW
     local function storageView()
         local selected = 1
         local previousButton, nextButton, backButton
@@ -2356,6 +2378,7 @@ return mainframe
 ]=],
 
     ["mainframe/reactor_adapter.lua"] = [=[
+-- @section REACTOR PERIPHERAL ADAPTER
 local adapter = {}
 
 local function readAny(name, availableMethods, candidates)
@@ -2717,6 +2740,7 @@ local governor = {}
 local clearCooldown
 local saveProfile
 
+-- @section COMMON FUNCTIONS
 local function clamp(value, minimum, maximum)
     return math.max(minimum, math.min(maximum, value))
 end
@@ -2798,6 +2822,7 @@ function governor.new()
     return { reactors = {}, profileDirty = false }
 end
 
+-- @section CALIBRATION PROFILE STORAGE
 function governor.consumeProfileChanges(memory)
     local dirty = memory and memory.profileDirty == true
     if memory then memory.profileDirty = false end
@@ -2877,6 +2902,7 @@ function governor.saveCurrentCalibration(memory, control, reactor, context)
     return true
 end
 
+-- @section STEAM DEMAND AND SOURCE STATUS
 function governor.steamDemand(turbines, control)
     if #(turbines or {}) == 0 then
         return nil, 0, "No turbine telemetry is available"
@@ -2969,6 +2995,7 @@ clearCooldown = function(previous)
     previous.cooldownLastProgressAt = nil
 end
 
+-- @section LEARNING AND RESPONSE LOGIC
 local function observeCooldown(previous, reactor, control, context, production)
     local now = tonumber(context and context.now) or 0
     local casingTemperature = tonumber(reactor and reactor.casingTemperature)
@@ -3148,6 +3175,7 @@ local function saveBufferDefault(memory, control, name, exposure, production,
     return profile, changed
 end
 
+-- @section REACTOR GOVERNOR
 function governor.evaluate(memory, reactor, control, context, targetSteam, activeTurbines)
     memory.reactors = memory.reactors or {}
     control, context = control or {}, context or {}
@@ -3628,6 +3656,7 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
     return result
 end
 
+-- @section MULTI-REACTOR EVALUATION
 function governor.evaluateAll(memory, reactors, turbines, control, context)
     local demand, activeTurbines, demandError = governor.steamDemand(turbines, control)
     local turbineBufferPercent, bufferReadings = nil, 0
@@ -3670,6 +3699,7 @@ function governor.evaluateAll(memory, reactors, turbines, control, context)
     return reactors, demand, activeTurbines, demandError
 end
 
+-- @section ACTUATOR APPLICATION
 function governor.apply(memory, reactor, control, context, writers)
     control, context = control or {}, context or {}
     local plan = reactor and reactor.governor
@@ -3777,6 +3807,7 @@ return governor
 ]=],
 
     ["mainframe/storage_adapter.lua"] = [=[
+-- @section GENERIC STORAGE PERIPHERAL ADAPTER
 local adapter = {}
 local previousSamples = {}
 
@@ -4059,6 +4090,7 @@ return adapter
 ]=],
 
     ["mainframe/turbine_adapter.lua"] = [=[
+-- @section TURBINE PERIPHERAL ADAPTER
 local adapter = {}
 
 local function readAny(name, availableMethods, candidates)
@@ -4275,6 +4307,7 @@ return adapter
     ["mainframe/turbine_governor.lua"] = [=[
 local governor = {}
 
+-- @section COMMON FUNCTIONS
 local function clamp(value, minimum, maximum)
     return math.max(minimum, math.min(maximum, value))
 end
@@ -4334,6 +4367,7 @@ function governor.new()
     return { turbines = {}, profileDirty = false }
 end
 
+-- @section CALIBRATION PROFILE STORAGE
 function governor.requestSteamPrime(memory)
     memory.turbines = memory.turbines or {}
     for _, previous in pairs(memory.turbines) do
@@ -4375,6 +4409,7 @@ function governor.resetCalibration(memory, control, name)
     return true
 end
 
+-- @section TURBINE GOVERNOR
 function governor.evaluate(memory, turbine, control, context)
     control = control or {}
     context = context or {}
@@ -5064,6 +5099,7 @@ function governor.evaluate(memory, turbine, control, context)
     return result
 end
 
+-- @section ACTUATOR APPLICATION
 function governor.apply(memory, turbine, control, context, writers)
     control = control or {}
     context = context or {}
@@ -5156,6 +5192,7 @@ function governor.apply(memory, turbine, control, context, writers)
     return plan
 end
 
+-- @section MULTI-TURBINE EVALUATION
 function governor.applyAll(memory, turbines, control, context, writers)
     for _, turbine in ipairs(turbines or {}) do
         governor.apply(memory, turbine, control, context, writers)
@@ -5181,6 +5218,7 @@ return governor
     ["terminal/main.lua"] = [=[
 local terminal = {}
 
+-- @section REMOTE TERMINAL RUNTIME
 function terminal.run(config)
     local display = dofile("/helios/core/display.lua")
     display.start(config)
@@ -5212,6 +5250,7 @@ function terminal.run(config)
         return rawName or "UNKNOWN"
     end
 
+    -- @section LOCAL ALARMS
     local function playSound(sound, pitch, volume)
         for _, name in ipairs(peripheral.getNames()) do
             if peripheral.hasType(name, "speaker") then
@@ -5242,6 +5281,7 @@ function terminal.run(config)
         end
     end
 
+    -- @section MAINFRAME LINK
     local function sendHello()
         network.broadcast({
             helios = true,
@@ -5291,6 +5331,7 @@ function terminal.run(config)
         term.setTextColor(colors.white)
     end
 
+    -- @section TELEMETRY VIEWS
     local function renderList(title, list, state, drawItem)
         ui.header("REMOTE " .. title, "Read-only mainframe telemetry")
         local link, colour = statusLine()
@@ -5428,6 +5469,7 @@ function terminal.run(config)
         print("Q exits on the terminal keyboard")
     end
 
+    -- @section EVENT LOOP AND RENDERING
     local function render()
         previousButton, nextButton, silenceButton, testButton = nil, nil, nil, nil
         ui.setIdConflicts(idConflicts)

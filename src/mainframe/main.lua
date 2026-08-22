@@ -1,5 +1,6 @@
 local mainframe = {}
 
+-- @section STARTUP AND RUNTIME STATE
 function mainframe.run(config)
     local display = dofile("/helios/core/display.lua")
     display.start(config)
@@ -41,6 +42,7 @@ function mainframe.run(config)
 
     local timeoutChoices = { 300, 900, 1800, 3600 }
 
+    -- @section DISCOVERY AND NETWORK IDENTITY
     local function sameList(a, b)
         if #a ~= #b then return false end
         for index = 1, #a do if a[index] ~= b[index] then return false end end
@@ -111,6 +113,7 @@ function mainframe.run(config)
         registryStale = false
     end
 
+    -- @section ALARMS
     local function playSound(sound, pitch, force)
         if not config.alarms.enabled and not force then return end
         for _, name in ipairs(peripheral.getNames()) do
@@ -227,6 +230,7 @@ function mainframe.run(config)
         end
     end
 
+    -- @section TELEMETRY AND GOVERNORS
     local function pollReactors()
         reactors = reactorAdapter.readAll(devices)
         turbines = turbineAdapter.readAll(devices)
@@ -290,6 +294,7 @@ function mainframe.run(config)
         return currentAlarm and (currentAlarm.level .. ":" .. currentAlarm.key) or nil
     end
 
+    -- @section REMOTE TELEMETRY
     local function snapshotFor(assignment)
         local includeAll = assignment == "all"
         return {
@@ -467,6 +472,7 @@ function mainframe.run(config)
         return "AUTOMATIC / NO CONTROLLED PLANT", colors.gray
     end
 
+    -- @section MAIN DASHBOARD
     local function render()
         ui.setIdConflicts(idConflicts)
         ui.header("MAINFRAME", "Central control authority")
@@ -542,6 +548,7 @@ function mainframe.run(config)
         term.setTextColor(colors.white)
     end
 
+    -- @section CONTROL VIEW
     local function controlView()
         local selected = 1
         local buttons = {}
@@ -643,6 +650,7 @@ function mainframe.run(config)
         end
     end
 
+    -- @section SETTINGS
     local function namingSettings()
         local selected = 1
         local buttons = {}
@@ -945,6 +953,7 @@ function mainframe.run(config)
         end
     end
 
+    -- @section REACTOR VIEW AND CALIBRATION
     local function reactorView()
         local selected = 1
         local viewSilenceButton
@@ -1322,6 +1331,7 @@ function mainframe.run(config)
         end
     end
 
+    -- @section TURBINE VIEW
     local function turbineView()
         local selected = 1
         local previousButton, nextButton, backButton
@@ -1410,6 +1420,7 @@ function mainframe.run(config)
         end
     end
 
+    -- @section STORAGE VIEW
     local function storageView()
         local selected = 1
         local previousButton, nextButton, backButton
