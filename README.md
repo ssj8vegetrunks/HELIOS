@@ -1,6 +1,11 @@
-# HELIOS - v1.4.0 Alpha 19 Live Reactor Calibration Progress
+# HELIOS - v1.5.0 Alpha 1 External Module Pack
 
 Industrial power management for **CC:Tweaked** and **Extreme Reactors**.
+
+HELIOS Core and its peripheral adapters are now independently versioned. The
+mainframe installer retrieves the official Module Pack from GitHub; remote
+terminals install Core only. The tested reactor, turbine, and storage adapter
+logic is unchanged in this first modular release.
 
 This milestone adds guarded reactor steam regulation to the automatic turbine
 governor. HELIOS now matches one steam reactor to the trusted intake
@@ -125,6 +130,7 @@ helios scan
 helios reactors
 helios turbines
 helios storage
+helios modules update
 ```
 
 The installed layout is:
@@ -137,21 +143,30 @@ The installed layout is:
   core/
     config.lua
     display.lua
+    module_loader.lua
+    module_manager.lua
     network.lua
     power_format.lua
     ui.lua
   mainframe/
     device_registry.lua
-    reactor_adapter.lua
     reactor_governor.lua
-    turbine_adapter.lua
     turbine_governor.lua
-    storage_adapter.lua
     main.lua
+  modules/
+    manifest.json
+    extreme_reactors/
+      reactor_adapter.lua
+      turbine_adapter.lua
+    universal_energy/
+      storage_adapter.lua
   terminal/
     main.lua
 /startup/99-helios.lua
 ```
+
+See [`docs/MODULE_API.md`](docs/MODULE_API.md) for the manifest, compatibility,
+and adapter-loading contract.
 
 If `/startup` is already a program, the installer asks permission before
 converting it into a startup directory. The original is preserved as

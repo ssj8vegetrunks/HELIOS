@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "pack": {
+    "id": "helios_official",
+    "name": "HELIOS Official Module Pack",
+    "version": "0.1.0-alpha.1"
+  },
+  "compatible_core_versions": [
+    "1.5.0-alpha.1"
+  ],
+  "modules": [
+    {
+      "id": "extreme_reactors",
+      "name": "Extreme Reactors",
+      "version": "1.0.0",
+      "provides": [
+        {
+          "capability": "reactor_adapter",
+          "path": "extreme_reactors/reactor_adapter.lua"
+        },
+        {
+          "capability": "turbine_adapter",
+          "path": "extreme_reactors/turbine_adapter.lua"
+        }
+      ]
+    },
+    {
+      "id": "universal_energy",
+      "name": "Universal Energy Storage",
+      "version": "1.0.0",
+      "supports": [
+        "generic_energy",
+        "mekanism_induction"
+      ],
+      "provides": [
+        {
+          "capability": "storage_adapter",
+          "path": "universal_energy/storage_adapter.lua"
+        }
+      ]
+    }
+  ]
+}

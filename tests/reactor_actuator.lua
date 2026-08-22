@@ -30,7 +30,7 @@ peripheral = {
     end,
 }
 
-local adapter = dofile("src/mainframe/reactor_adapter.lua")
+local adapter = dofile("module-pack/extreme_reactors/reactor_adapter.lua")
 local reactor = { name = "reactor_0", controlRods = 3 }
 
 local activeOk, reportedActive, activeReason = adapter.setActive(reactor, true)

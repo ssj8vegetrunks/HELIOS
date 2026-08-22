@@ -7,12 +7,16 @@ function mainframe.run(config)
     local ui = dofile("/helios/core/ui.lua")
     ui.setVersion(config.version)
     local configStore = dofile("/helios/core/config.lua")
+    local moduleLoader = dofile("/helios/core/module_loader.lua")
     local registry = dofile("/helios/mainframe/device_registry.lua")
-    local reactorAdapter = dofile("/helios/mainframe/reactor_adapter.lua")
+    local reactorAdapter, reactorModuleError = moduleLoader.load("reactor_adapter", config.version)
+    if not reactorAdapter then error(reactorModuleError, 0) end
     local reactorGovernor = dofile("/helios/mainframe/reactor_governor.lua")
-    local turbineAdapter = dofile("/helios/mainframe/turbine_adapter.lua")
+    local turbineAdapter, turbineModuleError = moduleLoader.load("turbine_adapter", config.version)
+    if not turbineAdapter then error(turbineModuleError, 0) end
     local turbineGovernor = dofile("/helios/mainframe/turbine_governor.lua")
-    local storageAdapter = dofile("/helios/mainframe/storage_adapter.lua")
+    local storageAdapter, storageModuleError = moduleLoader.load("storage_adapter", config.version)
+    if not storageAdapter then error(storageModuleError, 0) end
     local powerFormat = dofile("/helios/core/power_format.lua")
     local network = dofile("/helios/core/network.lua")
     local devices = {}

@@ -36,7 +36,7 @@ peripheral = {
     end,
 }
 
-local adapter = dofile("src/mainframe/turbine_adapter.lua")
+local adapter = dofile("module-pack/extreme_reactors/turbine_adapter.lua")
 local turbine = { name = "turbine_0", flowRateLimit = 2000 }
 
 local reading = adapter.read(turbine)

@@ -1,9 +1,10 @@
 -- HELIOS single-file installer
--- Milestone 8.5: coordinated reactor-first steam startup.
+-- Step 3 alpha: external peripheral Module Pack.
 
-local VERSION = "1.4.1-alpha.23"
+local VERSION = "1.5.0-alpha.1"
 local INSTALL_DIR = "/helios"
 local STAGE_DIR = "/.helios-install"
+local MODULE_PACK_BASE_URL = "https://raw.githubusercontent.com/ssj8vegetrunks/HELIOS/agent/alpha14-release/module-pack"
 
 local function clear()
     term.setBackgroundColor(colors.black)
@@ -59,6 +60,91 @@ local function writeFile(path, contents)
     if not handle then error("Could not write " .. path .. ": " .. tostring(reason), 0) end
     handle.write(contents)
     handle.close()
+end
+
+local function fetchText(url)
+    if not http or not http.get then
+        error("CC:Tweaked HTTP is disabled; the HELIOS Module Pack cannot be downloaded.", 0)
+    end
+    local handle, reason = http.get(url)
+    if not handle then error("Could not download " .. url .. ": " .. tostring(reason), 0) end
+    local contents = handle.readAll()
+    handle.close()
+    return contents
+end
+
+local function safeModulePath(path)
+    return type(path) == "string" and path ~= "" and
+        string.sub(path, 1, 1) ~= "/" and
+        not string.find(path, "..", 1, true) and
+        not string.find(path, "\\", 1, true)
+end
+
+local function validateModuleManifest(manifest)
+    if type(manifest) ~= "table" or manifest.schema_version ~= 1 or
+       type(manifest.pack) ~= "table" or type(manifest.pack.version) ~= "string" or
+       type(manifest.compatible_core_versions) ~= "table" or
+       type(manifest.modules) ~= "table" then
+        return false, "The downloaded HELIOS Module Pack manifest is invalid."
+    end
+    local moduleIds, capabilities = {}, {}
+    for _, module in ipairs(manifest.modules) do
+        if type(module) ~= "table" or type(module.id) ~= "string" or module.id == "" or
+           type(module.name) ~= "string" or type(module.version) ~= "string" or
+           type(module.provides) ~= "table" then
+            return false, "The Module Pack contains invalid module metadata."
+        end
+        if moduleIds[module.id] then
+            return false, "The Module Pack duplicates module id " .. module.id .. "."
+        end
+        moduleIds[module.id] = true
+        for _, provider in ipairs(module.provides) do
+            if type(provider) ~= "table" or type(provider.capability) ~= "string" or
+               provider.capability == "" or not safeModulePath(provider.path) then
+                return false, "The Module Pack contains an invalid capability provider."
+            end
+            if capabilities[provider.capability] then
+                return false, "The Module Pack duplicates capability " .. provider.capability .. "."
+            end
+            capabilities[provider.capability] = true
+        end
+    end
+    return true
+end
+
+local function installModulePack(stageDir)
+    local encoded = fetchText(MODULE_PACK_BASE_URL .. "/manifest.json")
+    local ok, manifest = pcall(textutils.unserializeJSON, encoded)
+    if not ok or type(manifest) ~= "table" then
+        error("The downloaded HELIOS Module Pack manifest is invalid.", 0)
+    end
+    local valid, validationReason = validateModuleManifest(manifest)
+    if not valid then error(validationReason, 0) end
+    local compatible = false
+    for _, version in ipairs(manifest.compatible_core_versions or {}) do
+        if version == VERSION then compatible = true break end
+    end
+    if not compatible then
+        error("Module Pack " .. tostring(manifest.pack.version or "unknown") ..
+            " is not compatible with HELIOS Core " .. VERSION .. ".", 0)
+    end
+
+    local downloaded = {}
+    for _, module in ipairs(manifest.modules) do
+        for _, provider in ipairs(module.provides or {}) do
+            local path = provider.path
+            if not safeModulePath(path) then
+                error("Module Pack contains an unsafe path: " .. tostring(path), 0)
+            end
+            if not downloaded[path] then
+                writeFile(fs.combine(fs.combine(stageDir, "modules"), path),
+                    fetchText(MODULE_PACK_BASE_URL .. "/" .. path))
+                downloaded[path] = true
+            end
+        end
+    end
+    writeFile(fs.combine(fs.combine(stageDir, "modules"), "manifest.json"), encoded)
+    return manifest.pack.version
 end
 
 local function removeOldBackups()
@@ -329,6 +415,287 @@ function display.count()
 end
 
 return display
+]=],
+
+    ["core/module_loader.lua"] = [=[
+-- @section MODULE PACK MANIFEST
+local loader = {}
+local ROOT = "/helios/modules"
+local MANIFEST_PATH = ROOT .. "/manifest.json"
+
+local manifestCache
+
+local function readFile(path)
+    local handle, reason = fs.open(path, "r")
+    if not handle then return nil, reason end
+    local contents = handle.readAll()
+    handle.close()
+    return contents
+end
+
+local function safeRelativePath(path)
+    return type(path) == "string" and path ~= "" and
+        string.sub(path, 1, 1) ~= "/" and
+        not string.find(path, "..", 1, true) and
+        not string.find(path, "\\", 1, true)
+end
+
+local function validateManifest(manifest)
+    if type(manifest) ~= "table" or manifest.schema_version ~= 1 or
+       type(manifest.pack) ~= "table" or type(manifest.pack.version) ~= "string" or
+       type(manifest.compatible_core_versions) ~= "table" or
+       type(manifest.modules) ~= "table" then
+        return false, "Module manifest uses an unsupported schema"
+    end
+    local moduleIds, capabilities = {}, {}
+    for _, module in ipairs(manifest.modules) do
+        if type(module) ~= "table" or type(module.id) ~= "string" or module.id == "" or
+           type(module.name) ~= "string" or type(module.version) ~= "string" or
+           type(module.provides) ~= "table" then
+            return false, "Module manifest contains invalid module metadata"
+        end
+        if moduleIds[module.id] then
+            return false, "Module manifest duplicates module id " .. module.id
+        end
+        moduleIds[module.id] = true
+        for _, provider in ipairs(module.provides) do
+            if type(provider) ~= "table" or type(provider.capability) ~= "string" or
+               provider.capability == "" or not safeRelativePath(provider.path) then
+                return false, "Module manifest contains an invalid capability provider"
+            end
+            if capabilities[provider.capability] then
+                return false, "Module manifest duplicates capability " .. provider.capability
+            end
+            capabilities[provider.capability] = true
+        end
+    end
+    return true
+end
+
+local function coreCompatible(manifest, coreVersion)
+    if not coreVersion then return true end
+    for _, version in ipairs(manifest.compatible_core_versions or {}) do
+        if version == coreVersion then return true end
+    end
+    return false
+end
+
+function loader.manifest(coreVersion)
+    if not manifestCache then
+        local encoded, reason = readFile(MANIFEST_PATH)
+        if not encoded then return nil, "Module manifest unavailable: " .. tostring(reason) end
+        local ok, decoded = pcall(textutils.unserializeJSON, encoded)
+        if not ok or type(decoded) ~= "table" then
+            return nil, "Module manifest is invalid JSON"
+        end
+        local valid, validationReason = validateManifest(decoded)
+        if not valid then return nil, validationReason end
+        manifestCache = decoded
+    end
+    if not coreCompatible(manifestCache, coreVersion) then
+        return nil, "Module Pack " .. tostring((manifestCache.pack or {}).version or "unknown") ..
+            " is not compatible with HELIOS Core " .. tostring(coreVersion)
+    end
+    return manifestCache
+end
+
+-- @section MODULE RESOLUTION AND LOADING
+function loader.resolve(capability, coreVersion)
+    local manifest, reason = loader.manifest(coreVersion)
+    if not manifest then return nil, reason end
+    for _, module in ipairs(manifest.modules) do
+        for _, provider in ipairs(module.provides or {}) do
+            if provider.capability == capability then
+                if not safeRelativePath(provider.path) then
+                    return nil, "Module path is unsafe: " .. tostring(provider.path)
+                end
+                return {
+                    path = ROOT .. "/" .. provider.path,
+                    capability = capability,
+                    moduleId = module.id,
+                    moduleName = module.name,
+                    moduleVersion = module.version,
+                    packVersion = manifest.pack.version,
+                }
+            end
+        end
+    end
+    return nil, "No installed HELIOS module provides " .. tostring(capability)
+end
+
+function loader.load(capability, coreVersion)
+    local resolved, reason = loader.resolve(capability, coreVersion)
+    if not resolved then return nil, reason end
+    if not fs.exists(resolved.path) then
+        return nil, "Module file is missing: " .. resolved.path
+    end
+    local ok, implementation = pcall(dofile, resolved.path)
+    if not ok then return nil, "Module failed to load: " .. tostring(implementation) end
+    if type(implementation) ~= "table" then
+        return nil, "Module did not return an adapter table: " .. resolved.path
+    end
+    return implementation, resolved
+end
+
+function loader.versions(coreVersion)
+    local manifest, reason = loader.manifest(coreVersion)
+    if not manifest then return nil, reason end
+    local versions = {
+        pack = manifest.pack.version,
+        modules = {},
+    }
+    for _, module in ipairs(manifest.modules) do
+        versions.modules[#versions.modules + 1] = {
+            id = module.id,
+            name = module.name,
+            version = module.version,
+        }
+    end
+    return versions
+end
+
+return loader
+]=],
+
+    ["core/module_manager.lua"] = [=[
+-- @section MODULE PACK DOWNLOAD AND VALIDATION
+local manager = {}
+local BASE_URL = "https://raw.githubusercontent.com/ssj8vegetrunks/HELIOS/agent/alpha14-release/module-pack"
+local MODULE_DIR = "/helios/modules"
+local STAGE_DIR = "/.helios-module-update"
+local BACKUP_DIR = "/helios/modules.previous"
+
+local function fetchText(url)
+    if not http or not http.get then
+        return nil, "CC:Tweaked HTTP is disabled"
+    end
+    local handle, reason = http.get(url)
+    if not handle then return nil, tostring(reason) end
+    local contents = handle.readAll()
+    handle.close()
+    return contents
+end
+
+local function writeFile(path, contents)
+    local parent = fs.getDir(path)
+    if parent ~= "" and not fs.exists(parent) then fs.makeDir(parent) end
+    local handle, reason = fs.open(path, "w")
+    if not handle then return false, reason end
+    handle.write(contents)
+    handle.close()
+    return true
+end
+
+local function safeRelativePath(path)
+    return type(path) == "string" and path ~= "" and
+        string.sub(path, 1, 1) ~= "/" and
+        not string.find(path, "..", 1, true) and
+        not string.find(path, "\\", 1, true)
+end
+
+local function validateManifest(manifest)
+    if type(manifest) ~= "table" or manifest.schema_version ~= 1 or
+       type(manifest.pack) ~= "table" or type(manifest.pack.version) ~= "string" or
+       type(manifest.compatible_core_versions) ~= "table" or
+       type(manifest.modules) ~= "table" then
+        return false, "Downloaded Module Pack manifest is invalid"
+    end
+    local moduleIds, capabilities = {}, {}
+    for _, module in ipairs(manifest.modules) do
+        if type(module) ~= "table" or type(module.id) ~= "string" or module.id == "" or
+           type(module.name) ~= "string" or type(module.version) ~= "string" or
+           type(module.provides) ~= "table" then
+            return false, "Downloaded Module Pack contains invalid module metadata"
+        end
+        if moduleIds[module.id] then
+            return false, "Downloaded Module Pack duplicates module id " .. module.id
+        end
+        moduleIds[module.id] = true
+        for _, provider in ipairs(module.provides) do
+            if type(provider) ~= "table" or type(provider.capability) ~= "string" or
+               provider.capability == "" or not safeRelativePath(provider.path) then
+                return false, "Downloaded Module Pack contains an invalid capability provider"
+            end
+            if capabilities[provider.capability] then
+                return false, "Downloaded Module Pack duplicates capability " .. provider.capability
+            end
+            capabilities[provider.capability] = true
+        end
+    end
+    return true
+end
+
+local function compatible(manifest, coreVersion)
+    for _, version in ipairs(manifest.compatible_core_versions or {}) do
+        if version == coreVersion then return true end
+    end
+    return false
+end
+
+local function download(coreVersion)
+    local encoded, reason = fetchText(BASE_URL .. "/manifest.json")
+    if not encoded then return nil, "Could not download Module Pack manifest: " .. reason end
+    local ok, manifest = pcall(textutils.unserializeJSON, encoded)
+    if not ok or type(manifest) ~= "table" then
+        return nil, "Downloaded Module Pack manifest is invalid"
+    end
+    local valid, validationReason = validateManifest(manifest)
+    if not valid then return nil, validationReason end
+    if not compatible(manifest, coreVersion) then
+        return nil, "Module Pack " .. tostring(manifest.pack.version or "unknown") ..
+            " is incompatible with HELIOS Core " .. tostring(coreVersion)
+    end
+
+    if fs.exists(STAGE_DIR) then fs.delete(STAGE_DIR) end
+    fs.makeDir(STAGE_DIR)
+    local downloaded = {}
+    for _, module in ipairs(manifest.modules) do
+        for _, provider in ipairs(module.provides or {}) do
+            local path = provider.path
+            if not safeRelativePath(path) then
+                fs.delete(STAGE_DIR)
+                return nil, "Module Pack contains an unsafe path: " .. tostring(path)
+            end
+            if not downloaded[path] then
+                local contents, fileReason = fetchText(BASE_URL .. "/" .. path)
+                if not contents then
+                    fs.delete(STAGE_DIR)
+                    return nil, "Could not download " .. path .. ": " .. tostring(fileReason)
+                end
+                local wrote, writeReason = writeFile(fs.combine(STAGE_DIR, path), contents)
+                if not wrote then
+                    fs.delete(STAGE_DIR)
+                    return nil, "Could not stage " .. path .. ": " .. tostring(writeReason)
+                end
+                downloaded[path] = true
+            end
+        end
+    end
+    local wrote, writeReason = writeFile(fs.combine(STAGE_DIR, "manifest.json"), encoded)
+    if not wrote then
+        fs.delete(STAGE_DIR)
+        return nil, "Could not stage manifest: " .. tostring(writeReason)
+    end
+    return manifest
+end
+
+-- @section ATOMIC MODULE PACK UPDATE
+function manager.update(coreVersion)
+    local manifest, reason = download(coreVersion)
+    if not manifest then return false, reason end
+    if fs.exists(BACKUP_DIR) then fs.delete(BACKUP_DIR) end
+    if fs.exists(MODULE_DIR) then fs.move(MODULE_DIR, BACKUP_DIR) end
+    local ok, moveReason = pcall(fs.move, STAGE_DIR, MODULE_DIR)
+    if not ok then
+        if fs.exists(MODULE_DIR) then fs.delete(MODULE_DIR) end
+        if fs.exists(BACKUP_DIR) then fs.move(BACKUP_DIR, MODULE_DIR) end
+        return false, "Module Pack update rolled back: " .. tostring(moveReason)
+    end
+    if fs.exists(BACKUP_DIR) then fs.delete(BACKUP_DIR) end
+    return true, manifest.pack.version
+end
+
+return manager
 ]=],
 
     ["core/network.lua"] = [=[
@@ -602,6 +969,17 @@ return ui
 local args = { ... }
 local config = dofile("/helios/core/config.lua").load()
 
+if args[1] == "modules" and args[2] == "update" then
+    if config.role ~= "mainframe" then
+        error("Only a HELIOS mainframe installs peripheral modules.", 0)
+    end
+    print("Updating HELIOS Module Pack...")
+    local ok, result = dofile("/helios/core/module_manager.lua").update(config.version)
+    if not ok then error(result, 0) end
+    print("Module Pack " .. tostring(result) .. " installed. Restart HELIOS to load it.")
+    return
+end
+
 if args[1] == "unpair" then
     if config.role ~= "terminal" then
         error("Only a HELIOS remote terminal can be unpaired.", 0)
@@ -614,8 +992,20 @@ if args[1] == "unpair" then
 end
 
 if args[1] == "status" then
-    print("HELIOS " .. tostring(config.version))
+    print("HELIOS Core: " .. tostring(config.version))
     print("Role: " .. tostring(config.role))
+    if config.role == "mainframe" then
+        local moduleLoader = dofile("/helios/core/module_loader.lua")
+        local versions, reason = moduleLoader.versions(config.version)
+        if versions then
+            print("Module Pack: " .. tostring(versions.pack))
+            for _, module in ipairs(versions.modules) do
+                print(("  %s: %s"):format(module.name or module.id, module.version or "unknown"))
+            end
+        else
+            print("Module Pack: ERROR - " .. tostring(reason))
+        end
+    end
     if config.role == "terminal" then
         print("Display: " .. tostring(config.display))
         print("Mainframe ID: " .. tostring(config.mainframeId or "not paired"))
@@ -640,7 +1030,8 @@ if args[1] == "reactors" then
         error("Only the HELIOS mainframe can read reactor telemetry.", 0)
     end
     local registry = dofile("/helios/mainframe/device_registry.lua")
-    local adapter = dofile("/helios/mainframe/reactor_adapter.lua")
+    local adapter, reason = dofile("/helios/core/module_loader.lua").load("reactor_adapter", config.version)
+    if not adapter then error(reason, 0) end
     local formatter = dofile("/helios/core/power_format.lua")
     local devices = registry.scan()
     adapter.printReport(adapter.readAll(devices), config, formatter)
@@ -652,7 +1043,8 @@ if args[1] == "turbines" then
         error("Only the HELIOS mainframe can read turbine telemetry.", 0)
     end
     local registry = dofile("/helios/mainframe/device_registry.lua")
-    local adapter = dofile("/helios/mainframe/turbine_adapter.lua")
+    local adapter, reason = dofile("/helios/core/module_loader.lua").load("turbine_adapter", config.version)
+    if not adapter then error(reason, 0) end
     local formatter = dofile("/helios/core/power_format.lua")
     local devices = registry.scan()
     adapter.printReport(adapter.readAll(devices), config, formatter)
@@ -664,7 +1056,8 @@ if args[1] == "storage" or args[1] == "batteries" then
         error("Only the HELIOS mainframe can read energy-storage telemetry.", 0)
     end
     local registry = dofile("/helios/mainframe/device_registry.lua")
-    local adapter = dofile("/helios/mainframe/storage_adapter.lua")
+    local adapter, reason = dofile("/helios/core/module_loader.lua").load("storage_adapter", config.version)
+    if not adapter then error(reason, 0) end
     local formatter = dofile("/helios/core/power_format.lua")
     local devices = registry.scan()
     adapter.printReport(adapter.readAll(devices, config.power), config, formatter)
@@ -796,12 +1189,16 @@ function mainframe.run(config)
     local ui = dofile("/helios/core/ui.lua")
     ui.setVersion(config.version)
     local configStore = dofile("/helios/core/config.lua")
+    local moduleLoader = dofile("/helios/core/module_loader.lua")
     local registry = dofile("/helios/mainframe/device_registry.lua")
-    local reactorAdapter = dofile("/helios/mainframe/reactor_adapter.lua")
+    local reactorAdapter, reactorModuleError = moduleLoader.load("reactor_adapter", config.version)
+    if not reactorAdapter then error(reactorModuleError, 0) end
     local reactorGovernor = dofile("/helios/mainframe/reactor_governor.lua")
-    local turbineAdapter = dofile("/helios/mainframe/turbine_adapter.lua")
+    local turbineAdapter, turbineModuleError = moduleLoader.load("turbine_adapter", config.version)
+    if not turbineAdapter then error(turbineModuleError, 0) end
     local turbineGovernor = dofile("/helios/mainframe/turbine_governor.lua")
-    local storageAdapter = dofile("/helios/mainframe/storage_adapter.lua")
+    local storageAdapter, storageModuleError = moduleLoader.load("storage_adapter", config.version)
+    if not storageAdapter then error(storageModuleError, 0) end
     local powerFormat = dofile("/helios/core/power_format.lua")
     local network = dofile("/helios/core/network.lua")
     local devices = {}
@@ -2377,364 +2774,6 @@ end
 return mainframe
 ]=],
 
-    ["mainframe/reactor_adapter.lua"] = [=[
--- @section REACTOR PERIPHERAL ADAPTER
-local adapter = {}
-
-local function readAny(name, availableMethods, candidates)
-    for _, method in ipairs(candidates) do
-        if availableMethods[method] then
-            local ok, value = pcall(peripheral.call, name, method)
-            if ok and value ~= nil then return value, method end
-        end
-    end
-    return nil, nil
-end
-
-local function number(value)
-    value = tonumber(value)
-    if value ~= value then return nil end
-    return value
-end
-
-local function percent(amount, maximum)
-    amount, maximum = number(amount), number(maximum)
-    if not amount or not maximum or maximum <= 0 then return nil end
-    return math.max(0, math.min(100, amount / maximum * 100))
-end
-
-local function availableMethods(name)
-    local methods = {}
-    for _, method in ipairs(peripheral.getMethods(name) or {}) do
-        methods[method] = true
-    end
-    return methods
-end
-
-local function rodLevels(name, methods, count)
-    local levels
-    if methods.getControlRodLevel and count and count > 0 then
-        levels = {}
-        for index = 0, count - 1 do
-            local ok, value = pcall(peripheral.call, name, "getControlRodLevel", index)
-            if not ok or tonumber(value) == nil then return nil end
-            levels[index] = tonumber(value)
-        end
-    end
-    if not levels and methods.getControlRodsLevels then
-        local ok, values = pcall(peripheral.call, name, "getControlRodsLevels")
-        if ok and type(values) == "table" then
-            levels = {}
-            local zeroBased = values[0] ~= nil
-            for index = 0, (count or #values) - 1 do
-                levels[index] = tonumber(values[zeroBased and index or (index + 1)])
-                if levels[index] == nil then return nil end
-            end
-        end
-    end
-    return levels
-end
-
-local function rodSummary(levels)
-    if type(levels) ~= "table" then return nil, nil, nil end
-    local total, count, minimum, maximum = 0, 0
-    for _, value in pairs(levels) do
-        value = number(value)
-        if value then
-            total, count = total + value, count + 1
-            minimum = minimum and math.min(minimum, value) or value
-            maximum = maximum and math.max(maximum, value) or value
-        end
-    end
-    if count == 0 then return nil, nil, nil end
-    return total / count, minimum, maximum
-end
-
-function adapter.read(device)
-    local name = device.name
-    local reactor = { name = name, available = peripheral.isPresent(name) }
-    if not reactor.available then
-        reactor.error = "Peripheral unavailable"
-        return reactor
-    end
-
-    local availableMethods = availableMethods(name)
-
-    reactor.connected = readAny(name, availableMethods, { "getConnected", "isConnected", "mbIsConnected", "mbIsAssembled", "connected" })
-    reactor.active = readAny(name, availableMethods, { "getActive", "isActive", "active" })
-    reactor.activelyCooled = readAny(name, availableMethods, { "isActivelyCooled" })
-    reactor.fuel = number(readAny(name, availableMethods, { "getFuelAmount", "fuelAmount" }))
-    reactor.fuelMax = number(readAny(name, availableMethods, { "getFuelAmountMax", "getFuelCapacity", "fuelAmountMax" }))
-    reactor.waste = number(readAny(name, availableMethods, { "getWasteAmount", "wasteAmount" }))
-    reactor.fuelUse = number(readAny(name, availableMethods, { "getFuelConsumedLastTick", "getFuelConsumptionRate", "fuelConsumedLastTick" }))
-    reactor.fuelTemperature = number(readAny(name, availableMethods, { "getFuelTemperature", "fuelTemperature" }))
-    reactor.casingTemperature = number(readAny(name, availableMethods, { "getCasingTemperature", "casingTemperature" }))
-    reactor.energy = number(readAny(name, availableMethods, { "getEnergyStored", "getEnergy", "energyStored" }))
-    reactor.energyMax = number(readAny(name, availableMethods, { "getEnergyCapacity", "getMaxEnergyStored", "energyCapacity" }))
-    reactor.energyProduction = number(readAny(name, availableMethods, { "getEnergyProducedLastTick", "getEnergyProductionRate", "energyProducedLastTick" }))
-    reactor.coolant = number(readAny(name, availableMethods, { "getCoolantAmount", "coolantAmount" }))
-    reactor.coolantMax = number(readAny(name, availableMethods, { "getCoolantAmountMax", "getCoolantCapacity", "coolantAmountMax" }))
-    reactor.hotFluid = number(readAny(name, availableMethods, { "getHotFluidAmount", "hotFluidAmount" }))
-    reactor.hotFluidMax = number(readAny(name, availableMethods, { "getHotFluidAmountMax", "getHotFluidCapacity", "hotFluidAmountMax" }))
-    reactor.steamProduction = number(readAny(name, availableMethods, { "getHotFluidProducedLastTick", "getSteamProducedLastTick", "hotFluidProducedLastTick" }))
-    reactor.controlRods = number(readAny(name, availableMethods, { "getNumberOfControlRods", "getControlRodCount" }))
-    reactor.controlRodLevels = rodLevels(name, availableMethods, reactor.controlRods)
-    reactor.controlRodLevel, reactor.controlRodMinimum, reactor.controlRodMaximum =
-        rodSummary(reactor.controlRodLevels)
-    if reactor.controlRodLevel and reactor.controlRods then
-        reactor.controlRodExposure = reactor.controlRods *
-            (100 - reactor.controlRodLevel) / 100
-    end
-
-    reactor.fuelPercent = percent(reactor.fuel, reactor.fuelMax)
-    reactor.energyPercent = percent(reactor.energy, reactor.energyMax)
-    reactor.coolantPercent = percent(reactor.coolant, reactor.coolantMax)
-    reactor.hotFluidPercent = percent(reactor.hotFluid, reactor.hotFluidMax)
-
-    if reactor.activelyCooled == true then
-        reactor.mode = "steam"
-    elseif reactor.activelyCooled == false then
-        reactor.mode = "power"
-    elseif (reactor.coolantMax and reactor.coolantMax > 0) or
-       (reactor.hotFluidMax and reactor.hotFluidMax > 0) then
-        reactor.mode = "steam"
-    elseif reactor.energyMax or reactor.energyProduction then
-        reactor.mode = "power"
-    else
-        reactor.mode = "unknown"
-    end
-
-    local useful = reactor.active ~= nil or reactor.fuel ~= nil or
-        reactor.energyProduction ~= nil or reactor.steamProduction ~= nil
-    if reactor.connected == false then
-        reactor.error = "Reactor is not connected"
-    elseif not useful then
-        reactor.error = "No supported telemetry methods"
-    end
-    return reactor
-end
-
-function adapter.setAllControlRodLevels(reactor, requested, pauseBeforeVerify)
-    if type(reactor) ~= "table" or type(reactor.name) ~= "string" then
-        return false, nil, "Invalid reactor identity"
-    end
-    if not peripheral.isPresent(reactor.name) then
-        return false, nil, "Peripheral unavailable"
-    end
-
-    local methods = availableMethods(reactor.name)
-    if not methods.setAllControlRodLevels or
-       (not methods.getControlRodsLevels and not methods.getControlRodLevel) then
-        return false, nil, "Verified control-rod control is unavailable"
-    end
-
-    requested = tonumber(requested)
-    if not requested then return false, nil, "Invalid control-rod level" end
-    requested = math.max(0, math.min(100, math.floor(requested + 0.5)))
-
-    local ok, reason = pcall(peripheral.call, reactor.name,
-        "setAllControlRodLevels", requested)
-    if not ok then return false, nil, tostring(reason) end
-    if type(pauseBeforeVerify) == "function" then pauseBeforeVerify() end
-
-    local count = tonumber(reactor.controlRods)
-    if not count and methods.getNumberOfControlRods then
-        local countOk, value = pcall(peripheral.call, reactor.name,
-            "getNumberOfControlRods")
-        if countOk then count = tonumber(value) end
-    end
-    local levels = rodLevels(reactor.name, methods, count)
-    local average, minimum, maximum = rodSummary(levels)
-    if average == nil then return false, nil, "Control-rod verification failed" end
-    if minimum ~= requested or maximum ~= requested then
-        return false, average, ("Requested %d%%; reactor reports %.0f-%.0f%%"):format(
-            requested, minimum, maximum)
-    end
-    return true, average
-end
-
-function adapter.setActive(reactor, requested, pauseBeforeVerify)
-    if type(reactor) ~= "table" or type(reactor.name) ~= "string" then
-        return false, nil, "Invalid reactor identity"
-    end
-    if not peripheral.isPresent(reactor.name) then
-        return false, nil, "Peripheral unavailable"
-    end
-
-    local methods = availableMethods(reactor.name)
-    if not methods.setActive then
-        return false, nil, "Verified reactor activation control is unavailable"
-    end
-    local readMethod
-    for _, candidate in ipairs({ "getActive", "isActive", "active" }) do
-        if methods[candidate] then readMethod = candidate break end
-    end
-    if not readMethod then
-        return false, nil, "Reactor active-state read-back is unavailable"
-    end
-
-    requested = requested == true
-    local ok, reason = pcall(peripheral.call, reactor.name, "setActive", requested)
-    if not ok then return false, nil, tostring(reason) end
-    if type(pauseBeforeVerify) == "function" then pauseBeforeVerify() end
-
-    local readOk, actual = pcall(peripheral.call, reactor.name, readMethod)
-    if not readOk or type(actual) ~= "boolean" then
-        return false, nil, "Reactor activation verification failed"
-    end
-    if actual ~= requested then
-        return false, actual, ("Requested reactor %s; reactor reports %s"):format(
-            requested and "active" or "inactive",
-            actual and "active" or "inactive")
-    end
-    return true, actual
-end
-
-function adapter.prepareRecalibration(reactor, pause)
-    pause = type(pause) == "function" and pause or function() end
-
-    local stopped, _, stopError = adapter.setActive(reactor, false, pause)
-    if not stopped then
-        return false, "Reactor shutdown failed: " ..
-            tostring(stopError or "activation command rejected")
-    end
-    local inserted, _, rodError = adapter.setAllControlRodLevels(reactor, 100, pause)
-    if not inserted then
-        return false, "Rod insertion failed: " ..
-            tostring(rodError or "bulk rod command rejected")
-    end
-    local started, _, startError = adapter.setActive(reactor, true, pause)
-    if not started then
-        return false, "Reactor restart failed: " ..
-            tostring(startError or "activation command rejected")
-    end
-    return true
-end
-
-local function exposureLevels(count, exposure)
-    count = math.max(0, math.floor(tonumber(count) or 0))
-    exposure = math.max(0, math.min(count, tonumber(exposure) or 0))
-    if count < 1 then return {} end
-    local exposurePoints = math.floor(exposure * 100 + 0.5)
-    local pointsPerRod = math.floor(exposurePoints / count)
-    local remainder = exposurePoints % count
-    local levels = {}
-    for index = 0, count - 1 do
-        local exposedPercent = pointsPerRod + (index < remainder and 1 or 0)
-        levels[index] = 100 - exposedPercent
-    end
-    return levels
-end
-
-local function exposureFromLevels(levels, count)
-    local exposure = 0
-    for index = 0, count - 1 do
-        local level = tonumber(levels and levels[index])
-        if level == nil then return nil end
-        exposure = exposure + (100 - math.max(0, math.min(100, level))) / 100
-    end
-    return exposure
-end
-
-function adapter.setControlRodExposure(reactor, requestedExposure)
-    if type(reactor) ~= "table" or type(reactor.name) ~= "string" then
-        return false, nil, "Invalid reactor identity"
-    end
-    if not peripheral.isPresent(reactor.name) then
-        return false, nil, "Peripheral unavailable"
-    end
-
-    local methods = availableMethods(reactor.name)
-    if not methods.setControlRodLevel or not methods.getControlRodLevel then
-        return false, nil, "Verified individual control-rod control is unavailable"
-    end
-    local count = math.floor(tonumber(reactor.controlRods) or 0)
-    if count < 1 then return false, nil, "Control-rod count is unavailable" end
-
-    local current = rodLevels(reactor.name, methods, count)
-    if not current then return false, nil, "Control-rod read failed" end
-    local wanted = exposureLevels(count, requestedExposure)
-
-    -- Insert rods first, then withdraw rods. A partial failure therefore reduces
-    -- reactor output instead of briefly exposing more fuel than requested.
-    for pass = 1, 2 do
-        for index = 0, count - 1 do
-            local before, after = tonumber(current[index]), wanted[index]
-            local safer = pass == 1 and after > before
-            local stronger = pass == 2 and after < before
-            if safer or stronger then
-                local ok, reason = pcall(peripheral.call, reactor.name,
-                    "setControlRodLevel", index, after)
-                if not ok then
-                    return false, exposureFromLevels(current, count), tostring(reason)
-                end
-                current[index] = after
-            end
-        end
-    end
-
-    local reported = rodLevels(reactor.name, methods, count)
-    if not reported then return false, nil, "Control-rod verification failed" end
-    for index = 0, count - 1 do
-        if tonumber(reported[index]) ~= wanted[index] then
-            return false, exposureFromLevels(reported, count),
-                ("Rod %d requested %d%%; reactor reports %s%%"):format(
-                    index, wanted[index], tostring(reported[index]))
-        end
-    end
-    return true, exposureFromLevels(reported, count), wanted
-end
-
-function adapter.readAll(devices)
-    local reactors = {}
-    for _, device in ipairs(devices or {}) do
-        if device.category == "reactor" then
-            reactors[#reactors + 1] = adapter.read(device)
-        end
-    end
-    return reactors
-end
-
-local function value(numberValue, suffix)
-    if numberValue == nil then return "N/A" end
-    return ("%.1f%s"):format(numberValue, suffix or "")
-end
-
-function adapter.printReport(reactors, config, formatter)
-    print("HELIOS reactor telemetry")
-    print("Reactors found: " .. #reactors)
-    print("")
-    for _, reactor in ipairs(reactors) do
-        local alias = config.deviceAliases[reactor.name]
-        local displayName = alias or reactor.name
-        print(("[%s] %s"):format(string.upper(reactor.mode or "unknown"), displayName))
-        if config.ui.showPeripheralNames and alias then print("  Peripheral: " .. reactor.name) end
-        if reactor.error then
-            print("  ERROR: " .. reactor.error)
-        else
-            print("  State: " .. (reactor.active == true and "ACTIVE" or reactor.active == false and "OFFLINE" or "UNKNOWN"))
-            print("  Fuel: " .. value(reactor.fuelPercent, "%"))
-            print("  Fuel use: " .. value(reactor.fuelUse, " mB/t"))
-            print("  Fuel temp: " .. value(reactor.fuelTemperature, " C"))
-            print("  Casing temp: " .. value(reactor.casingTemperature, " C"))
-            if reactor.mode == "steam" then
-                print("  Steam: " .. value(reactor.steamProduction, " mB/t"))
-                print("  Coolant: " .. value(reactor.coolantPercent, "%"))
-                print("  Hot fluid: " .. value(reactor.hotFluidPercent, "%"))
-                print("  Rod insertion: " .. value(reactor.controlRodLevel, "%"))
-                print("  Rod exposure: " .. value(reactor.controlRodExposure, " equivalents"))
-            else
-                print("  Power: " .. formatter.power(reactor.energyProduction, config.power, true))
-                print("  Buffer: " .. value(reactor.energyPercent, "%"))
-            end
-        end
-        print("")
-    end
-end
-
-return adapter
-]=],
-
     ["mainframe/reactor_governor.lua"] = [=[
 local governor = {}
 local clearCooldown
@@ -3804,504 +3843,6 @@ function governor.applyAll(memory, reactors, control, context, writers)
 end
 
 return governor
-]=],
-
-    ["mainframe/storage_adapter.lua"] = [=[
--- @section GENERIC STORAGE PERIPHERAL ADAPTER
-local adapter = {}
-local previousSamples = {}
-
-local function contains(value, fragment)
-    return string.find(string.lower(value or ""), fragment, 1, true) ~= nil
-end
-
-local function methodSet(methods)
-    local set = {}
-    for _, method in ipairs(methods or {}) do set[method] = true end
-    return set
-end
-
-local function number(value)
-    if type(value) == "number" then return value end
-    if type(value) == "string" then return tonumber(value) end
-    if type(value) == "table" then
-        return tonumber(value.value or value.amount or value.energy or value.stored)
-    end
-    return nil
-end
-
-local function readAny(name, available, candidates)
-    for _, method in ipairs(candidates) do
-        if available[method] then
-            local ok, result = pcall(peripheral.call, name, method)
-            if ok and result ~= nil then return result, method end
-        end
-    end
-    return nil, nil
-end
-
-local function hasPair(available, storedMethods, capacityMethods)
-    local stored, capacity = false, false
-    for _, method in ipairs(storedMethods) do stored = stored or available[method] == true end
-    for _, method in ipairs(capacityMethods) do capacity = capacity or available[method] == true end
-    return stored and capacity
-end
-
-local STORED_METHODS = { "getEnergyStored", "getEnergy", "getStoredEnergy", "getStored", "getEnergyStorage" }
-local CAPACITY_METHODS = { "getMaxEnergyStored", "getMaxEnergy", "getEnergyCapacity", "getCapacity", "getMaxStored" }
-local INPUT_METHODS = { "getLastInput", "getEnergyInput", "getInputRate", "getInput" }
-local OUTPUT_METHODS = { "getLastOutput", "getEnergyOutput", "getOutputRate", "getOutput" }
-
-local function inductionIdentity(device)
-    if contains(device.name, "inductionport") or contains(device.name, "induction_port") then return true end
-    for _, peripheralType in ipairs(device.types or {}) do
-        if contains(peripheralType, "inductionport") or contains(peripheralType, "induction_port") then return true end
-    end
-    return false
-end
-
-local function genericSupported(available)
-    return hasPair(available, STORED_METHODS, CAPACITY_METHODS)
-end
-
-local function mekanismSupported(device, available)
-    if not inductionIdentity(device) then return false end
-    if not (available.getEnergy and available.getMaxEnergy) then return false end
-    return available.getLastInput or available.getLastOutput or available.getTransferCap or
-        available.getInstalledCells or available.getInstalledProviders
-end
-
-local function toBaseFE(value, nativeUnit, powerConfig)
-    value = number(value)
-    if value == nil then return nil end
-    if nativeUnit == "J" then
-        local joulesPerFE = tonumber(((powerConfig or {}).ratios or {}).J) or 2.5
-        if joulesPerFE > 0 then return value / joulesPerFE end
-    end
-    return value
-end
-
-local function percentage(stored, capacity, reported)
-    reported = number(reported)
-    if reported ~= nil then
-        if reported >= 0 and reported <= 1 then return reported * 100 end
-        return reported
-    end
-    if stored ~= nil and capacity and capacity > 0 then return stored / capacity * 100 end
-    return nil
-end
-
-local function readGeneric(device, available, powerConfig)
-    local stored = number(readAny(device.name, available, STORED_METHODS))
-    local capacity = number(readAny(device.name, available, CAPACITY_METHODS))
-    if stored == nil or capacity == nil then return nil end
-    return {
-        name = device.name,
-        adapter = "generic",
-        adapterName = "GENERIC",
-        stored = toBaseFE(stored, "FE", powerConfig),
-        capacity = toBaseFE(capacity, "FE", powerConfig),
-        input = toBaseFE(readAny(device.name, available, INPUT_METHODS), "FE", powerConfig),
-        output = toBaseFE(readAny(device.name, available, OUTPUT_METHODS), "FE", powerConfig),
-        nativeUnit = "FE",
-        telemetryOk = true,
-        details = {},
-    }
-end
-
-local function readMekanism(device, available, powerConfig)
-    local formed = readAny(device.name, available, { "isFormed" })
-    if formed == false then
-        return {
-            name = device.name,
-            adapter = "mekanism_induction",
-            adapterName = "MEKANISM MATRIX",
-            nativeUnit = "J",
-            telemetryOk = false,
-            error = "Induction Matrix is not formed",
-            details = {},
-        }
-    end
-
-    local stored = toBaseFE(readAny(device.name, available, { "getEnergy" }), "J", powerConfig)
-    local capacity = toBaseFE(readAny(device.name, available, { "getMaxEnergy" }), "J", powerConfig)
-    if stored == nil or capacity == nil then return nil end
-
-    local result = {
-        name = device.name,
-        adapter = "mekanism_induction",
-        adapterName = "MEKANISM MATRIX",
-        stored = stored,
-        capacity = capacity,
-        input = toBaseFE(readAny(device.name, available, { "getLastInput" }), "J", powerConfig),
-        output = toBaseFE(readAny(device.name, available, { "getLastOutput" }), "J", powerConfig),
-        nativeUnit = "J",
-        telemetryOk = true,
-        details = {
-            transferCap = toBaseFE(readAny(device.name, available, { "getTransferCap" }), "J", powerConfig),
-            cells = number(readAny(device.name, available, { "getInstalledCells" })),
-            providers = number(readAny(device.name, available, { "getInstalledProviders" })),
-            formed = formed,
-        },
-    }
-    result.reportedPercent = number(readAny(device.name, available, { "getEnergyFilledPercentage" }))
-    return result
-end
-
-local function finalize(storage)
-    storage.percent = percentage(storage.stored, storage.capacity, storage.reportedPercent)
-    storage.reportedPercent = nil
-
-    if storage.input ~= nil and storage.output ~= nil then
-        storage.net = storage.input - storage.output
-    else
-        local now = os.epoch("utc") / 1000
-        local previous = previousSamples[storage.name]
-        if previous and now > previous.time and storage.stored ~= nil then
-            local elapsedSeconds = now - previous.time
-            storage.net = (storage.stored - previous.stored) / (elapsedSeconds * 20)
-        end
-        if storage.stored ~= nil then
-            previousSamples[storage.name] = { stored = storage.stored, time = now }
-        end
-    end
-
-    local epsilon = 0.5
-    if storage.capacity and storage.capacity > 0 and storage.stored and storage.stored >= storage.capacity then
-        storage.state = "FULL"
-    elseif storage.stored and storage.stored <= 0 then
-        storage.state = "EMPTY"
-    elseif storage.net and storage.net > epsilon then
-        storage.state = "CHARGING"
-    elseif storage.net and storage.net < -epsilon then
-        storage.state = "DRAINING"
-    elseif storage.net ~= nil then
-        storage.state = "STABLE"
-    else
-        storage.state = "UNKNOWN"
-    end
-
-    if storage.net and storage.capacity and storage.stored then
-        if storage.net > epsilon then
-            storage.etaSeconds = math.max(0, (storage.capacity - storage.stored) / (storage.net * 20))
-        elseif storage.net < -epsilon then
-            storage.etaSeconds = math.max(0, storage.stored / (-storage.net * 20))
-        end
-    end
-    return storage
-end
-
-function adapter.read(device, powerConfig)
-    if not peripheral.isPresent(device.name) then
-        return { name = device.name, adapterName = "UNKNOWN", telemetryOk = false, error = "Peripheral unavailable", details = {} }
-    end
-    local methods = peripheral.getMethods(device.name) or device.methods or {}
-    local available = methodSet(methods)
-    local storage
-
-    if mekanismSupported(device, available) then
-        local ok, specialized = pcall(readMekanism, device, available, powerConfig)
-        if ok then storage = specialized end
-        if not storage then
-            storage = readGeneric(device, available, powerConfig)
-            if storage then
-                storage.fallback = true
-                storage.adapterName = "GENERIC (FALLBACK)"
-            end
-        end
-    elseif genericSupported(available) then
-        storage = readGeneric(device, available, powerConfig)
-    end
-
-    if not storage then return nil end
-    return finalize(storage)
-end
-
-function adapter.readAll(devices, powerConfig)
-    local storages = {}
-    local present = {}
-    for _, device in ipairs(devices or {}) do
-        if device.category ~= "reactor" and device.category ~= "turbine" and
-           device.category ~= "monitor" and device.category ~= "modem" then
-            local ok, storage = pcall(adapter.read, device, powerConfig)
-            if ok and storage then
-                storages[#storages + 1] = storage
-                present[storage.name] = true
-            elseif not ok and device.category == "battery" then
-                storages[#storages + 1] = {
-                    name = device.name,
-                    adapterName = "UNKNOWN",
-                    telemetryOk = false,
-                    error = "Storage adapter failed",
-                    details = {},
-                }
-            end
-        end
-    end
-    for name in pairs(previousSamples) do
-        if not present[name] then previousSamples[name] = nil end
-    end
-    table.sort(storages, function(a, b) return a.name < b.name end)
-    return storages
-end
-
-local function eta(value)
-    if value == nil or value ~= value or value == math.huge then return "N/A" end
-    value = math.max(0, math.floor(value + 0.5))
-    local days = math.floor(value / 86400)
-    local hours = math.floor((value % 86400) / 3600)
-    local minutes = math.floor((value % 3600) / 60)
-    local seconds = value % 60
-    if days > 0 then return ("%dd %dh"):format(days, hours) end
-    if hours > 0 then return ("%dh %dm"):format(hours, minutes) end
-    if minutes > 0 then return ("%dm %ds"):format(minutes, seconds) end
-    return seconds .. "s"
-end
-
-function adapter.formatETA(storage)
-    return eta(storage and storage.etaSeconds)
-end
-
-function adapter.printReport(storages, config, formatter)
-    print("HELIOS energy-storage telemetry")
-    print("Storage devices found: " .. #storages)
-    print("")
-    for _, storage in ipairs(storages) do
-        local alias = config.deviceAliases[storage.name]
-        print("[" .. storage.adapterName .. "] " .. (alias or storage.name))
-        if config.ui.showPeripheralNames and alias then print("  Peripheral: " .. storage.name) end
-        if storage.error then
-            print("  ERROR: " .. storage.error)
-        else
-            print("  Stored: " .. formatter.power(storage.stored, config.power, false) .. " / " .. formatter.power(storage.capacity, config.power, false))
-            print("  Charge: " .. (storage.percent and ("%.1f%%"):format(storage.percent) or "N/A"))
-            print("  Input: " .. formatter.power(storage.input, config.power, true))
-            print("  Output: " .. formatter.power(storage.output, config.power, true))
-            print("  Net: " .. formatter.power(storage.net, config.power, true))
-            print("  State: " .. storage.state)
-            if storage.state == "CHARGING" then print("  Full in: " .. eta(storage.etaSeconds)) end
-            if storage.state == "DRAINING" then print("  Empty in: " .. eta(storage.etaSeconds)) end
-        end
-        print("")
-    end
-end
-
-return adapter
-]=],
-
-    ["mainframe/turbine_adapter.lua"] = [=[
--- @section TURBINE PERIPHERAL ADAPTER
-local adapter = {}
-
-local function readAny(name, availableMethods, candidates)
-    for _, method in ipairs(candidates) do
-        if availableMethods[method] then
-            local ok, value = pcall(peripheral.call, name, method)
-            if ok and value ~= nil then return value, method end
-        end
-    end
-    return nil, nil
-end
-
-local function number(value)
-    value = tonumber(value)
-    if value ~= value then return nil end
-    return value
-end
-
-local function percent(amount, maximum)
-    amount, maximum = number(amount), number(maximum)
-    if not amount or not maximum or maximum <= 0 then return nil end
-    return math.max(0, math.min(100, amount / maximum * 100))
-end
-
-local function availableMethods(name)
-    local methods = {}
-    for _, method in ipairs(peripheral.getMethods(name) or {}) do
-        methods[method] = true
-    end
-    return methods
-end
-
-function adapter.read(device)
-    local name = device.name
-    local turbine = { name = name, available = peripheral.isPresent(name) }
-    if not turbine.available then
-        turbine.error = "Peripheral unavailable"
-        return turbine
-    end
-
-    local availableMethods = availableMethods(name)
-
-    turbine.connected = readAny(name, availableMethods, { "getConnected", "isConnected", "mbIsConnected", "mbIsAssembled", "connected" })
-    turbine.active = readAny(name, availableMethods, { "getActive", "isActive", "active" })
-    turbine.rotorSpeed = number(readAny(name, availableMethods, { "getRotorSpeed", "getRotorRPM", "rotorSpeed" }))
-    turbine.energyProduction = number(readAny(name, availableMethods, { "getEnergyProducedLastTick", "getEnergyProductionRate", "energyProducedLastTick" }))
-    turbine.energy = number(readAny(name, availableMethods, { "getEnergyStored", "getEnergy", "energyStored" }))
-    turbine.energyMax = number(readAny(name, availableMethods, { "getEnergyCapacity", "getMaxEnergyStored", "energyCapacity" }))
-    turbine.flowRate = number(readAny(name, availableMethods, { "getFluidFlowRate", "getFluidFlowRateLastTick", "getInputFlowRate", "fluidFlowRate" }))
-    turbine.flowRateMax = number(readAny(name, availableMethods, { "getFluidFlowRateMax", "getMaxFluidFlowRate", "getMaxIntakeRate", "fluidFlowRateMax" }))
-    turbine.flowRateLimit = number(readAny(name, availableMethods, { "getFluidFlowRateMaxMax", "getFluidFlowRateLimit", "getMaxPermittedFlow", "flowRateLimit" }))
-    turbine.inputAmount = number(readAny(name, availableMethods, { "getInputAmount", "getInputFluidAmount", "inputAmount" }))
-    turbine.inputMax = number(readAny(name, availableMethods, {
-        "getInputAmountMax", "getInputCapacity", "getFluidAmountMax", "inputAmountMax",
-    }))
-    turbine.outputAmount = number(readAny(name, availableMethods, { "getOutputAmount", "getOutputFluidAmount", "outputAmount" }))
-    turbine.outputMax = number(readAny(name, availableMethods, {
-        "getOutputAmountMax", "getOutputCapacity", "getFluidAmountMax", "outputAmountMax",
-    }))
-    turbine.inductorEngaged = readAny(name, availableMethods, { "getInductorEngaged", "isInductorEngaged", "inductorEngaged" })
-    turbine.ventMode = readAny(name, availableMethods, { "getVentMode", "ventMode" })
-    turbine.bladeCount = number(readAny(name, availableMethods, { "getBladeCount", "getNumberOfBlades", "bladeCount" }))
-    turbine.coilCount = number(readAny(name, availableMethods, { "getCoilSize", "getCoilCount", "coilSize" }))
-    turbine.efficiency = number(readAny(name, availableMethods, { "getRotorEfficiencyLastTick", "getEfficiency", "rotorEfficiencyLastTick" }))
-
-    turbine.energyPercent = percent(turbine.energy, turbine.energyMax)
-    turbine.inputPercent = percent(turbine.inputAmount, turbine.inputMax)
-    turbine.outputPercent = percent(turbine.outputAmount, turbine.outputMax)
-
-    local useful = turbine.active ~= nil or turbine.rotorSpeed ~= nil or turbine.energyProduction ~= nil
-    if turbine.connected == false then
-        turbine.error = "Turbine is not connected"
-    elseif not useful then
-        turbine.error = "No supported telemetry methods"
-    end
-    return turbine
-end
-
-function adapter.setFlowLimit(turbine, requested)
-    if type(turbine) ~= "table" or type(turbine.name) ~= "string" then
-        return false, nil, "Invalid turbine identity"
-    end
-    if not peripheral.isPresent(turbine.name) then
-        return false, nil, "Peripheral unavailable"
-    end
-
-    local methods = availableMethods(turbine.name)
-    if not methods.setFluidFlowRateMax or not methods.getFluidFlowRateMax then
-        return false, nil, "Verified flow-limit control is unavailable"
-    end
-
-    requested = tonumber(requested)
-    if not requested then return false, nil, "Invalid flow limit" end
-    local hardLimit = tonumber(turbine.flowRateLimit)
-    if hardLimit then requested = math.min(requested, hardLimit) end
-    requested = math.max(0, math.floor(requested + 0.5))
-
-    local ok, reason = pcall(peripheral.call, turbine.name, "setFluidFlowRateMax", requested)
-    if not ok then return false, nil, tostring(reason) end
-
-    local readOk, actual = pcall(peripheral.call, turbine.name, "getFluidFlowRateMax")
-    actual = tonumber(actual)
-    if not readOk or actual == nil then
-        return false, nil, "Flow-limit verification failed"
-    end
-    local verified = math.floor(actual + 0.5)
-    if verified ~= requested then
-        return false, verified, ("Requested %d mB/t; turbine reports %d mB/t"):format(
-            requested, verified)
-    end
-    return true, verified
-end
-
-function adapter.setActive(turbine, requested)
-    if type(turbine) ~= "table" or type(turbine.name) ~= "string" then
-        return false, nil, "Invalid turbine identity"
-    end
-    if not peripheral.isPresent(turbine.name) then
-        return false, nil, "Peripheral unavailable"
-    end
-
-    local methods = availableMethods(turbine.name)
-    if not methods.setActive or not methods.getActive then
-        return false, nil, "Verified turbine power control is unavailable"
-    end
-
-    requested = requested == true
-    local ok, reason = pcall(peripheral.call, turbine.name, "setActive", requested)
-    if not ok then return false, nil, tostring(reason) end
-
-    local readOk, actual = pcall(peripheral.call, turbine.name, "getActive")
-    if not readOk or type(actual) ~= "boolean" then
-        return false, nil, "Turbine power-state verification failed"
-    end
-    if actual ~= requested then
-        return false, actual, ("Requested turbine %s; turbine reports %s"):format(
-            requested and "active" or "inactive", actual and "active" or "inactive")
-    end
-    return true, actual
-end
-
-function adapter.setInductor(turbine, engaged)
-    if type(turbine) ~= "table" or type(turbine.name) ~= "string" then
-        return false, nil, "Invalid turbine identity"
-    end
-    if not peripheral.isPresent(turbine.name) then
-        return false, nil, "Peripheral unavailable"
-    end
-
-    local methods = availableMethods(turbine.name)
-    if not methods.setInductorEngaged or not methods.getInductorEngaged then
-        return false, nil, "Verified inductor control is unavailable"
-    end
-
-    engaged = engaged == true
-    local ok, reason = pcall(peripheral.call, turbine.name, "setInductorEngaged", engaged)
-    if not ok then return false, nil, tostring(reason) end
-
-    local readOk, actual = pcall(peripheral.call, turbine.name, "getInductorEngaged")
-    if not readOk or type(actual) ~= "boolean" then
-        return false, nil, "Inductor verification failed"
-    end
-    if actual ~= engaged then
-        return false, actual, ("Requested inductor %s; turbine reports %s"):format(
-            engaged and "engaged" or "disengaged", actual and "engaged" or "disengaged")
-    end
-    return true, actual
-end
-
-function adapter.readAll(devices)
-    local turbines = {}
-    for _, device in ipairs(devices or {}) do
-        local lowerName = string.lower(device.name or "")
-        if device.category == "turbine" or string.find(lowerName, "turbine", 1, true) then
-            turbines[#turbines + 1] = adapter.read(device)
-        end
-    end
-    return turbines
-end
-
-local function value(numberValue, suffix)
-    if numberValue == nil then return "N/A" end
-    return ("%.1f%s"):format(numberValue, suffix or "")
-end
-
-function adapter.printReport(turbines, config, formatter)
-    print("HELIOS turbine telemetry")
-    print("Turbines found: " .. #turbines)
-    print("")
-    for _, turbine in ipairs(turbines) do
-        local alias = config.deviceAliases[turbine.name]
-        local displayName = alias or turbine.name
-        print("[TURBINE] " .. displayName)
-        if config.ui.showPeripheralNames and alias then print("  Peripheral: " .. turbine.name) end
-        if turbine.error then
-            print("  ERROR: " .. turbine.error)
-        else
-            print("  State: " .. (turbine.active == true and "ACTIVE" or turbine.active == false and "OFFLINE" or "UNKNOWN"))
-            print("  Rotor: " .. value(turbine.rotorSpeed, " RPM"))
-            print("  Power: " .. formatter.power(turbine.energyProduction, config.power, true))
-            print("  Buffer: " .. value(turbine.energyPercent, "%"))
-            print("  Flow: " .. value(turbine.flowRate, " mB/t"))
-            print("  Flow setting: " .. value(turbine.flowRateMax, " mB/t"))
-            print("  Flow limit: " .. value(turbine.flowRateLimit, " mB/t"))
-            print("  Inductor: " .. (turbine.inductorEngaged == true and "ENGAGED" or turbine.inductorEngaged == false and "DISENGAGED" or "N/A"))
-        end
-        print("")
-    end
-end
-
-return adapter
 ]=],
 
     ["mainframe/turbine_governor.lua"] = [=[
@@ -5776,6 +5317,13 @@ local function runInstaller()
         writeFile(fs.combine(STAGE_DIR, relativePath), contents)
     end
     writeFile(fs.combine(STAGE_DIR, "config.lua"), buildConfig(role, display, existingConfig))
+    local modulePackVersion
+    if role == "mainframe" then
+        title("Installing Module Pack")
+        print("Downloading official peripheral modules...")
+        modulePackVersion = installModulePack(STAGE_DIR)
+        print("Module Pack " .. tostring(modulePackVersion) .. " ready.")
+    end
 
     local previousInstall
     if fs.exists(INSTALL_DIR) then
@@ -5807,6 +5355,7 @@ shell.run("/helios/helios.lua", ...)
     print("HELIOS " .. VERSION .. " installed successfully.")
     term.setTextColor(colors.white)
     print("Role: " .. role)
+    if modulePackVersion then print("Module Pack: " .. tostring(modulePackVersion)) end
     if display then print("Display: " .. display) end
     if previousInstall then print("Previous version: " .. previousInstall) end
     if autoStarted then

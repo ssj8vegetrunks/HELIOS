@@ -98,3 +98,11 @@ docs/
 ├── SAFETY.md             ← failures/interlocks
 ├── INSTALLATION.md
 └── WEB.md                ← eventual web plugin
+
+11. External module-pack boundary
+   - HELIOS Core owns discovery, control, safety, UI, networking and persistence
+   - Peripheral adapters are downloaded from the official Module Pack
+   - Core, Module Pack and individual modules have independent versions
+   - Mainframe startup fails clearly when a required module is absent or incompatible
+   - Remote terminals do not install or execute hardware modules
+   - See MODULE_API.md for the manifest and loader contract
