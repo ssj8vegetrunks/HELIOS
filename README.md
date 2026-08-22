@@ -1,4 +1,4 @@
-# HELIOS - v1.5.0 Alpha 1 External Module Pack
+# HELIOS - v1.5.0 Alpha 2 External Module Pack
 
 Industrial power management for **CC:Tweaked** and **Extreme Reactors**.
 
@@ -79,6 +79,8 @@ The existing touch interface and network-ID protection remain online:
 - reactor calibration shows its explicit phase plus rolling-steam and
   process-response sample progress instead of ambiguous fallback labels;
 - upgrades remove obsolete HELIOS rollback copies before staging and retain only the immediately replaced version.
+- storage-constrained upgrades preserve configuration and calibration data while
+  replacing only installed program files, avoiding a second full Core copy.
 
 The existing telemetry foundation includes:
 

@@ -6,7 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 INSTALLER = ROOT / "install.lua"
-START = "local FILES = {\n"
+START = "FILES = {\n"
 END = "\n}\n\nlocal function installStartup()"
 
 

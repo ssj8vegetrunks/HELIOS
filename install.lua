@@ -1,7 +1,7 @@
 -- HELIOS single-file installer
 -- Step 3 alpha: external peripheral Module Pack.
 
-local VERSION = "1.5.0-alpha.1"
+local VERSION = "1.5.0-alpha.2"
 local INSTALL_DIR = "/helios"
 local STAGE_DIR = "/.helios-install"
 local MODULE_PACK_BASE_URL = "https://raw.githubusercontent.com/ssj8vegetrunks/HELIOS/agent/alpha14-release/module-pack"
@@ -58,8 +58,13 @@ local function writeFile(path, contents)
     end
     local handle, reason = fs.open(path, "w")
     if not handle then error("Could not write " .. path .. ": " .. tostring(reason), 0) end
-    handle.write(contents)
-    handle.close()
+    local wrote, writeReason = pcall(handle.write, contents)
+    local closed, closeReason = pcall(handle.close)
+    if not wrote or not closed then
+        if fs.exists(path) then pcall(fs.delete, path) end
+        error("Could not write " .. path .. ": " ..
+            tostring(wrote and closeReason or writeReason), 0)
+    end
 end
 
 local function fetchText(url)
@@ -155,7 +160,39 @@ local function removeOldBackups()
     end
 end
 
-local FILES = {
+local FILES
+
+local function embeddedInstallBytes(configText, role)
+    local bytes = #configText
+    for _, contents in pairs(FILES) do
+        bytes = bytes + #contents
+    end
+    -- The external pack is currently much smaller than this allowance. Keeping
+    -- a reserve here also covers its manifest and filesystem bookkeeping.
+    if role == "mainframe" then bytes = bytes + (64 * 1024) end
+    return bytes
+end
+
+local function removeReplaceableInstallFiles()
+    if not fs.exists(INSTALL_DIR) then return end
+    for _, name in ipairs({ "core", "mainframe", "terminal", "modules", "helios.lua" }) do
+        local path = fs.combine(INSTALL_DIR, name)
+        if fs.exists(path) then fs.delete(path) end
+    end
+end
+
+local function installStageInPlace()
+    if not fs.exists(INSTALL_DIR) then fs.makeDir(INSTALL_DIR) end
+    for _, name in ipairs(fs.list(STAGE_DIR)) do
+        local source = fs.combine(STAGE_DIR, name)
+        local destination = fs.combine(INSTALL_DIR, name)
+        if fs.exists(destination) then fs.delete(destination) end
+        fs.move(source, destination)
+    end
+    fs.delete(STAGE_DIR)
+end
+
+FILES = {
     ["core/config.lua"] = [=[
 local config = {}
 
@@ -581,8 +618,12 @@ local function writeFile(path, contents)
     if parent ~= "" and not fs.exists(parent) then fs.makeDir(parent) end
     local handle, reason = fs.open(path, "w")
     if not handle then return false, reason end
-    handle.write(contents)
-    handle.close()
+    local wrote, writeReason = pcall(handle.write, contents)
+    local closed, closeReason = pcall(handle.close)
+    if not wrote or not closed then
+        if fs.exists(path) then pcall(fs.delete, path) end
+        return false, tostring(wrote and closeReason or writeReason)
+    end
     return true
 end
 
@@ -5310,13 +5351,35 @@ local function runInstaller()
         return
     end
 
+    local configText = buildConfig(role, display, existingConfig)
+    local requiredBytes = embeddedInstallBytes(configText, role)
+    local freeSpace = fs.getFreeSpace("/")
+    local lowSpaceUpgrade = type(freeSpace) == "number" and freeSpace < requiredBytes
+
     if fs.exists(STAGE_DIR) then fs.delete(STAGE_DIR) end
     removeOldBackups()
+
+    if lowSpaceUpgrade then
+        title("Low-Space Upgrade")
+        term.setTextColor(colors.yellow)
+        print("Not enough room for a second HELIOS copy.")
+        term.setTextColor(colors.white)
+        print("Preserving configuration and calibration data.")
+        print("Replacing installed program files in place...")
+        removeReplaceableInstallFiles()
+        freeSpace = fs.getFreeSpace("/")
+        if type(freeSpace) == "number" and freeSpace < requiredBytes then
+            error("Not enough disk space for HELIOS. Free " .. tostring(freeSpace) ..
+                " bytes; approximately " .. tostring(requiredBytes) ..
+                " bytes are required. Existing configuration and data were preserved.", 0)
+        end
+    end
+
     fs.makeDir(STAGE_DIR)
     for relativePath, contents in pairs(FILES) do
         writeFile(fs.combine(STAGE_DIR, relativePath), contents)
     end
-    writeFile(fs.combine(STAGE_DIR, "config.lua"), buildConfig(role, display, existingConfig))
+    writeFile(fs.combine(STAGE_DIR, "config.lua"), configText)
     local modulePackVersion
     if role == "mainframe" then
         title("Installing Module Pack")
@@ -5326,7 +5389,7 @@ local function runInstaller()
     end
 
     local previousInstall
-    if fs.exists(INSTALL_DIR) then
+    if not lowSpaceUpgrade and fs.exists(INSTALL_DIR) then
         previousInstall = "/helios.previous"
         local backupNumber = 2
         while fs.exists(previousInstall) do
@@ -5337,15 +5400,23 @@ local function runInstaller()
     end
 
     local ok, reason = pcall(function()
-        fs.move(STAGE_DIR, INSTALL_DIR)
+        if lowSpaceUpgrade then
+            installStageInPlace()
+        else
+            fs.move(STAGE_DIR, INSTALL_DIR)
+        end
         writeFile("/helios.lua", [=[
 shell.run("/helios/helios.lua", ...)
 ]=])
     end)
     if not ok then
-        if fs.exists(INSTALL_DIR) then fs.delete(INSTALL_DIR) end
-        if previousInstall and fs.exists(previousInstall) then fs.move(previousInstall, INSTALL_DIR) end
-        error("Installation failed and the previous install was restored: " .. tostring(reason), 0)
+        if previousInstall then
+            if fs.exists(INSTALL_DIR) then fs.delete(INSTALL_DIR) end
+            if fs.exists(previousInstall) then fs.move(previousInstall, INSTALL_DIR) end
+            error("Installation failed and the previous install was restored: " .. tostring(reason), 0)
+        end
+        error("Installation failed during the low-space upgrade. Configuration and data " ..
+            "were preserved; rerun the installer after freeing space: " .. tostring(reason), 0)
     end
 
     local autoStarted, startupNote = installStartup()
@@ -5358,6 +5429,7 @@ shell.run("/helios/helios.lua", ...)
     if modulePackVersion then print("Module Pack: " .. tostring(modulePackVersion)) end
     if display then print("Display: " .. display) end
     if previousInstall then print("Previous version: " .. previousInstall) end
+    if lowSpaceUpgrade then print("Upgrade mode: low-space (configuration/data preserved)") end
     if autoStarted then
         print("HELIOS will start automatically after reboot.")
     else

@@ -21,8 +21,12 @@ local function writeFile(path, contents)
     if parent ~= "" and not fs.exists(parent) then fs.makeDir(parent) end
     local handle, reason = fs.open(path, "w")
     if not handle then return false, reason end
-    handle.write(contents)
-    handle.close()
+    local wrote, writeReason = pcall(handle.write, contents)
+    local closed, closeReason = pcall(handle.close)
+    if not wrote or not closed then
+        if fs.exists(path) then pcall(fs.delete, path) end
+        return false, tostring(wrote and closeReason or writeReason)
+    end
     return true
 end
 
