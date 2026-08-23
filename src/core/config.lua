@@ -31,7 +31,10 @@ function config.load()
     loaded.ui.showPeripheralNames = loaded.ui.showPeripheralNames == true
     loaded.ui.monitorTextScale = tonumber(loaded.ui.monitorTextScale) or 0.5
     loaded.control = loaded.control or {}
+    -- Manual authority is deliberately never restored after a reboot.
     loaded.control.mode = "automatic"
+    loaded.control.manualSafetyReserve = math.max(0.5, math.min(25,
+        tonumber(loaded.control.manualSafetyReserve) or 2))
     loaded.control.actuatorsEnabled = loaded.role == "mainframe"
     loaded.control.targetRpm = tonumber(loaded.control.targetRpm) or 1800
     loaded.control.rpmDeadband = math.max(1, tonumber(loaded.control.rpmDeadband) or 25)

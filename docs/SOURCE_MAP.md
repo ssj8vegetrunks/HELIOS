@@ -4,49 +4,51 @@
 
 Authoritative file: `install.lua`
 
-Total physical lines: **5450**
+Total physical lines: **5663**
 
 This map uses the actual line numbers in the bundled `install.lua`.
 
 ## Bundled HELIOS modules
 
-- Lines 196-352: **core/config.lua** (module contents 197-351)
-- Lines 354-455: **core/display.lua** (module contents 355-454)
-- Lines 457-595: **core/module_loader.lua** (module contents 458-594)
-- Lines 597-740: **core/module_manager.lua** (module contents 598-739)
-- Lines 742-817: **core/network.lua** (module contents 743-816)
-- Lines 819-869: **core/power_format.lua** (module contents 820-868)
-- Lines 871-1006: **core/ui.lua** (module contents 872-1005)
-- Lines 1008-1115: **helios.lua** (module contents 1009-1114)
-- Lines 1117-1221: **mainframe/device_registry.lua** (module contents 1118-1220)
-- Lines 1223-2816: **mainframe/main.lua** (module contents 1224-2815)
-- Lines 2818-3887: **mainframe/reactor_governor.lua** (module contents 2819-3886)
-- Lines 3889-4798: **mainframe/turbine_governor.lua** (module contents 3890-4797)
-- Lines 4800-5148: **terminal/main.lua** (module contents 4801-5147)
+- Lines 196-355: **core/config.lua** (module contents 197-354)
+- Lines 357-458: **core/display.lua** (module contents 358-457)
+- Lines 460-598: **core/module_loader.lua** (module contents 461-597)
+- Lines 600-743: **core/module_manager.lua** (module contents 601-742)
+- Lines 745-820: **core/network.lua** (module contents 746-819)
+- Lines 822-872: **core/power_format.lua** (module contents 823-871)
+- Lines 874-1009: **core/ui.lua** (module contents 875-1008)
+- Lines 1011-1118: **helios.lua** (module contents 1012-1117)
+- Lines 1120-1224: **mainframe/device_registry.lua** (module contents 1121-1223)
+- Lines 1226-3005: **mainframe/main.lua** (module contents 1227-3004)
+- Lines 3007-3029: **mainframe/manual_control.lua** (module contents 3008-3028)
+- Lines 3031-4100: **mainframe/reactor_governor.lua** (module contents 3032-4099)
+- Lines 4102-5011: **mainframe/turbine_governor.lua** (module contents 4103-5010)
+- Lines 5013-5361: **terminal/main.lua** (module contents 5014-5360)
 
 ## Installer code outside bundled modules
 
 - Lines 1-195: **Installer/bootstrap code**
-- Lines 353-353: **Bundle table separator / installer code**
-- Lines 456-456: **Bundle table separator / installer code**
-- Lines 596-596: **Bundle table separator / installer code**
-- Lines 741-741: **Bundle table separator / installer code**
-- Lines 818-818: **Bundle table separator / installer code**
-- Lines 870-870: **Bundle table separator / installer code**
-- Lines 1007-1007: **Bundle table separator / installer code**
-- Lines 1116-1116: **Bundle table separator / installer code**
-- Lines 1222-1222: **Bundle table separator / installer code**
-- Lines 2817-2817: **Bundle table separator / installer code**
-- Lines 3888-3888: **Bundle table separator / installer code**
-- Lines 4799-4799: **Bundle table separator / installer code**
-- Lines 5149-5450: **Installer/configuration/execution code**
+- Lines 356-356: **Bundle table separator / installer code**
+- Lines 459-459: **Bundle table separator / installer code**
+- Lines 599-599: **Bundle table separator / installer code**
+- Lines 744-744: **Bundle table separator / installer code**
+- Lines 821-821: **Bundle table separator / installer code**
+- Lines 873-873: **Bundle table separator / installer code**
+- Lines 1010-1010: **Bundle table separator / installer code**
+- Lines 1119-1119: **Bundle table separator / installer code**
+- Lines 1225-1225: **Bundle table separator / installer code**
+- Lines 3006-3006: **Bundle table separator / installer code**
+- Lines 3030-3030: **Bundle table separator / installer code**
+- Lines 4101-4101: **Bundle table separator / installer code**
+- Lines 5012-5012: **Bundle table separator / installer code**
+- Lines 5362-5663: **Installer/configuration/execution code**
 
 ## External Module Pack files
 
 These files are downloaded separately and therefore do not occupy physical lines inside `install.lua`.
 
-- `module-pack/extreme_reactors/reactor_adapter.lua`: lines 1-355 — **extreme_reactors 1.0.0**
-- `module-pack/extreme_reactors/turbine_adapter.lua`: lines 1-212 — **extreme_reactors 1.0.0**
+- `module-pack/extreme_reactors/reactor_adapter.lua`: lines 1-388 — **extreme_reactors 1.1.0-alpha.1**
+- `module-pack/extreme_reactors/turbine_adapter.lua`: lines 1-212 — **extreme_reactors 1.1.0-alpha.1**
 - `module-pack/universal_energy/storage_adapter.lua`: lines 1-280 — **universal_energy 1.0.0**
 
 ## Quick lookup

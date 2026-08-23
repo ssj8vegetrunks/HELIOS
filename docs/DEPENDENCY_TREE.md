@@ -60,11 +60,16 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 - depends on → `core/power_format.lua`
 - depends on → `core/ui.lua`
 - depends on → `mainframe/device_registry.lua`
+- depends on → `mainframe/manual_control.lua`
 - depends on → `mainframe/reactor_governor.lua`
 - depends on → `mainframe/turbine_governor.lua`
 - depends on → `modules/extreme_reactors/reactor_adapter.lua`
 - depends on → `modules/extreme_reactors/turbine_adapter.lua`
 - depends on → `modules/universal_energy/storage_adapter.lua`
+
+### `mainframe/manual_control.lua`
+
+- No HELIOS module dependencies detected.
 
 ### `mainframe/reactor_governor.lua`
 
@@ -144,6 +149,10 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 ### `mainframe/main.lua`
 
 - used by ← `helios.lua`
+
+### `mainframe/manual_control.lua`
+
+- used by ← `mainframe/main.lua`
 
 ### `mainframe/reactor_governor.lua`
 

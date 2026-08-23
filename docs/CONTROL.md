@@ -1,11 +1,24 @@
 # HELIOS Control Boundary
 
-## v1.4.0-alpha.19
+## Guarded manual authority (1.6 alpha)
+
+- Manual authority requires separate ARM and CONFIRM actions.
+- Entering manual authority pauses the reactor and turbine governors; telemetry,
+  alarms, ID-conflict protection, and storage-reserve monitoring remain active.
+- Reactor controls provide verified on/off commands, uniform all-rod changes, and
+  paginated individual-rod insertion changes in selectable 1%, 5%, or 10% steps.
+- Rod pages show six fuel columns at a time and therefore scale to reactors with
+  100 or more rods without changing monitor size.
+- If any trusted storage device falls below the configured 2% reserve, HELIOS
+  immediately returns to automatic authority, safely resets steam reactors, and
+  starts fresh reactor and turbine calibration.
+- Manual authority never survives a HELIOS reboot.
+
+## Automatic governor baseline (v1.4.0-alpha.19)
 
 The Power Control screen now runs a guarded automatic turbine governor.
 
-- Mode is fixed to `AUTOMATIC`.
-- Manual mode and tuning fields are visible but locked.
+- In that baseline, mode was fixed to `AUTOMATIC` and manual fields were locked.
 - Turbine actuators are enabled only on the mainframe.
 - Hardware writes are limited to Extreme Reactors' verified flow-limit and
   inductor controls.

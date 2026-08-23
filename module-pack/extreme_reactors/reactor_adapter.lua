@@ -173,6 +173,39 @@ function adapter.setAllControlRodLevels(reactor, requested, pauseBeforeVerify)
     return true, average
 end
 
+function adapter.setControlRodLevel(reactor, index, requested, pauseBeforeVerify)
+    if type(reactor) ~= "table" or type(reactor.name) ~= "string" then
+        return false, nil, "Invalid reactor identity"
+    end
+    if not peripheral.isPresent(reactor.name) then
+        return false, nil, "Peripheral unavailable"
+    end
+    local methods = availableMethods(reactor.name)
+    if not methods.setControlRodLevel or not methods.getControlRodLevel then
+        return false, nil, "Verified individual control-rod control is unavailable"
+    end
+    local count = math.floor(tonumber(reactor.controlRods) or 0)
+    index = math.floor(tonumber(index) or -1)
+    if index < 0 or index >= count then return false, nil, "Invalid control-rod index" end
+    requested = tonumber(requested)
+    if not requested then return false, nil, "Invalid control-rod level" end
+    requested = math.max(0, math.min(100, math.floor(requested + 0.5)))
+
+    local ok, reason = pcall(peripheral.call, reactor.name,
+        "setControlRodLevel", index, requested)
+    if not ok then return false, nil, tostring(reason) end
+    if type(pauseBeforeVerify) == "function" then pauseBeforeVerify() end
+    local readOk, actual = pcall(peripheral.call, reactor.name,
+        "getControlRodLevel", index)
+    actual = readOk and tonumber(actual) or nil
+    if actual == nil then return false, nil, "Control-rod verification failed" end
+    if actual ~= requested then
+        return false, actual, ("Rod %d requested %d%%; reactor reports %d%%"):
+            format(index, requested, actual)
+    end
+    return true, actual
+end
+
 function adapter.setActive(reactor, requested, pauseBeforeVerify)
     if type(reactor) ~= "table" or type(reactor.name) ~= "string" then
         return false, nil, "Invalid reactor identity"

@@ -29,8 +29,12 @@ The existing touch interface and network-ID protection remain online:
 - duplicate CC:Tweaked computer IDs are detected from independent HELIOS sessions;
 - every HELIOS screen receives a red conflict banner listing all duplicated IDs;
 - conflicting directed telemetry is treated as unsafe until the IDs become unique;
-- a persistent Power Control screen exposes the planned automatic/manual and tuning layout;
-- `AUTOMATIC` is fixed on, while manual mode and tuning controls remain locked.
+- a guarded Power Control screen supports explicit automatic/manual authority;
+- manual reactor control provides verified on/off, all-rod, and paginated
+  individual-rod adjustments for reactors with up to 100 or more rods;
+- a two-step arming action prevents accidental manual entry, automatic governors
+  pause during manual authority, and a storage reserve below 2% cancels manual
+  control and starts fresh automatic calibration;
 - every turbine learns and persists its own 900- or 1800-RPM operating band;
 - governor states, proposed changes, and actuator results appear on mainframe and remote turbine screens;
 - the governor holds on missing, conflicting, inactive, or unsupported telemetry;

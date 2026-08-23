@@ -38,6 +38,13 @@ assert(activeOk, tostring(activeReason))
 assert(reportedActive == true and active == true,
     "reactor activation was not verified")
 
+local singleOk, singleLevel, singleReason = adapter.setControlRodLevel(reactor, 1, 42)
+assert(singleOk == true and singleLevel == 42,
+    "individual control rod should be written and verified")
+assert(singleReason == nil, "successful individual rod write returned an error")
+levels[1] = 40
+calls = {}
+
 local ok, applied, reason = adapter.setControlRodExposure(reactor, 1.35)
 assert(ok, tostring(reason))
 assert(math.abs(applied - 1.35) < 0.001, "exposure was not verified")
