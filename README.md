@@ -1,4 +1,4 @@
-# HELIOS - v1.5.0 Alpha 2 External Module Pack
+# HELIOS - v1.6.0 Alpha 2 Manual Reactor Control
 
 Industrial power management for **CC:Tweaked** and **Extreme Reactors**.
 
@@ -32,9 +32,12 @@ The existing touch interface and network-ID protection remain online:
 - a guarded Power Control screen supports explicit automatic/manual authority;
 - manual reactor control provides verified on/off, all-rod, and paginated
   individual-rod adjustments for reactors with up to 100 or more rods;
-- a two-step arming action prevents accidental manual entry, automatic governors
-  pause during manual authority, and a storage reserve below 2% cancels manual
-  control and starts fresh automatic calibration;
+- a two-step arming action prevents accidental manual entry and automatic
+  governors pause during manual authority;
+- entering manual authority verifies that each reactor is active and the rod
+  control page displays live steam, hot-fluid buffer, and temperature telemetry;
+- an already depleted grid may be recovered manually; after storage first reaches
+  2%, a later drop below 2% cancels manual control and starts fresh calibration;
 - every turbine learns and persists its own 900- or 1800-RPM operating band;
 - governor states, proposed changes, and actuator results appear on mainframe and remote turbine screens;
 - the governor holds on missing, conflicting, inactive, or unsupported telemetry;

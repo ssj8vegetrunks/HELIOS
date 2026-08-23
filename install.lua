@@ -1,7 +1,7 @@
 -- HELIOS single-file installer
 -- Manual-control alpha: guarded direct plant authority.
 
-local VERSION = "1.6.0-alpha.1"
+local VERSION = "1.6.0-alpha.2"
 local INSTALL_DIR = "/helios"
 local STAGE_DIR = "/.helios-install"
 local MODULE_PACK_BASE_URL = "https://raw.githubusercontent.com/ssj8vegetrunks/HELIOS/agent/manual-control-alpha3/module-pack"
@@ -1271,6 +1271,7 @@ function mainframe.run(config)
     local governorMemory = turbineGovernor.new()
     local reactorGovernorMemory = reactorGovernor.new()
     local manualNotice
+    local manualSafetyState = manualControl.newSafetyState()
     local minimumPowerReserve
     local returnToAutomatic
 
@@ -1471,7 +1472,8 @@ function mainframe.run(config)
         turbines = turbineAdapter.readAll(devices)
         storages = storageAdapter.readAll(devices, config.power)
         if config.control.mode == "manual" then
-            local failover, reserve = manualControl.shouldFailover(storages,
+            local failover, reserve = manualControl.shouldFailover(manualSafetyState,
+                storages,
                 config.control.manualSafetyReserve)
             if failover then
                 returnToAutomatic(("Manual cancelled: reserve %.1f%% below %.1f%%"):
@@ -1640,6 +1642,7 @@ function mainframe.run(config)
 
     returnToAutomatic = function(reason, recalibrate)
         config.control.mode = "automatic"
+        manualSafetyState = manualControl.newSafetyState()
         manualNotice = reason
         if recalibrate then
             for _, turbine in ipairs(turbines) do
@@ -1840,9 +1843,20 @@ function mainframe.run(config)
             local pages = math.max(1, math.ceil(count / perPage))
             page = math.max(1, math.min(page, pages))
             ui.header("MANUAL REACTOR", deviceName(reactor.name))
-            ui.status("Authority", "MANUAL - GUARDED", colors.orange)
+            ui.status("Authority", manualSafetyState.armed and
+                "MANUAL - GUARDED" or "MANUAL - GUARD ARMING", colors.orange)
             ui.status("Reactor", reactor.active == true and "ACTIVE" or "OFFLINE",
                 reactor.active == true and colors.lime or colors.orange)
+            ui.status("Steam / hot buffer", ("%s / %s"):format(
+                reactor.steamProduction and
+                    ("%.0f mB/t"):format(reactor.steamProduction) or "N/A",
+                reactor.hotFluidPercent and
+                    ("%.1f%%"):format(reactor.hotFluidPercent) or "N/A"), colors.cyan)
+            ui.status("Fuel / casing temp", ("%s / %s"):format(
+                reactor.fuelTemperature and
+                    ("%.0f C"):format(reactor.fuelTemperature) or "N/A",
+                reactor.casingTemperature and
+                    ("%.0f C"):format(reactor.casingTemperature) or "N/A"))
             ui.status("Rod page / step", ("%d/%d / %d%%"):format(page, pages, step), colors.cyan)
             if notice then ui.line(notice, colors.orange) end
             buttons.rods = {}
@@ -1934,9 +1948,11 @@ function mainframe.run(config)
                 manual and colors.orange or colors.lime)
             ui.status("Actuators", "ENABLED - GUARDED", colors.lime)
             local reserve = minimumPowerReserve()
-            ui.status("Safety failover", reserve and ("%.1f%% / %.1f%%"):
-                format(reserve, config.control.manualSafetyReserve) or
-                "NO STORAGE TELEMETRY", reserve and colors.cyan or colors.gray)
+            local safetyState = manual and
+                (manualSafetyState.armed and "ARMED" or "ARMING") or "STANDBY"
+            ui.status("Safety guard", reserve and ("%s %.1f%% / %.1f%%"):
+                format(safetyState, reserve, config.control.manualSafetyReserve) or
+                (safetyState .. " / NO STORAGE"), reserve and colors.cyan or colors.gray)
             if manualNotice then ui.line(manualNotice, colors.orange) end
             if manual then
                 if #reactors == 0 then
@@ -2010,7 +2026,14 @@ function mainframe.run(config)
                     armed = false
                 elseif armed and #idConflicts == 0 then
                     config.control.mode = "manual"
-                    manualNotice = "Automatic governors paused; safety alarms remain active"
+                    manualSafetyState = manualControl.newSafetyState()
+                    local activated, activationErrors = manualControl.activateReactors(
+                        reactors, reactorAdapter.setActive)
+                    manualNotice = activated and
+                        "Reactors active; governors paused; safety guard arming" or
+                        ("Manual armed; reactor activation failed: " ..
+                            table.concat(activationErrors, "; "))
+                    pollReactors()
                     armed = false
                 else
                     armed = true
@@ -3019,10 +3042,37 @@ function manual.minimumReserve(storages)
     return minimum
 end
 
-function manual.shouldFailover(storages, threshold)
+function manual.newSafetyState()
+    return { armed = false }
+end
+
+function manual.activateReactors(reactors, setActive)
+    if type(setActive) ~= "function" then
+        return false, { "Reactor activation writer is unavailable" }
+    end
+    local errors = {}
+    for _, reactor in ipairs(reactors or {}) do
+        local ok, _, reason = setActive(reactor, true)
+        if not ok then
+            errors[#errors + 1] = tostring(reactor.name or "reactor") ..
+                ": " .. tostring(reason or "activation rejected")
+        end
+    end
+    return #errors == 0, errors
+end
+
+function manual.shouldFailover(state, storages, threshold)
+    state = type(state) == "table" and state or manual.newSafetyState()
     local reserve = manual.minimumReserve(storages)
     threshold = tonumber(threshold) or 2
-    return reserve ~= nil and reserve < threshold, reserve
+
+    -- Manual control is also the recovery path for an already depleted grid.
+    -- Do not immediately eject the operator when manual authority begins below
+    -- the threshold. Arm the failover only after this session has first reached
+    -- a safe reserve, then protect against a subsequent fall below it.
+    if reserve ~= nil and reserve >= threshold then state.armed = true end
+    return state.armed == true and reserve ~= nil and reserve < threshold,
+        reserve, state.armed == true
 end
 
 return manual

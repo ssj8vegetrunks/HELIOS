@@ -4,7 +4,7 @@
 
 Authoritative file: `install.lua`
 
-Total physical lines: **5663**
+Total physical lines: **5713**
 
 This map uses the actual line numbers in the bundled `install.lua`.
 
@@ -19,11 +19,11 @@ This map uses the actual line numbers in the bundled `install.lua`.
 - Lines 874-1009: **core/ui.lua** (module contents 875-1008)
 - Lines 1011-1118: **helios.lua** (module contents 1012-1117)
 - Lines 1120-1224: **mainframe/device_registry.lua** (module contents 1121-1223)
-- Lines 1226-3005: **mainframe/main.lua** (module contents 1227-3004)
-- Lines 3007-3029: **mainframe/manual_control.lua** (module contents 3008-3028)
-- Lines 3031-4100: **mainframe/reactor_governor.lua** (module contents 3032-4099)
-- Lines 4102-5011: **mainframe/turbine_governor.lua** (module contents 4103-5010)
-- Lines 5013-5361: **terminal/main.lua** (module contents 5014-5360)
+- Lines 1226-3028: **mainframe/main.lua** (module contents 1227-3027)
+- Lines 3030-3079: **mainframe/manual_control.lua** (module contents 3031-3078)
+- Lines 3081-4150: **mainframe/reactor_governor.lua** (module contents 3082-4149)
+- Lines 4152-5061: **mainframe/turbine_governor.lua** (module contents 4153-5060)
+- Lines 5063-5411: **terminal/main.lua** (module contents 5064-5410)
 
 ## Installer code outside bundled modules
 
@@ -37,11 +37,11 @@ This map uses the actual line numbers in the bundled `install.lua`.
 - Lines 1010-1010: **Bundle table separator / installer code**
 - Lines 1119-1119: **Bundle table separator / installer code**
 - Lines 1225-1225: **Bundle table separator / installer code**
-- Lines 3006-3006: **Bundle table separator / installer code**
-- Lines 3030-3030: **Bundle table separator / installer code**
-- Lines 4101-4101: **Bundle table separator / installer code**
-- Lines 5012-5012: **Bundle table separator / installer code**
-- Lines 5362-5663: **Installer/configuration/execution code**
+- Lines 3029-3029: **Bundle table separator / installer code**
+- Lines 3080-3080: **Bundle table separator / installer code**
+- Lines 4151-4151: **Bundle table separator / installer code**
+- Lines 5062-5062: **Bundle table separator / installer code**
+- Lines 5412-5713: **Installer/configuration/execution code**
 
 ## External Module Pack files
 
