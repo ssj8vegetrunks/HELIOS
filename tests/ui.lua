@@ -63,10 +63,10 @@ assert(rows[1]:sub(1, 19) == "HELIOS // MAINFRAME",
     "header role is not left aligned")
 assert(rows[1]:sub(width - #"v1.4.1-alpha.23" + 1) == "v1.4.1-alpha.23",
     "installed version is not right aligned")
-assert(rows[2]:sub(1, 29) == "[REACTORS] [TURBINES] [POWER]",
-    "dashboard navigation is not directly below the title")
-assert(rows[3]:sub(1, #"Central control authority") == "Central control authority",
-    "header subtitle must follow dashboard navigation")
+assert(rows[2]:sub(1, #"Central control authority") == "Central control authority",
+    "header subtitle must be directly below the title")
+assert(rows[3]:sub(1, 29) == "[REACTORS] [TURBINES] [POWER]",
+    "dashboard navigation must follow the header subtitle")
 
 rows, cursorX, cursorY, scrollCount = {}, 1, 5, 0
 ui.status("Control", string.rep("LONG STATUS ", 10), colors.red)

@@ -112,9 +112,9 @@ function ui.header(role, subtitle, afterTitle)
         write(string.sub(heading, 1, width))
     end
     term.setCursorPos(1, row + 1)
-    if type(afterTitle) == "function" then afterTitle() end
     term.setTextColor(colors.lightGray)
     print(subtitle)
+    if type(afterTitle) == "function" then afterTitle() end
     term.setTextColor(colors.gray)
     print(string.rep("-", math.min(select(1, term.getSize()), 40)))
     term.setTextColor(colors.white)
