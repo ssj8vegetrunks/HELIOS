@@ -1,9 +1,11 @@
 local terminal = {}
 
+-- @section REMOTE TERMINAL RUNTIME
 function terminal.run(config)
     local display = dofile("/helios/core/display.lua")
     display.start(config)
     local ui = dofile("/helios/core/ui.lua")
+    ui.setVersion(config.version)
     local configStore = dofile("/helios/core/config.lua")
     local network = dofile("/helios/core/network.lua")
     local powerFormat = dofile("/helios/core/power_format.lua")
@@ -30,6 +32,7 @@ function terminal.run(config)
         return rawName or "UNKNOWN"
     end
 
+    -- @section LOCAL ALARMS
     local function playSound(sound, pitch, volume)
         for _, name in ipairs(peripheral.getNames()) do
             if peripheral.hasType(name, "speaker") then
@@ -60,6 +63,7 @@ function terminal.run(config)
         end
     end
 
+    -- @section MAINFRAME LINK
     local function sendHello()
         network.broadcast({
             helios = true,
@@ -109,6 +113,7 @@ function terminal.run(config)
         term.setTextColor(colors.white)
     end
 
+    -- @section TELEMETRY VIEWS
     local function renderList(title, list, state, drawItem)
         ui.header("REMOTE " .. title, "Read-only mainframe telemetry")
         local link, colour = statusLine()
@@ -137,19 +142,49 @@ function terminal.run(config)
         return ("%.1f%s"):format(value, suffix or "")
     end
 
+    local function formatRodLayout(reactor, exposure)
+        local minimum = tonumber(reactor.controlRodMinimum)
+        local maximum = tonumber(reactor.controlRodMaximum)
+        local range
+        if minimum == nil or maximum == nil then
+            range = "N/A"
+        elseif math.abs(maximum - minimum) < 0.05 then
+            range = ("%.0f%%"):format(minimum)
+        else
+            range = ("%.0f-%.0f%%"):format(minimum, maximum)
+        end
+        return ("%s / %s eq"):format(range,
+            exposure ~= nil and ("%.2f"):format(exposure) or "N/A")
+    end
+
     local function renderReactors(state)
         renderList("REACTORS", state.reactors, state, function(item)
             ui.status("Mode", string.upper(item.mode or "unknown"))
             if item.error then ui.status("Telemetry", item.error, colors.red) return end
             ui.status("State", item.active == true and "ACTIVE" or item.active == false and "OFFLINE" or "UNKNOWN")
-            ui.status("Fuel", formatValue(item.fuelPercent, "%"))
-            ui.status("Fuel use", formatValue(item.fuelUse, " mB/t"))
-            ui.status("Fuel temp", formatValue(item.fuelTemperature, " C"))
-            ui.status("Casing temp", formatValue(item.casingTemperature, " C"))
+            ui.status("Fuel / use", ("%s / %s"):format(
+                formatValue(item.fuelPercent, "%"),
+                formatValue(item.fuelUse, " mB/t")))
+            ui.status("Temps fuel/case", ("%s / %s"):format(
+                formatValue(item.fuelTemperature, " C"),
+                formatValue(item.casingTemperature, " C")))
             if item.mode == "steam" then
-                ui.status("Steam output", formatValue(item.steamProduction, " mB/t"), colors.cyan)
-                ui.status("Coolant", formatValue(item.coolantPercent, "%"))
-                ui.status("Hot fluid", formatValue(item.hotFluidPercent, "%"))
+                local plan = item.governor or {}
+                ui.status("Steam avg/target", ("%s / %s"):format(
+                    formatValue(plan.averageSteamProduction or
+                        item.steamProduction, ""),
+                    formatValue(plan.targetSteam, " mB/t")), colors.cyan)
+                ui.status("Coolant / hot", ("%s / %s"):format(
+                    formatValue(item.coolantPercent, "%"),
+                    formatValue(item.hotFluidPercent, "%")))
+                ui.status("Rods range / exposed",
+                    formatRodLayout(item, plan.currentRodExposure))
+                ui.status("Governor", (plan.state or "WAITING") .. " / " ..
+                    (plan.actuatorState or "WAITING"),
+                    (plan.trusted == false or plan.actuatorState == "FAULT") and
+                        colors.red or
+                    ((plan.state == "STEAM DEFICIT" or
+                      plan.state == "STEAM SURPLUS") and colors.orange or colors.lime))
             else
                 ui.status("Power output", powerFormat.power(item.energyProduction, state.power, true), colors.cyan)
                 ui.status("Energy buffer", formatValue(item.energyPercent, "%"))
@@ -162,10 +197,19 @@ function terminal.run(config)
             if item.error then ui.status("Telemetry", item.error, colors.red) return end
             ui.status("State", item.active == true and "ACTIVE" or item.active == false and "OFFLINE" or "UNKNOWN")
             ui.status("Rotor speed", formatValue(item.rotorSpeed, " RPM"), colors.cyan)
+            local plan = item.governor or {}
+            ui.status("Governor", (plan.state or "WAITING") .. " / " ..
+                (plan.actuatorState or "WAITING"),
+                (plan.trusted == false or plan.actuatorState == "FAULT") and colors.red or colors.lime)
             ui.status("Power output", powerFormat.power(item.energyProduction, state.power, true), colors.cyan)
             ui.status("Energy buffer", formatValue(item.energyPercent, "%"))
-            ui.status("Fluid flow", formatValue(item.flowRate, " mB/t"))
-            ui.status("Max flow", formatValue(item.flowRateMax, " mB/t"))
+            if plan.currentFlow ~= nil and plan.recommendedFlow ~= nil then
+                ui.status("Flow actual/set/plan", ("%s / %.0f -> %.0f"):format(
+                    plan.actualFlow and ("%.0f"):format(plan.actualFlow) or "N/A",
+                    plan.currentFlow, plan.recommendedFlow), colors.cyan)
+            else
+                ui.status("Flow actual/set/plan", "N/A / HOLD", colors.gray)
+            end
             ui.status("Inductor", item.inductorEngaged == true and "ENGAGED" or item.inductorEngaged == false and "DISENGAGED" or "N/A")
         end)
     end
@@ -207,6 +251,7 @@ function terminal.run(config)
         print("Q exits on the terminal keyboard")
     end
 
+    -- @section EVENT LOOP AND RENDERING
     local function render()
         previousButton, nextButton, silenceButton, testButton = nil, nil, nil, nil
         ui.setIdConflicts(idConflicts)

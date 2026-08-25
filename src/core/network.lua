@@ -1,5 +1,6 @@
 local network = {}
 
+-- @section MODEM AND REDNET TRANSPORT
 network.protocol = "helios.v1"
 local PEER_FILE = "/helios/data/terminals.lua"
 
@@ -43,6 +44,7 @@ function network.now()
     return os.epoch("utc") / 1000
 end
 
+-- @section SESSION IDENTITY AND PEERS
 function network.sessionId(role)
     local seed = table.concat({
         tostring(role or "helios"),

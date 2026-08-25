@@ -1,3 +1,4 @@
+-- @section GENERIC STORAGE PERIPHERAL ADAPTER
 local adapter = {}
 local previousSamples = {}
 

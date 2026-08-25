@@ -1,0 +1,317 @@
+#!/usr/bin/env python3
+"""Generate the HELIOS source map and dependency tree from install.lua."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_INSTALL = ROOT / "install.lua"
+DEFAULT_SOURCE_MAP = ROOT / "docs" / "SOURCE_MAP.md"
+DEFAULT_DEPENDENCY_TREE = ROOT / "docs" / "DEPENDENCY_TREE.md"
+DEFAULT_MODULE_MANIFEST = ROOT / "module-pack" / "manifest.json"
+
+BUNDLE_OPEN = re.compile(r'^\s*\["(?P<name>[^"]+\.lua)"\]\s*=\s*\[=\[\s*$')
+BUNDLE_CLOSE = re.compile(r"^\s*\]=\],?\s*$")
+DOFILE = re.compile(
+    r'dofile\(\s*["\']/helios/(?P<path>[^"\']+\.lua)["\']\s*\)'
+)
+MODULE_LOAD = re.compile(r'\.load\(\s*["\'](?P<capability>[^"\']+)["\']')
+
+
+def load_module_pack(manifest_path: Path) -> tuple[dict[str, str], list[dict[str, str | int]]]:
+    """Return capability providers and external module file metadata."""
+    if not manifest_path.exists():
+        return {}, []
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    providers: dict[str, str] = {}
+    files: list[dict[str, str | int]] = []
+    seen_paths: set[str] = set()
+    for module in manifest.get("modules", []):
+        for provider in module.get("provides", []):
+            capability = provider["capability"]
+            relative = provider["path"]
+            installed = f"modules/{relative}"
+            providers[capability] = installed
+            if relative not in seen_paths:
+                source = manifest_path.parent / relative
+                files.append({
+                    "name": installed,
+                    "source": source.relative_to(ROOT).as_posix(),
+                    "lines": len(source.read_text(encoding="utf-8").splitlines()),
+                    "module_id": module["id"],
+                    "module_version": module["version"],
+                })
+                seen_paths.add(relative)
+    return providers, files
+
+
+def parse_bundle(lines: list[str]) -> list[dict[str, int | str]]:
+    """Return bundled module ranges using physical install.lua line numbers."""
+    modules: list[dict[str, int | str]] = []
+    index = 0
+
+    while index < len(lines):
+        match = BUNDLE_OPEN.match(lines[index])
+        if not match:
+            index += 1
+            continue
+
+        name = match.group("name")
+        start = index + 1
+        end_index = index + 1
+        while end_index < len(lines) and not BUNDLE_CLOSE.match(lines[end_index]):
+            end_index += 1
+
+        if end_index >= len(lines):
+            raise ValueError(
+                f"Unterminated bundled module {name!r}, starting at line {start}"
+            )
+
+        modules.append(
+            {
+                "name": name,
+                "start": start,
+                "content_start": start + 1,
+                "content_end": end_index,
+                "end": end_index + 1,
+            }
+        )
+        index = end_index + 1
+
+    return modules
+
+
+def module_dependencies(
+    lines: list[str], module: dict[str, int | str], known: set[str],
+    capability_providers: dict[str, str]
+) -> list[str]:
+    dependencies: set[str] = set()
+    content_start = int(module["content_start"])
+    content_end = int(module["content_end"])
+
+    for line_number in range(content_start, content_end + 1):
+        for match in DOFILE.finditer(lines[line_number - 1]):
+            dependency = match.group("path")
+            if dependency in known and dependency != module["name"]:
+                dependencies.add(dependency)
+        for match in MODULE_LOAD.finditer(lines[line_number - 1]):
+            provider = capability_providers.get(match.group("capability"))
+            if provider:
+                dependencies.add(provider)
+
+    return sorted(dependencies)
+
+
+def installer_ranges(
+    total_lines: int, modules: list[dict[str, int | str]]
+) -> list[tuple[int, int, str]]:
+    """Describe install.lua code outside bundled module entries."""
+    if not modules:
+        return [(1, total_lines, "Installer code")]
+
+    ranges: list[tuple[int, int, str]] = []
+    first_start = int(modules[0]["start"])
+    if first_start > 1:
+        ranges.append((1, first_start - 1, "Installer/bootstrap code"))
+
+    for left, right in zip(modules, modules[1:]):
+        gap_start = int(left["end"]) + 1
+        gap_end = int(right["start"]) - 1
+        if gap_start <= gap_end:
+            ranges.append((gap_start, gap_end, "Bundle table separator / installer code"))
+
+    last_end = int(modules[-1]["end"])
+    if last_end < total_lines:
+        ranges.append(
+            (last_end + 1, total_lines, "Installer/configuration/execution code")
+        )
+
+    return ranges
+
+
+def render_source_map(
+    install_path: Path, lines: list[str], modules: list[dict[str, int | str]],
+    external_modules: list[dict[str, str | int]]
+) -> str:
+    output = [
+        "# HELIOS install.lua Source Map",
+        "",
+        "<!-- Generated by scripts/generate_source_map.py. Do not edit line numbers manually. -->",
+        "",
+        f"Authoritative file: `{install_path.name}`",
+        "",
+        f"Total physical lines: **{len(lines)}**",
+        "",
+        "This map uses the actual line numbers in the bundled `install.lua`.",
+        "",
+        "## Bundled HELIOS modules",
+        "",
+    ]
+
+    for module in modules:
+        output.append(
+            f"- Lines {module['start']}-{module['end']}: "
+            f"**{module['name']}** "
+            f"(module contents {module['content_start']}-{module['content_end']})"
+        )
+
+    output.extend(["", "## Installer code outside bundled modules", ""])
+    for start, end, label in installer_ranges(len(lines), modules):
+        output.append(f"- Lines {start}-{end}: **{label}**")
+
+    if external_modules:
+        output.extend(["", "## External Module Pack files", ""])
+        output.append(
+            "These files are downloaded separately and therefore do not occupy "
+            "physical lines inside `install.lua`."
+        )
+        output.append("")
+        for module in external_modules:
+            output.append(
+                f"- `{module['source']}`: lines 1-{module['lines']} — "
+                f"**{module['module_id']} {module['module_version']}**"
+            )
+
+    output.extend(
+        [
+            "",
+            "## Quick lookup",
+            "",
+            "When HELIOS reports an error such as `install.lua:612`, find the range",
+            "containing that physical line number above to identify the bundled module.",
+            "",
+        ]
+    )
+    return "\n".join(output)
+
+
+def render_dependency_tree(
+    lines: list[str], modules: list[dict[str, int | str]],
+    capability_providers: dict[str, str],
+    external_modules: list[dict[str, str | int]]
+) -> str:
+    known = {str(module["name"]) for module in modules}
+    known.update(str(module["name"]) for module in external_modules)
+    dependencies = {
+        str(module["name"]): module_dependencies(
+            lines, module, known, capability_providers
+        )
+        for module in modules
+    }
+    for module in external_modules:
+        dependencies[str(module["name"])] = []
+    reverse: dict[str, list[str]] = {name: [] for name in known}
+
+    for module_name, module_dependencies_ in dependencies.items():
+        for dependency in module_dependencies_:
+            reverse[dependency].append(module_name)
+
+    output = [
+        "# HELIOS install.lua Dependency Tree",
+        "",
+        "<!-- Generated by scripts/generate_source_map.py. -->",
+        "",
+        "Dependencies are inferred from bundled `dofile(\"/helios/...lua\")` calls and Module Pack capability loads.",
+        "",
+        "## Module dependencies",
+        "",
+    ]
+
+    all_modules = [*modules, *external_modules]
+    for module in all_modules:
+        name = str(module["name"])
+        output.extend([f"### `{name}`", ""])
+        if dependencies[name]:
+            output.extend(
+                f"- depends on → `{dependency}`"
+                for dependency in dependencies[name]
+            )
+        else:
+            output.append("- No HELIOS module dependencies detected.")
+        output.append("")
+
+    output.extend(["## Reverse dependencies / blast radius", ""])
+    for module in all_modules:
+        name = str(module["name"])
+        output.extend([f"### `{name}`", ""])
+        users = sorted(reverse[name])
+        if users:
+            output.extend(f"- used by ← `{user}`" for user in users)
+        else:
+            output.append("- No HELIOS modules directly depend on this module.")
+        output.append("")
+
+    return "\n".join(output)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Generate the install.lua source map and dependency tree."
+    )
+    parser.add_argument("--install", type=Path, default=DEFAULT_INSTALL)
+    parser.add_argument("--source-map", type=Path, default=DEFAULT_SOURCE_MAP)
+    parser.add_argument(
+        "--dependency-tree", type=Path, default=DEFAULT_DEPENDENCY_TREE
+    )
+    parser.add_argument(
+        "--module-manifest", type=Path, default=DEFAULT_MODULE_MANIFEST
+    )
+    parser.add_argument(
+        "--check", action="store_true", help="fail when generated files are stale"
+    )
+    args = parser.parse_args()
+
+    install_path = args.install.resolve()
+    if not install_path.exists():
+        print(f"install.lua not found: {install_path}")
+        return 2
+
+    lines = install_path.read_text(encoding="utf-8").splitlines()
+    modules = parse_bundle(lines)
+    if not modules:
+        print("No bundled Lua modules found in install.lua.")
+        return 2
+
+    capability_providers, external_modules = load_module_pack(
+        args.module_manifest.resolve()
+    )
+    source_map = render_source_map(
+        install_path, lines, modules, external_modules
+    )
+    dependency_tree = render_dependency_tree(
+        lines, modules, capability_providers, external_modules
+    )
+    source_map_path = args.source_map.resolve()
+    dependency_tree_path = args.dependency_tree.resolve()
+
+    if args.check:
+        stale = False
+        for path, generated in (
+            (source_map_path, source_map),
+            (dependency_tree_path, dependency_tree),
+        ):
+            if not path.exists() or path.read_text(encoding="utf-8") != generated:
+                print(f"{path.relative_to(ROOT)} is stale")
+                stale = True
+        if stale:
+            return 1
+        print("docs/SOURCE_MAP.md and docs/DEPENDENCY_TREE.md are current")
+        return 0
+
+    source_map_path.parent.mkdir(parents=True, exist_ok=True)
+    dependency_tree_path.parent.mkdir(parents=True, exist_ok=True)
+    source_map_path.write_text(source_map, encoding="utf-8")
+    dependency_tree_path.write_text(dependency_tree, encoding="utf-8")
+    print(f"Mapped {len(modules)} bundled HELIOS modules from {install_path.name}")
+    print(f"Wrote {source_map_path.relative_to(ROOT)}")
+    print(f"Wrote {dependency_tree_path.relative_to(ROOT)}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

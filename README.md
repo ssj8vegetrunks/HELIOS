@@ -1,10 +1,16 @@
-# HELIOS — v1.3.0 Alpha 2 Control Interface and Touch
+# HELIOS - v1.6.0 Alpha 3 Manual Plant Control
 
 Industrial power management for **CC:Tweaked** and **Extreme Reactors**.
 
-This milestone prepares HELIOS for automatic regulation without enabling any
-actuators yet. It also brings monitor touch and network-ID conflict detection
-online:
+HELIOS Core and its peripheral adapters are now independently versioned. The
+mainframe installer retrieves the official Module Pack from GitHub; remote
+terminals install Core only. The tested reactor, turbine, and storage adapter
+logic is unchanged in this first modular release.
+
+This milestone adds guarded reactor steam regulation to the automatic turbine
+governor. HELIOS now matches one steam reactor to the trusted intake
+requested by its active turbines, reducing fuel waste without starving them.
+The existing touch interface and network-ID protection remain online:
 
 - the active HELIOS page is mirrored to every attached CC:Tweaked monitor;
 - mainframe monitors provide touch navigation, device selection, rescan, settings access, and alarm silence;
@@ -23,10 +29,72 @@ online:
 - duplicate CC:Tweaked computer IDs are detected from independent HELIOS sessions;
 - every HELIOS screen receives a red conflict banner listing all duplicated IDs;
 - conflicting directed telemetry is treated as unsafe until the IDs become unique;
-- a persistent Power Control screen exposes the planned automatic/manual and tuning layout;
-- `AUTOMATIC` is fixed on, while manual mode, tuning controls, and every actuator remain locked.
+- a guarded Power Control screen supports explicit automatic/manual authority;
+- manual reactor control provides verified on/off, all-rod, and paginated
+  individual-rod adjustments for reactors with up to 100 or more rods;
+- manual turbine control provides verified on/off and direct steam-flow-limit
+  adjustments while automatic governors are paused;
+- the text dashboard now uses color-coded Reactor, Turbine, and Power tabs,
+  persistent Control and Settings actions, and a direct Alarm route to the
+  affected equipment category;
+- touch and keyboard controls remain available together: turbine flow uses
+  `Z` / `X`, power uses `P`, and step selection uses `T`;
+- a two-step arming action prevents accidental manual entry and automatic
+  governors pause during manual authority;
+- entering manual authority verifies that each reactor is active and the rod
+  control page displays live steam, hot-fluid buffer, and temperature telemetry;
+- an already depleted grid may be recovered manually; after storage first reaches
+  2%, a later drop below 2% cancels manual control and starts fresh calibration;
+- every turbine learns and persists its own 900- or 1800-RPM operating band;
+- governor states, proposed changes, and actuator results appear on mainframe and remote turbine screens;
+- the governor holds on missing, conflicting, inactive, or unsupported telemetry;
+- normal changes require two matching readings, are limited to 100 mB/t every two seconds, and are verified by read-back;
+- calibration proves full steam and tests the 900-RPM band first;
+- turbines that overpower 900 RPM are unloaded again and tested at 1800 RPM;
+- 1800-RPM turbines trim steam in bounded steps and save both their learned band
+  and flow limit;
+- a turbine that cannot sustain 1800 RPM may settle back to a valid 900-RPM
+  profile without a fixed total timeout;
+- the inductor only changes at deliberate calibration transitions, eliminating
+  repeated clutch cycling;
+- invalid steam supply, rotor collapse below both bands, or a genuine no-progress
+  stall aborts calibration and raises a warning without saving a profile;
+- three consecutive readings confirm overspeed before an immediate zero-flow command;
+- confirmed turbine overspeed becomes a system-wide critical alarm;
+- rejected or unverifiable actuator commands become system-wide control-fault warnings;
+- the dashboard reports live automatic, calibration, maintenance, and fault state instead of the obsolete observe-only banner;
+- one steam reactor follows the summed configured intake of all active turbines;
+- managed turbine calibration waits for its steam reactor to start and supply
+  the full intake instead of failing while reactor output is still rising;
+- an offline steam reactor is started through verified activation control when
+  active turbine demand exists;
+- power-mode reactors remain telemetry-only and never enter steam alarms or control;
+- reactor exposure is spread as evenly as possible across every fuel column;
+- one-percent insertion differences provide 0.01 rod-equivalent fine control;
+- steam control uses a rolling average and a 2.5% reserve above turbine demand;
+- a new or unbalanced rod bank is first fully inserted to establish a known-safe baseline;
+- calibration begins once residual steam is negligible, the hot-fluid buffer is
+  drained, and casing temperature is below 150 C; it does not wait for a massive
+  casing to reach ambient temperature or become perfectly motionless;
+- recalibration records explicit baseline, testing, and adjusting phases so a
+  positive test exposure cannot restart the zero-exposure baseline loop;
+- once a recalibration test has a full rolling steam window and stable fluid
+  response, slow casing-temperature drift cannot hold that bounded step forever;
+- formula-assisted learning estimates the needed exposure, then bounded feedback corrects it;
+- ordinary reactor commands still wait for full plant response; recalibration
+  may ignore casing drift only after steam and hot-fluid response have settled;
+- stable learned exposure is saved per reactor and every individual rod command is verified;
+- external rod changes clear stale steam samples and automatically restore the learned exposure when turbine supply falls short;
+- high hot-fluid buffer pressure and zero turbine demand insert rods to reduce fuel use;
+- missing turbine demand, duplicate IDs, maintenance, unsupported rod telemetry, and ambiguous multiple-reactor routing hold reactor output unchanged;
 - settings and telemetry navigation use stable touch targets that fit the mirrored terminal canvas;
+- every mainframe and remote screen shows that computer's locally installed
+  HELIOS version in the upper-right corner;
+- reactor calibration shows its explicit phase plus rolling-steam and
+  process-response sample progress instead of ambiguous fallback labels;
 - upgrades remove obsolete HELIOS rollback copies before staging and retain only the immediately replaced version.
+- storage-constrained upgrades preserve configuration and calibration data while
+  replacing only installed program files, avoiding a second full Core copy.
 
 The existing telemetry foundation includes:
 
@@ -78,6 +146,7 @@ helios scan
 helios reactors
 helios turbines
 helios storage
+helios modules update
 ```
 
 The installed layout is:
@@ -90,19 +159,30 @@ The installed layout is:
   core/
     config.lua
     display.lua
+    module_loader.lua
+    module_manager.lua
     network.lua
     power_format.lua
     ui.lua
   mainframe/
     device_registry.lua
-    reactor_adapter.lua
-    turbine_adapter.lua
-    storage_adapter.lua
+    reactor_governor.lua
+    turbine_governor.lua
     main.lua
+  modules/
+    manifest.json
+    extreme_reactors/
+      reactor_adapter.lua
+      turbine_adapter.lua
+    universal_energy/
+      storage_adapter.lua
   terminal/
     main.lua
 /startup/99-helios.lua
 ```
+
+See [`docs/MODULE_API.md`](docs/MODULE_API.md) for the manifest, compatibility,
+and adapter-loading contract.
 
 If `/startup` is already a program, the installer asks permission before
 converting it into a startup directory. The original is preserved as
@@ -127,7 +207,7 @@ Use the left and right arrow keys to change the maintenance timeout. The old
 overlay. While maintenance is active, the on-screen countdown refreshes once
 per second without rescanning attached hardware.
 
-## Reactor monitoring
+## Reactor monitoring and steam control
 
 Press `V` on the mainframe dashboard to open live reactor telemetry. Use the
 left and right arrow keys to move between connected reactors. HELIOS reads
@@ -138,6 +218,29 @@ threshold is 20% and the critical threshold is 5%. Clicking
 `[ SILENCE ALARM ]` silences only the current condition. A different or more
 severe alarm can still sound, and silence resets after the condition clears.
 
+For one steam reactor, HELIOS totals the configured intake requested by
+all active turbines and regulates exposed rod-equivalents until reactor steam
+production matches that demand plus a 15% reserve. Total exposure is spread
+across every fuel column as evenly as integer insertion levels allow. For
+example, 0.26 equivalent on 25 rods becomes one rod at 98% insertion and 24 at
+99%. A rolling steam average filters the reactor's fuel-column cycle before
+stable measurements feed the proportional/interpolated learner. Live feedback
+still corrects for temperature, fuel, moderator layout, and other nonlinear
+effects. Each individual rod write is read back and verified.
+
+For an uncalibrated turbine, the reactor target is based on the turbine's hard
+intake limit. HELIOS starts an offline steam reactor and keeps the turbine
+intake open while temporarily targeting 90% extra reactor output. Once both
+steam buffers reach the 85% safety threshold, the reactor returns to its normal
+15% reserve and turbine calibration begins at full flow.
+Peripherals without readable buffer capacity retain the full-steam preflight
+fallback. A power-mode reactor is never considered a steam source.
+
+The reactor governor holds during maintenance, ID conflict, missing or
+untrusted turbine telemetry, unsupported rod control, or when more than one
+steam reactor is active. Multiple reactor loops need explicit routing before
+HELIOS will control them.
+
 The adapter is deliberately tolerant of several Extreme Reactors API naming
 variants. Unsupported measurements display `N/A` rather than stopping HELIOS.
 
@@ -147,8 +250,11 @@ Press `G` on the mainframe dashboard to open live turbine telemetry. `T` is
 intentionally unused because ATM10 binds it to the inventory trash overlay.
 Use the left and right arrow keys to move between connected turbines.
 
-The turbine adapter is read-only. Unsupported values display `N/A`, allowing
-ATM10 to show whichever measurements its Extreme Reactors build provides.
+The turbine adapter distinguishes actual steam consumed,
+the configured intake limit, and the turbine's hard intake limit. Unsupported
+values display `N/A`. In automatic mode, the mainframe uses Extreme Reactors'
+official `setFluidFlowRateMax` method and verifies the resulting setting after
+every command. Remote terminals remain read-only.
 
 ## Names and power display
 
@@ -220,14 +326,27 @@ terminal can press `S` to silence only its local speaker. Warnings remain visibl
 new conditions can sound, and silence resets after the condition clears.
 Press `X` on either computer's alarm interface to test its locally attached speaker.
 
-## Power control interface
+## Automatic plant governors
 
-Press `C` or touch `[CONTROL]` on the mainframe dashboard. The screen contains
-the future control mode, turbine RPM target, storage demand band, rod/flow step
-limits, and adjustment interval. For this alpha, `AUTOMATIC` is selected but
-all tuning fields and actuator calls are deliberately locked. This is an
-interface and authority test only; HELIOS still cannot move rods, change flow,
-toggle a reactor, or engage a turbine.
+Press `C` or touch `[CONTROL]` on the mainframe dashboard. The screen shows each
+turbine's live governor state, target RPM, current flow-limit setting, proposed
+setting, and action. Use Previous/Next to inspect turbines independently.
+
+An uncalibrated turbine first proves that its full advertised steam rate is
+available. HELIOS spools it unloaded to 900 RPM and tests that band under load.
+Only a turbine that continues climbing past 1000 RPM proceeds to the 1800-RPM
+test. At 1800 RPM HELIOS trims excess steam, or lets an unsustainable high-band
+test settle back toward 900 while maintaining full steam. It saves the valid band
+and learned flow limit. Steam loss, rotor collapse below both bands, or a genuine
+no-progress stall raises `CALIBRATION FAILED` and saves nothing. Three confirmed
+overspeed readings engage the inductor, cut steam, and raise a global alarm.
+Missing or untrusted telemetry always produces HOLD.
+
+`AUTOMATIC` remains selected and tuning controls remain locked. HELIOS may
+change a turbine's configured flow limit and inductor state, plus the individual
+control-rod insertion and active state of one steam reactor. It still cannot
+control a power-mode reactor, start or stop a turbine, change venting, eject
+fuel, or eject waste.
 
 See [`docs/CONTROL.md`](docs/CONTROL.md) for the concise control boundary and
 planned governor order.
@@ -243,6 +362,7 @@ trusting directed telemetry.
 
 ## Scope boundary
 
-Discovery, remote telemetry, and power hardware remain read-only. The control
-interface is present, but reactor/turbine governor logic and actuator calls are
-disabled. Graphs and additional specialized storage adapters come later.
+Remote terminals remain read-only. The mainframe may control only turbine flow
+limits, turbine inductors, and the verified active state and individual rods of
+one steam reactor. Multi-reactor routing, storage coordination, graphs, and
+additional specialized storage adapters come later.
