@@ -48,3 +48,10 @@ combined storage, steam production versus demand, total plant generation, and
 net storage flow. Its activity panel lists live governor states and reasons.
 Device tabs retain raw telemetry, while ADVANCED opens the established text-only
 configuration and manual-control interface.
+
+Custom large-screen rendering is independent from the computer terminal. The
+terminal always retains the compact built-in GUI and mouse controls while a
+qualifying attached monitor displays Control Room with monitor-touch controls.
+Advanced is rendered through the compact mirrored interface. If the custom
+renderer fails or the monitor becomes too small, the built-in GUI resumes on
+the monitor as well.

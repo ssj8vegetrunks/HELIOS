@@ -1976,45 +1976,21 @@ function mainframe.run(config)
 
     -- @section READ-ONLY GRAPHICAL INTERFACE
     local function graphicalView()
-        local customRenderer, customManifest = guiLoader.load(config.ui.renderer, config.version,
-            term.getSize())
-        if customRenderer then
-            local customState, customButtons = {}, {}
-            while true do
-                local ok, rendered = pcall(customRenderer.render, snapshotFor("all"), customState, {
-                    gui = gui, powerFormat = powerFormat,
-                })
-                if not ok then
-                    customRenderer = nil
-                    break
-                end
-                customButtons = rendered or {}
-                local event, value, message, protocol = os.pullEvent()
-                local handled, action = pcall(customRenderer.handle, customState, customButtons,
-                    event, value, message, protocol, {
-                        eventPoint = ui.eventPoint, hit = gui.hit,
-                    })
-                if not handled then customRenderer = nil break end
-                if action == "advanced" then return "advanced" end
-                if event == "key" and value == keys.q then return "quit"
-                elseif event == "rednet_message" then handleNetwork(value, message, protocol)
-                elseif event == "peripheral" or event == "peripheral_detach" then
-                    if maintenance or config.discovery.defaultMode == "manual" then registryStale = true else rescan() end
-                elseif event == "term_resize" or event == "monitor_resize" then
-                    local width, height = term.getSize()
-                    if width < customManifest.minimumWidth or height < customManifest.minimumHeight then break end
-                elseif event == "timer" then
-                    if maintenance and value == maintenanceTimer then stopMaintenance()
-                    elseif maintenance and value == countdownTimer then countdownTimer = os.startTimer(1)
-                    elseif value == reactorTimer then
-                        pollReactors(); broadcastSnapshots(); reactorTimer = os.startTimer(1)
-                    end
-                end
-            end
-        end
         local page = "overview"
         local selected = { reactors = 1, turbines = 1, storage = 1 }
         local buttons = {}
+        local customState, customButtons, customManifest = {}, {}, nil
+        local customRenderer
+
+        local function reloadCustomRenderer()
+            customRenderer, customManifest = nil, nil
+            local width, height = display.monitorSize()
+            if width then
+                customRenderer, customManifest = guiLoader.load(config.ui.renderer,
+                    config.version, width, height)
+            end
+        end
+        reloadCustomRenderer()
 
         local function readiness()
             if #idConflicts > 0 then return "FAULT", "DUPLICATE COMPUTER ID", colors.red end
@@ -2216,19 +2192,39 @@ function mainframe.run(config)
         end
 
         while true do
-            draw()
+            if customRenderer then
+                display.useNative()
+                draw()
+                display.useMonitors()
+                local ok, rendered = pcall(customRenderer.render, snapshotFor("all"), customState, {
+                    gui = gui, powerFormat = powerFormat,
+                })
+                if ok then customButtons = rendered or {} else customRenderer = nil end
+                display.useNative()
+            else
+                display.useMirrored()
+                draw()
+                display.useNative()
+            end
             local event, value, message, protocol = os.pullEvent()
             local touchX, touchY = ui.eventPoint(event, value, message, protocol)
-            if event == "key" and value == keys.q then return "quit"
+            if (event == "monitor_touch" or event == "key") and customRenderer then
+                local handled, action = pcall(customRenderer.handle, customState, customButtons,
+                    event, value, message, protocol, { eventPoint = ui.eventPoint, hit = gui.hit })
+                if not handled then customRenderer = nil
+                elseif action == "advanced" then display.useMirrored(); return "advanced" end
+                if event == "monitor_touch" then touchX, touchY = nil, nil end
+            end
+            if event == "key" and value == keys.q then display.useMirrored(); return "quit"
             elseif event == "key" and value == keys.v then page = "reactors"
             elseif event == "key" and value == keys.g then page = "turbines"
             elseif event == "key" and value == keys.e then page = "storage"
-            elseif event == "key" and value == keys.a then return "advanced"
+            elseif event == "key" and value == keys.a then display.useMirrored(); return "advanced"
             elseif gui.hit(buttons.overview, touchX, touchY) then page = "overview"
             elseif gui.hit(buttons.reactors, touchX, touchY) then page = "reactors"
             elseif gui.hit(buttons.turbines, touchX, touchY) then page = "turbines"
             elseif gui.hit(buttons.storage, touchX, touchY) then page = "storage"
-            elseif gui.hit(buttons.advanced, touchX, touchY) then return "advanced"
+            elseif gui.hit(buttons.advanced, touchX, touchY) then display.useMirrored(); return "advanced"
             elseif gui.hit(buttons.keepControl, touchX, touchY) then
                 selectAuthority("control")
             elseif gui.hit(buttons.monitorOnly, touchX, touchY) then
@@ -2264,6 +2260,9 @@ function mainframe.run(config)
                 handleNetwork(value, message, protocol)
             elseif event == "peripheral" or event == "peripheral_detach" then
                 if maintenance or config.discovery.defaultMode == "manual" then registryStale = true else rescan() end
+                reloadCustomRenderer()
+            elseif event == "term_resize" or event == "monitor_resize" then
+                reloadCustomRenderer()
             elseif event == "timer" then
                 if maintenance and value == maintenanceTimer then
                     stopMaintenance()
