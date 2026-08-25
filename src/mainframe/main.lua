@@ -113,8 +113,20 @@ function mainframe.run(config)
             return tostring(a.unit.name) < tostring(b.unit.name)
         end)
 
-        local remaining = plantRechargeActive and
-            math.max(1, tonumber(powerDemand) or 0) or 0
+        local totalCapacity = 0
+        for _, source in ipairs(sources) do
+            totalCapacity = totalCapacity + math.max(0, tonumber(source.capacity) or 0)
+        end
+        local rechargeTarget = 0
+        if plantRechargeActive and powerReserve ~= nil and totalCapacity > 0 then
+            -- A near-empty grid needs decisive recharge, while a grid closer to
+            -- the high threshold is replenished with progressively less capacity.
+            local fraction = math.max(0.10, math.min(1,
+                (high - powerReserve) / math.max(1, high - low)))
+            rechargeTarget = totalCapacity * fraction
+        end
+        local remaining = plantRechargeActive and math.max(1,
+            tonumber(powerDemand) or 0, rechargeTarget) or 0
         for _, source in ipairs(sources) do
             if remaining > 0 then
                 local assigned = source.capacity > 0 and

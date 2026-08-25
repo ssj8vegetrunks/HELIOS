@@ -2060,8 +2060,20 @@ function mainframe.run(config)
             return tostring(a.unit.name) < tostring(b.unit.name)
         end)
 
-        local remaining = plantRechargeActive and
-            math.max(1, tonumber(powerDemand) or 0) or 0
+        local totalCapacity = 0
+        for _, source in ipairs(sources) do
+            totalCapacity = totalCapacity + math.max(0, tonumber(source.capacity) or 0)
+        end
+        local rechargeTarget = 0
+        if plantRechargeActive and powerReserve ~= nil and totalCapacity > 0 then
+            -- A near-empty grid needs decisive recharge, while a grid closer to
+            -- the high threshold is replenished with progressively less capacity.
+            local fraction = math.max(0.10, math.min(1,
+                (high - powerReserve) / math.max(1, high - low)))
+            rechargeTarget = totalCapacity * fraction
+        end
+        local remaining = plantRechargeActive and math.max(1,
+            tonumber(powerDemand) or 0, rechargeTarget) or 0
         for _, source in ipairs(sources) do
             if remaining > 0 then
                 local assigned = source.capacity > 0 and
@@ -7552,6 +7564,10 @@ local function buildConfig(role, display, existing)
                 math.floor(tonumber(control.overspeedSamples) or 3)),
             storageLow = tonumber(control.storageLow) or 25,
             storageHigh = tonumber(control.storageHigh) or 85,
+            assistedIdleRpmRatio = math.max(0.25, math.min(0.95,
+                tonumber(control.assistedIdleRpmRatio) or 0.75)),
+            assistedIdleFlow = math.max(1,
+                tonumber(control.assistedIdleFlow) or 250),
             maxRodStep = tonumber(control.maxRodStep) or 5,
             reactorAdjustmentInterval = math.max(2,
                 tonumber(control.reactorAdjustmentInterval) or 5),
