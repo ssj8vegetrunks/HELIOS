@@ -232,6 +232,10 @@ function config.load()
     loaded.control.manualSafetyReserve = math.max(0.5, math.min(25,
         tonumber(loaded.control.manualSafetyReserve) or 2))
     loaded.control.actuatorsEnabled = loaded.role == "mainframe"
+    if loaded.control.mainframeAuthority ~= "control" and
+       loaded.control.mainframeAuthority ~= "monitor" then
+        loaded.control.mainframeAuthority = "auto"
+    end
     loaded.control.targetRpm = tonumber(loaded.control.targetRpm) or 1800
     loaded.control.rpmDeadband = math.max(1, tonumber(loaded.control.rpmDeadband) or 25)
     loaded.control.overspeedRpm = math.max(loaded.control.targetRpm + loaded.control.rpmDeadband,
@@ -414,7 +418,17 @@ local function buildProxy()
     target.setCursorBlink = function(...) return mirror("setCursorBlink", ...) end
     target.getCursorBlink = function(...) return native.getCursorBlink(...) end
     target.isColor = function(...) return native.isColor(...) end
-    target.getSize = function(...) return native.getSize(...) end
+    target.getSize = function(...)
+        local width, height = native.getSize(...)
+        for _, monitor in ipairs(monitors) do
+            local ok, monitorWidth, monitorHeight = pcall(monitor.getSize)
+            if ok then
+                width = math.min(width, monitorWidth)
+                height = math.min(height, monitorHeight)
+            end
+        end
+        return width, height
+    end
     target.scroll = function(...) return mirror("scroll", ...) end
     target.setTextColor = function(...) return mirror("setTextColor", ...) end
     target.getTextColor = function(...) return native.getTextColor(...) end
@@ -535,6 +549,83 @@ function gui.rpmGauge(x, y, width, rpm)
 end
 
 return gui
+]=],
+
+    ["core/mainframe_authority.lua"] = [=[
+local authority = {}
+
+local function normalise(mode)
+    if mode == "control" or mode == "monitor" then return mode end
+    return "auto"
+end
+
+function authority.new(mode, localId)
+    return { mode = normalise(mode), localId = tonumber(localId), peers = {} }
+end
+
+function authority.observe(state, sender, message, now)
+    if type(message) ~= "table" or message.kind ~= "mainframe_presence" then return false end
+    local id = tonumber(sender)
+    if not id or id == state.localId then return false end
+    state.peers[tostring(id)] = {
+        id = id,
+        mode = normalise(message.authority),
+        lastSeen = tonumber(now) or 0,
+    }
+    local previous = state.mode
+    if message.authority == "control" and
+       (state.mode == "auto" or (state.mode == "control" and id < state.localId)) then
+        state.mode = "monitor"
+    end
+    return state.mode ~= previous
+end
+
+function authority.expire(state, now, timeout)
+    local changed = false
+    for key, peer in pairs(state.peers) do
+        if (tonumber(now) or 0) - (tonumber(peer.lastSeen) or 0) > (timeout or 5) then
+            state.peers[key] = nil
+            changed = true
+        end
+    end
+    return changed
+end
+
+function authority.select(state, mode)
+    state.mode = normalise(mode)
+    if state.mode == "control" then
+        for _, peer in pairs(state.peers) do
+            if peer.mode == "control" and peer.id < state.localId then
+                state.mode = "monitor"
+                break
+            end
+        end
+    end
+    return state.mode
+end
+
+function authority.peerCount(state)
+    local count = 0
+    for _ in pairs(state.peers) do count = count + 1 end
+    return count
+end
+
+function authority.controllingPeer(state)
+    for _, peer in pairs(state.peers) do
+        if peer.mode == "control" then return peer end
+    end
+end
+
+function authority.needsSelection(state)
+    return state.mode == "auto" and authority.peerCount(state) > 0
+end
+
+function authority.canControl(state)
+    return state.mode == "control" or
+        (state.mode == "auto" and authority.peerCount(state) == 0)
+end
+
+return authority
 ]=],
 
     ["core/module_loader.lua"] = [=[
@@ -1444,6 +1535,7 @@ function mainframe.run(config)
     if not storageAdapter then error(storageModuleError, 0) end
     local powerFormat = dofile("/helios/core/power_format.lua")
     local network = dofile("/helios/core/network.lua")
+    local authority = dofile("/helios/core/mainframe_authority.lua")
     local devices = {}
     local reactors = {}
     local turbines = {}
@@ -1464,6 +1556,8 @@ function mainframe.run(config)
     local terminals = network.loadPeers()
     local missingDevices = {}
     local sessionId = network.sessionId("mainframe")
+    local authorityState = authority.new(config.control.mainframeAuthority,
+        os.getComputerID())
     local identityClaims = {}
     local idConflicts = {}
     local dashboardButtons = {}
@@ -1475,6 +1569,29 @@ function mainframe.run(config)
     local returnToAutomatic
 
     local timeoutChoices = { 300, 900, 1800, 3600 }
+
+    local function saveAuthority()
+        config.control.mainframeAuthority = authorityState.mode
+        configStore.save(config)
+    end
+
+    local function advertiseMainframe()
+        network.broadcast({
+            helios = true,
+            kind = "mainframe_presence",
+            sourceId = os.getComputerID(),
+            sessionId = sessionId,
+            authority = authorityState.mode,
+            version = config.version,
+            sentAt = network.now(),
+        })
+    end
+
+    local function selectAuthority(mode)
+        authority.select(authorityState, mode)
+        saveAuthority()
+        advertiseMainframe()
+    end
 
     -- @section DISCOVERY AND NETWORK IDENTITY
     local function sameList(a, b)
@@ -1670,6 +1787,8 @@ function mainframe.run(config)
 
     -- @section TELEMETRY AND GOVERNORS
     local function pollReactors()
+        authority.expire(authorityState, network.now(), 5)
+        advertiseMainframe()
         reactors = reactorAdapter.readAll(devices)
         turbines = turbineAdapter.readAll(devices)
         storages = storageAdapter.readAll(devices, config.power)
@@ -1683,12 +1802,13 @@ function mainframe.run(config)
             end
         end
         local manualAuthority = config.control.mode == "manual"
+        local authorityPaused = not authority.canControl(authorityState)
         local now = os.epoch("utc") / 1000
         local steamPrimeRequested = turbineGovernor.needsSteamPrime(
             governorMemory, turbines)
         local _, steamDemand = reactorGovernor.evaluateAll(reactorGovernorMemory,
             reactors, turbines, config.control, {
-                maintenance = maintenance or manualAuthority,
+                maintenance = maintenance or manualAuthority or authorityPaused,
                 mainframeId = os.getComputerID(),
                 idConflicts = idConflicts,
                 now = now,
@@ -1703,7 +1823,7 @@ function mainframe.run(config)
             configStore.save(config)
         end
         reactorGovernor.applyAll(reactorGovernorMemory, reactors, config.control, {
-            maintenance = maintenance or manualAuthority,
+            maintenance = maintenance or manualAuthority or authorityPaused,
             now = now,
         }, {
             setActive = reactorAdapter.setActive,
@@ -1713,7 +1833,7 @@ function mainframe.run(config)
         local steamSource = reactorGovernor.steamSourceStatus(reactors,
             steamDemand, config.control)
         turbineGovernor.evaluateAll(governorMemory, turbines, config.control, {
-            maintenance = maintenance or manualAuthority,
+            maintenance = maintenance or manualAuthority or authorityPaused,
             mainframeId = os.getComputerID(),
             idConflicts = idConflicts,
             now = now,
@@ -1726,7 +1846,7 @@ function mainframe.run(config)
             configStore.save(config)
         end
         turbineGovernor.applyAll(governorMemory, turbines, config.control, {
-                maintenance = maintenance or manualAuthority,
+                maintenance = maintenance or manualAuthority or authorityPaused,
                 now = now,
         }, {
             setActive = turbineAdapter.setActive,
@@ -1776,7 +1896,16 @@ function mainframe.run(config)
     end
 
     local function handleNetwork(sender, message, protocol)
-        if protocol ~= network.protocol or not network.valid(message, "hello") then return false end
+        if protocol ~= network.protocol or not network.valid(message) then return false end
+        if message.kind == "mainframe_presence" then
+            local changed = authority.observe(authorityState, sender, message, network.now())
+            if changed then
+                saveAuthority()
+                advertiseMainframe()
+            end
+            return true
+        end
+        if message.kind ~= "hello" then return false end
         local claim = tostring(message.sessionId or ("legacy:" .. tostring(sender)))
         local idKey = tostring(sender)
         identityClaims[idKey] = identityClaims[idKey] or {}
@@ -3322,6 +3451,14 @@ function mainframe.run(config)
 
         local function readiness()
             if #idConflicts > 0 then return "FAULT", "DUPLICATE COMPUTER ID", colors.red end
+            if authority.needsSelection(authorityState) then
+                return "AUTHORITY", "MULTIPLE MAINFRAMES - SELECT ONE", colors.orange
+            end
+            if not authority.canControl(authorityState) then
+                local peer = authority.controllingPeer(authorityState)
+                return "MONITORING", peer and ("CONTROLLED BY MAINFRAME " .. peer.id) or
+                    "AUTOMATIC CONTROL DISABLED", colors.cyan
+            end
             local alarmLevel = currentAlarm and tonumber(currentAlarm.level) or nil
             if currentAlarm and alarmLevel and alarmLevel >= 3 then
                 return "FAULT", currentAlarm.message, colors.red
@@ -3395,6 +3532,17 @@ function mainframe.run(config)
                 reserve and ("%5.1f%%"):format(reserve) or "  N/A", colors.white)
             gui.text(1, 15, "Graphical monitoring only", colors.gray)
             gui.text(1, 16, "Manual control: ADVANCED text interface", colors.gray)
+            local height = select(2, term.getSize())
+            if authority.needsSelection(authorityState) then
+                local row = math.max(17, height - 2)
+                buttons.keepControl = gui.button(1, row, "KEEP CONTROL", colors.black, colors.lime)
+                buttons.monitorOnly = gui.button(buttons.keepControl.x2 + 2, row,
+                    "MONITOR ONLY", colors.black, colors.cyan)
+            elseif authorityState.mode == "monitor" and
+                   not authority.controllingPeer(authorityState) then
+                local row = math.max(17, height - 2)
+                buttons.keepControl = gui.button(1, row, "TAKE CONTROL", colors.black, colors.orange)
+            end
         end
 
         local function reactorPage()
@@ -3514,6 +3662,10 @@ function mainframe.run(config)
             elseif gui.hit(buttons.turbines, touchX, touchY) then page = "turbines"
             elseif gui.hit(buttons.storage, touchX, touchY) then page = "storage"
             elseif gui.hit(buttons.advanced, touchX, touchY) then return "advanced"
+            elseif gui.hit(buttons.keepControl, touchX, touchY) then
+                selectAuthority("control")
+            elseif gui.hit(buttons.monitorOnly, touchX, touchY) then
+                selectAuthority("monitor")
             elseif event == "key" and value == keys.left then
                 if page == "reactors" and #reactors > 0 then
                     selected.reactors = ((selected.reactors - 2) % #reactors) + 1
@@ -6219,7 +6371,7 @@ function terminal.run(config)
             render()
         elseif event == "key" and value == keys.x then
             playSound("minecraft:block.note_block.bell", 0.8, 1.5)
-        elseif event == "monitor_touch" then
+        elseif event == "monitor_touch" or event == "mouse_click" then
             local x, y = message, protocol
             if not advanced then
                 if gui.hit(graphicalButtons.overview, x, y) then graphicalPage, selected = "overview", 1
@@ -6350,6 +6502,7 @@ local function buildConfig(role, display, existing)
         control = {
             mode = "automatic",
             actuatorsEnabled = role == "mainframe",
+            mainframeAuthority = role == "mainframe" and "auto" or "monitor",
             targetRpm = tonumber(control.targetRpm) or 1800,
             rpmDeadband = math.max(1, tonumber(control.rpmDeadband) or 25),
             overspeedRpm = math.max((tonumber(control.targetRpm) or 1800) +

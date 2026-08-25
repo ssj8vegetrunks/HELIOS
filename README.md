@@ -29,6 +29,7 @@ The existing touch interface and network-ID protection remain online:
 - the active HELIOS page is mirrored to every attached CC:Tweaked monitor;
 - mainframe monitors provide touch navigation, device selection, rescan, settings access, and alarm silence;
 - remote-terminal monitors provide read-only telemetry navigation, local alarm silence, and speaker testing;
+- remote computer screens accept mouse clicks for the same read-only navigation;
 - monitors may be attached or detached while HELIOS is running;
 - the same display layer works on both mainframes and remote-terminal roles;
 - monitor text scale defaults to `0.5` to fit the terminal layout;
@@ -312,9 +313,16 @@ A monitor driven by a remote terminal remains read-only. Its touch buttons may
 change the locally displayed device, test its speaker, or silence its local
 speaker, but cannot change mainframe settings or call power hardware.
 
-The display uses text scale `0.5`. A monitor must be physically large enough to
-show the computer-sized layout; content outside a smaller monitor is safely
-clipped.
+The display uses text scale `0.5`. When screens of different sizes are mirrored,
+HELIOS lays out the page for the smallest attached screen so navigation and
+critical status remain visible rather than being clipped.
+
+Mainframes announce their control authority over HELIOS networking. A lone new
+mainframe controls normally. If two unassigned mainframes discover each other,
+both pause actuator commands and show an authority choice on HOME. Choosing
+`KEEP CONTROL` persists control on that computer and defaults the peer to
+persisted monitoring-only mode. Simultaneous control claims are resolved safely
+by computer ID, so only one governor can issue commands.
 
 ## Remote terminals
 

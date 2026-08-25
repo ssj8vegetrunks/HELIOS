@@ -492,7 +492,7 @@ function terminal.run(config)
             render()
         elseif event == "key" and value == keys.x then
             playSound("minecraft:block.note_block.bell", 0.8, 1.5)
-        elseif event == "monitor_touch" then
+        elseif event == "monitor_touch" or event == "mouse_click" then
             local x, y = message, protocol
             if not advanced then
                 if gui.hit(graphicalButtons.overview, x, y) then graphicalPage, selected = "overview", 1

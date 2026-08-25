@@ -36,6 +36,10 @@ function config.load()
     loaded.control.manualSafetyReserve = math.max(0.5, math.min(25,
         tonumber(loaded.control.manualSafetyReserve) or 2))
     loaded.control.actuatorsEnabled = loaded.role == "mainframe"
+    if loaded.control.mainframeAuthority ~= "control" and
+       loaded.control.mainframeAuthority ~= "monitor" then
+        loaded.control.mainframeAuthority = "auto"
+    end
     loaded.control.targetRpm = tonumber(loaded.control.targetRpm) or 1800
     loaded.control.rpmDeadband = math.max(1, tonumber(loaded.control.rpmDeadband) or 25)
     loaded.control.overspeedRpm = math.max(loaded.control.targetRpm + loaded.control.rpmDeadband,
