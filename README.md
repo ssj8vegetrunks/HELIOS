@@ -1,6 +1,13 @@
-# HELIOS - v1.6.0 Alpha 3 Manual Plant Control
+# HELIOS - v1.6.0 Alpha 4 Graphical UI Contract
 
 Industrial power management for **CC:Tweaked** and **Extreme Reactors**.
+
+This development milestone freezes the tested Alpha 3 manual-control/text-UI
+build and introduces the first versioned graphical UI boundary. Renderers now
+receive sanitized, serializable snapshots and may submit only documented
+command envelopes through guarded Core handlers. See
+[`docs/UI_API.md`](docs/UI_API.md). No graphical renderer or new actuator path
+is enabled yet; the finished text UI remains the dependable built-in fallback.
 
 HELIOS Core and its peripheral adapters are now independently versioned. The
 mainframe installer retrieves the official Module Pack from GitHub; remote

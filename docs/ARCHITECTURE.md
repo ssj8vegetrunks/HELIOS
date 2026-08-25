@@ -106,3 +106,12 @@ docs/
    - Mainframe startup fails clearly when a required module is absent or incompatible
    - Remote terminals do not install or execute hardware modules
    - See MODULE_API.md for the manifest and loader contract
+
+12. Graphical UI contract boundary
+   - Core publishes sanitized, serializable plant snapshots through `helios.ui`
+   - Renderers never receive peripheral handles or call hardware adapters
+   - Renderers submit documented command envelopes to guarded Core handlers
+   - Remote renderers remain read-only and duplicate computer IDs block commands
+   - Manual actuator commands require active Manual authority
+   - The built-in text UI remains installed as the failure-safe fallback
+   - See UI_API.md for contract versioning, commands, and lifecycle rules

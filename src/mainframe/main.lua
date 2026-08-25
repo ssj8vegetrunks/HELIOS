@@ -6,6 +6,7 @@ function mainframe.run(config)
     display.start(config)
     local ui = dofile("/helios/core/ui.lua")
     ui.setVersion(config.version)
+    local uiContract = dofile("/helios/core/ui_contract.lua")
     local configStore = dofile("/helios/core/config.lua")
     local moduleLoader = dofile("/helios/core/module_loader.lua")
     local registry = dofile("/helios/mainframe/device_registry.lua")
@@ -321,7 +322,7 @@ function mainframe.run(config)
     -- @section REMOTE TELEMETRY
     local function snapshotFor(assignment)
         local includeAll = assignment == "all"
-        return {
+        return uiContract.attach({
             helios = true,
             kind = "snapshot",
             version = config.version,
@@ -338,7 +339,7 @@ function mainframe.run(config)
             alarmVolume = config.alarms.volume,
             idConflicts = idConflicts,
             control = config.control,
-        }
+        })
     end
 
     local function sendSnapshot(id, assignment)

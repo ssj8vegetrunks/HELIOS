@@ -34,6 +34,10 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 
 - No HELIOS module dependencies detected.
 
+### `core/ui_contract.lua`
+
+- No HELIOS module dependencies detected.
+
 ### `helios.lua`
 
 - depends on → `core/config.lua`
@@ -59,6 +63,7 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 - depends on → `core/network.lua`
 - depends on → `core/power_format.lua`
 - depends on → `core/ui.lua`
+- depends on → `core/ui_contract.lua`
 - depends on → `mainframe/device_registry.lua`
 - depends on → `mainframe/manual_control.lua`
 - depends on → `mainframe/reactor_governor.lua`
@@ -136,6 +141,10 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 
 - used by ← `mainframe/main.lua`
 - used by ← `terminal/main.lua`
+
+### `core/ui_contract.lua`
+
+- used by ← `mainframe/main.lua`
 
 ### `helios.lua`
 
