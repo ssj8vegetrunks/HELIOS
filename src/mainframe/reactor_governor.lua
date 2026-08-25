@@ -527,6 +527,13 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
             local lowBuffer = tonumber(control.reactorHotFluidLow) or 15
             local deadband = math.max(tonumber(control.reactorSteamDeadbandMin) or 25,
                 target * (tonumber(control.reactorSteamDeadband) or 0.01))
+            -- Use a wider threshold for issuing a new physical rod command than
+            -- for deciding whether telemetry is stable. Without this hysteresis,
+            -- a learned reactor can alternate between two adjacent rod settings:
+            -- each tiny correction invalidates the rolling average, the next
+            -- completed average reverses it, and calibration never finishes.
+            local commandDeadband = previous.recalibrating == true and deadband or
+                math.max(deadband, target * 0.025)
             local maxStep = math.max(0.01, math.min(1,
                 tonumber(control.maxRodEquivalentStep) or 0.25))
             local stableRequired = math.max(3,
@@ -801,7 +808,7 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
                 -- must retain its reserve instead of draining the network again.
                 addLearningPoint(previous, exposure, production)
 
-                if production < target - deadband then
+                if production < target - commandDeadband then
                     if exposure >= rodCount - 0.005 then
                         state = "STEAM DEFICIT"
                         reason = "Reactor cannot meet turbine demand with every rod exposed"
@@ -825,7 +832,7 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
                             format(hotFluid,
                                 previous.bufferRecoverySamples or 0,
                                 stableRequired)
-                elseif production > target + deadband then
+                elseif production > target + commandDeadband then
                     local estimate = learnedExposure(previous, profile, exposure,
                         production, target, rodCount)
                     proposed = math.max(exposure - maxStep,
@@ -895,6 +902,7 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
                 averageSteamSamples = averageSamples,
                 steamError = target - production,
                 steamDeadband = deadband,
+                steamCommandDeadband = commandDeadband,
                 rodCount = rodCount,
                 currentRodExposure = round(exposure, 2),
                 recommendedRodExposure = proposed,

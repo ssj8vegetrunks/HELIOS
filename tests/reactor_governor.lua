@@ -557,6 +557,35 @@ do
 end
 
 do
+    local hysteresisControl = {}
+    for key, value in pairs(control) do hysteresisControl[key] = value end
+    hysteresisControl.reactorProfiles = {
+        reactor_0 = {
+            exposure = 1.81,
+            steam = 11500,
+            targetSteam = 11500,
+            updatedAt = 1,
+        },
+    }
+    local requested = 11500 / (1 + hysteresisControl.reactorSteamReserveMargin)
+    local memory = governor.new()
+    local plan = settle(memory, reactor(11765, 1.81), requested, 0, 12)
+    equal(plan.state, "LEARNED",
+        "small learned-output error settles instead of reversing rod commands")
+    equal(plan.action, "HOLD",
+        "command hysteresis prevents an endless fine-adjustment loop")
+    equal(plan.recommendedRodExposure, 1.81,
+        "minor steam surplus retains the learned rod exposure")
+    assert(plan.steamCommandDeadband > plan.steamDeadband,
+        "physical command threshold is wider than telemetry deadband")
+
+    memory = governor.new()
+    plan = settle(memory, reactor(12000, 1.81), requested, 0, 12)
+    equal(plan.action, "REDUCE EXPOSURE",
+        "meaningful steam surplus still requests a correction")
+end
+
+do
     local memory = governor.new()
     local reserveControl = {}
     for key, value in pairs(control) do reserveControl[key] = value end

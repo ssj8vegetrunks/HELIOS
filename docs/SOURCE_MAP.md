@@ -4,7 +4,7 @@
 
 Authoritative file: `install.lua`
 
-Total physical lines: **7287**
+Total physical lines: **7295**
 
 This map uses the actual line numbers in the bundled `install.lua`.
 
@@ -27,9 +27,9 @@ This map uses the actual line numbers in the bundled `install.lua`.
 - Lines 1832-1936: **mainframe/device_registry.lua** (module contents 1833-1935)
 - Lines 1938-4339: **mainframe/main.lua** (module contents 1939-4338)
 - Lines 4341-4398: **mainframe/manual_control.lua** (module contents 4342-4397)
-- Lines 4400-5484: **mainframe/reactor_governor.lua** (module contents 4401-5483)
-- Lines 5486-6396: **mainframe/turbine_governor.lua** (module contents 5487-6395)
-- Lines 6398-6969: **terminal/main.lua** (module contents 6399-6968)
+- Lines 4400-5492: **mainframe/reactor_governor.lua** (module contents 4401-5491)
+- Lines 5494-6404: **mainframe/turbine_governor.lua** (module contents 5495-6403)
+- Lines 6406-6977: **terminal/main.lua** (module contents 6407-6976)
 
 ## Installer code outside bundled modules
 
@@ -51,9 +51,9 @@ This map uses the actual line numbers in the bundled `install.lua`.
 - Lines 1937-1937: **Bundle table separator / installer code**
 - Lines 4340-4340: **Bundle table separator / installer code**
 - Lines 4399-4399: **Bundle table separator / installer code**
-- Lines 5485-5485: **Bundle table separator / installer code**
-- Lines 6397-6397: **Bundle table separator / installer code**
-- Lines 6970-7287: **Installer/configuration/execution code**
+- Lines 5493-5493: **Bundle table separator / installer code**
+- Lines 6405-6405: **Bundle table separator / installer code**
+- Lines 6978-7295: **Installer/configuration/execution code**
 
 ## External Module Pack files
 
