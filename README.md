@@ -1,4 +1,4 @@
-# HELIOS - v1.6.0 Alpha 2 Manual Reactor Control
+# HELIOS - v1.6.0 Alpha 3 Manual Plant Control
 
 Industrial power management for **CC:Tweaked** and **Extreme Reactors**.
 
@@ -32,6 +32,13 @@ The existing touch interface and network-ID protection remain online:
 - a guarded Power Control screen supports explicit automatic/manual authority;
 - manual reactor control provides verified on/off, all-rod, and paginated
   individual-rod adjustments for reactors with up to 100 or more rods;
+- manual turbine control provides verified on/off and direct steam-flow-limit
+  adjustments while automatic governors are paused;
+- the text dashboard now uses color-coded Reactor, Turbine, and Power tabs,
+  persistent Control and Settings actions, and a direct Alarm route to the
+  affected equipment category;
+- touch and keyboard controls remain available together: turbine flow uses
+  `Z` / `X`, power uses `P`, and step selection uses `T`;
 - a two-step arming action prevents accidental manual entry and automatic
   governors pause during manual authority;
 - entering manual authority verifies that each reactor is active and the rod

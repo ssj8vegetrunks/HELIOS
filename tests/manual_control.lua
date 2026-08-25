@@ -49,4 +49,14 @@ assert(activated == false and #errors == 1 and
        string.find(errors[1], "offline", 1, true),
     "manual entry must report rejected reactor activation")
 
+local turbineCalls = {}
+activated, errors = manual.activateTurbines({ { name = "turbine_a" } },
+    function(turbine, requested)
+        turbineCalls[#turbineCalls + 1] = { name = turbine.name, requested = requested }
+        return true, requested
+    end)
+assert(activated == true and #errors == 0 and #turbineCalls == 1 and
+       turbineCalls[1].requested == true,
+    "manual entry must verify turbine activation without changing flow settings")
+
 print("manual control tests passed")

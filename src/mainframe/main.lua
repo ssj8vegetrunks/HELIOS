@@ -35,6 +35,7 @@ function mainframe.run(config)
     local lastAlarmSound = 0
     local conditionSamples = {}
     local silenceButton
+    local alarmButton
     local modemCount = network.openAll()
     local terminals = network.loadPeers()
     local missingDevices = {}
@@ -216,10 +217,13 @@ function mainframe.run(config)
         local previous = currentAlarm
         currentAlarm = chooseAlarm()
         if not currentAlarm then
+            ui.setCriticalAlarm(false)
             if previous then playSound("minecraft:block.note_block.pling", 1.5) end
             silencedAlarm = nil
             return
         end
+
+        ui.setCriticalAlarm(currentAlarm.level >= 3)
 
         local signature = currentAlarm.level .. ":" .. currentAlarm.key
         local previousSignature = previous and (previous.level .. ":" .. previous.key) or nil
@@ -529,7 +533,7 @@ function mainframe.run(config)
     -- @section MAIN DASHBOARD
     local function render()
         ui.setIdConflicts(idConflicts)
-        ui.header("MAINFRAME", "Central control authority")
+        ui.header("HELIOS", "Central power management")
         ui.status("System", "ONLINE", colors.lime)
         ui.status("Computer ID", config.computerId)
         ui.status("Attached hardware", #devices, #devices > 0 and colors.lime or colors.orange)
@@ -558,9 +562,12 @@ function mainframe.run(config)
         if currentAlarm then
             ui.block("!! " .. currentAlarm.message, alarmColour(), 3)
             local _, row = term.getCursorPos()
-            print("[ SILENCE ALARM ]")
-            silenceButton = { y = row, x1 = 1, x2 = 17 }
+            alarmButton = ui.inlineButton("ALARM", alarmColour())
+            write(" ")
+            silenceButton = ui.inlineButton("SILENCE", colors.gray)
+            print("")
         else
+            alarmButton = nil
             silenceButton = nil
             ui.status("Alarms", config.alarms.enabled and "CLEAR" or "DISABLED",
                 config.alarms.enabled and colors.lime or colors.gray)
@@ -584,21 +591,19 @@ function mainframe.run(config)
         end
         term.setCursorPos(1, footerRow)
         dashboardButtons = {}
-        dashboardButtons.reactors = ui.inlineButton("REACTORS", colors.cyan)
+        dashboardButtons.reactors = ui.inlineButton("REACTORS", colors.red)
         write(" ")
-        dashboardButtons.turbines = ui.inlineButton("TURBINES", colors.cyan)
+        dashboardButtons.turbines = ui.inlineButton("TURBINES", colors.blue)
         write(" ")
-        dashboardButtons.storage = ui.inlineButton("STORAGE", colors.cyan)
+        dashboardButtons.storage = ui.inlineButton("POWER", colors.yellow)
         print("")
         dashboardButtons.control = ui.inlineButton("CONTROL", colors.lime)
-        write(" ")
-        dashboardButtons.rescan = ui.inlineButton("RESCAN", colors.cyan)
         write(" ")
         dashboardButtons.settings = ui.inlineButton("SETTINGS", colors.cyan)
         print("")
         term.setTextColor(colors.gray)
         term.setCursorPos(1, height)
-        write(string.sub("Keyboard: V/G/E/C/R/S | Q exit", 1, width))
+        write(string.sub("Keyboard: V/G/E/C/A/R/S | Q exit", 1, width))
         term.setTextColor(colors.white)
     end
 
@@ -665,23 +670,26 @@ function mainframe.run(config)
             write(" ")
             buttons.back = ui.inlineButton("BACK", colors.cyan)
             print("")
+            ui.line("Keyboard: <-/-> page | Z/X all rods | T step | P power | B back", colors.gray)
 
             local event, value, message, protocol = os.pullEvent()
             local x, y = ui.eventPoint(event, value, message, protocol)
             if (event == "key" and value == keys.b) or ui.hit(buttons.back, x, y) then
                 return
-            elseif ui.hit(buttons.previous, x, y) then page = math.max(1, page - 1)
-            elseif ui.hit(buttons.next, x, y) then page = math.min(pages, page + 1)
-            elseif ui.hit(buttons.step, x, y) then
+            elseif (event == "key" and value == keys.left) or ui.hit(buttons.previous, x, y) then page = math.max(1, page - 1)
+            elseif (event == "key" and value == keys.right) or ui.hit(buttons.next, x, y) then page = math.min(pages, page + 1)
+            elseif (event == "key" and value == keys.t) or ui.hit(buttons.step, x, y) then
                 step = step == 1 and 5 or step == 5 and 10 or 1
-            elseif ui.hit(buttons.power, x, y) then
+            elseif (event == "key" and value == keys.p) or ui.hit(buttons.power, x, y) then
                 local ok, _, reason = reactorAdapter.setActive(reactor,
                     reactor.active ~= true)
                 notice = ok and "Reactor state verified" or tostring(reason)
                 pollReactors()
-            elseif ui.hit(buttons.allDown, x, y) or ui.hit(buttons.allUp, x, y) then
+            elseif (event == "key" and (value == keys.z or value == keys.x)) or
+                   ui.hit(buttons.allDown, x, y) or ui.hit(buttons.allUp, x, y) then
                 local current = tonumber(reactor.controlRodLevel) or 100
-                local requested = current + (ui.hit(buttons.allUp, x, y) and step or -step)
+                local increase = (event == "key" and value == keys.x) or ui.hit(buttons.allUp, x, y)
+                local requested = current + (increase and step or -step)
                 local ok, _, reason = reactorAdapter.setAllControlRodLevels(
                     reactor, requested)
                 notice = ok and "All rods verified" or tostring(reason)
@@ -698,6 +706,96 @@ function mainframe.run(config)
                         pollReactors()
                         break
                     end
+                end
+            end
+            if event == "rednet_message" then handleNetwork(value, message, protocol) end
+            if event == "timer" and value == reactorTimer then
+                pollReactors()
+                broadcastSnapshots()
+                reactorTimer = os.startTimer(1)
+            end
+        end
+    end
+
+    -- @section MANUAL TURBINE CONTROLS
+    local function manualTurbineView()
+        local selected, step, notice = 1, 100
+        local buttons = {}
+        while config.control.mode == "manual" do
+            buttons = {}
+            ui.header("MANUAL TURBINE", "Direct flow and power control")
+            ui.status("Authority", manualSafetyState.armed and
+                "MANUAL - GUARDED" or "MANUAL - GUARD ARMING", colors.orange)
+            if #turbines == 0 then
+                ui.status("Status", "NO TURBINES FOUND", colors.orange)
+                buttons.back = ui.button("BACK", colors.cyan)
+            else
+                if selected > #turbines then selected = #turbines end
+                local turbine = turbines[selected]
+                ui.status("Turbine", ("%d/%d %s"):format(selected, #turbines,
+                    deviceName(turbine.name)), colors.cyan)
+                ui.status("State", turbine.active == true and "ACTIVE" or
+                    turbine.active == false and "OFFLINE" or "UNKNOWN",
+                    turbine.active == true and colors.lime or colors.orange)
+                ui.status("Steam actual / limit", ("%s / %s"):format(
+                    turbine.flowRate and ("%.0f mB/t"):format(turbine.flowRate) or "N/A",
+                    turbine.flowRateMax and ("%.0f mB/t"):format(turbine.flowRateMax) or "N/A"),
+                    colors.cyan)
+                ui.status("Steam buffer", turbine.inputPercent and
+                    ("%.1f%%"):format(turbine.inputPercent) or "N/A")
+                ui.status("Rotor / output", ("%s / %s"):format(
+                    turbine.rotorSpeed and ("%.1f RPM"):format(turbine.rotorSpeed) or "N/A",
+                    powerFormat.power(turbine.energyProduction, config.power, true)))
+                ui.status("Flow adjustment", step .. " mB/t", colors.cyan)
+                if notice then ui.line(notice, colors.orange) end
+                buttons.previous = ui.inlineButton("< PREVIOUS", colors.cyan)
+                write(" ")
+                buttons.next = ui.inlineButton("NEXT >", colors.cyan)
+                write(" ")
+                buttons.step = ui.inlineButton("STEP", colors.cyan)
+                print("")
+                buttons.down = ui.inlineButton("FLOW -", colors.orange)
+                write(" ")
+                buttons.up = ui.inlineButton("FLOW +", colors.lime)
+                print("")
+                buttons.power = ui.inlineButton(turbine.active == true and
+                    "TURN OFF" or "TURN ON", colors.orange)
+                write(" ")
+                buttons.back = ui.inlineButton("BACK", colors.cyan)
+                print("")
+                ui.line("Keyboard: <-/-> select | Z/X flow | T step | P power | B back", colors.gray)
+            end
+
+            local event, value, message, protocol = os.pullEvent()
+            local x, y = ui.eventPoint(event, value, message, protocol)
+            if (event == "key" and value == keys.b) or ui.hit(buttons.back, x, y) then
+                return
+            elseif #turbines > 0 then
+                local turbine = turbines[selected]
+                if (event == "key" and value == keys.left) or ui.hit(buttons.previous, x, y) then
+                    selected = ((selected - 2) % #turbines) + 1
+                elseif (event == "key" and value == keys.right) or ui.hit(buttons.next, x, y) then
+                    selected = (selected % #turbines) + 1
+                elseif (event == "key" and value == keys.t) or ui.hit(buttons.step, x, y) then
+                    step = step == 100 and 500 or step == 500 and 1000 or 100
+                elseif (event == "key" and (value == keys.z or value == keys.x)) or
+                       ui.hit(buttons.down, x, y) or ui.hit(buttons.up, x, y) then
+                    local current = tonumber(turbine.flowRateMax)
+                    if not current then
+                        notice = "Flow-limit telemetry is unavailable"
+                    else
+                        local increase = (event == "key" and value == keys.x) or
+                            ui.hit(buttons.up, x, y)
+                        local change = increase and step or -step
+                        local ok, _, reason = turbineAdapter.setFlowLimit(turbine, current + change)
+                        notice = ok and "Turbine flow limit verified" or tostring(reason)
+                        pollReactors()
+                    end
+                elseif (event == "key" and value == keys.p) or ui.hit(buttons.power, x, y) then
+                    local ok, _, reason = turbineAdapter.setActive(turbine,
+                        turbine.active ~= true)
+                    notice = ok and "Turbine state verified" or tostring(reason)
+                    pollReactors()
                 end
             end
             if event == "rednet_message" then handleNetwork(value, message, protocol) end
@@ -741,6 +839,9 @@ function mainframe.run(config)
                         tonumber(reactor.controlRods) or 0,
                         tonumber(reactor.controlRodLevel) or 0))
                 end
+                if #turbines > 0 then
+                    ui.status("Turbines", (#turbines .. " MANUAL CONTROL AVAILABLE"), colors.cyan)
+                end
             elseif #turbines == 0 then
                 ui.status("Status", "NO TURBINES FOUND", colors.orange)
             else
@@ -770,6 +871,8 @@ function mainframe.run(config)
                 buttons.mode = ui.button("RETURN TO AUTOMATIC", colors.lime)
                 buttons.reactor = #reactors > 0 and
                     ui.button("REACTOR ROD CONTROLS", colors.orange) or nil
+                buttons.turbine = #turbines > 0 and
+                    ui.button("TURBINE CONTROLS", colors.cyan) or nil
             else
                 buttons.mode = ui.button(armed and "CONFIRM MANUAL CONTROL" or
                     "ARM MANUAL CONTROL", armed and colors.red or colors.orange)
@@ -817,6 +920,8 @@ function mainframe.run(config)
                 end
             elseif ui.hit(buttons.reactor, x, y) and #reactors > 0 then
                 manualReactorView(reactors[selected].name)
+            elseif ui.hit(buttons.turbine, x, y) and #turbines > 0 then
+                manualTurbineView()
             elseif ((event == "key" and value == keys.left) or ui.hit(buttons.previous, x, y)) and
                    ((config.control.mode == "manual" and #reactors > 0) or #turbines > 0) then
                 local count = config.control.mode == "manual" and #reactors or #turbines
@@ -1729,6 +1834,21 @@ function mainframe.run(config)
         end
     end
 
+    local function openAlarmLocation()
+        if not currentAlarm then return end
+        local name = tostring(currentAlarm.key or ""):match("^(.-):")
+        for _, reactor in ipairs(reactors) do
+            if reactor.name == name then reactorView(); return end
+        end
+        for _, turbine in ipairs(turbines) do
+            if turbine.name == name then turbineView(); return end
+        end
+        for _, storage in ipairs(storages) do
+            if storage.name == name then storageView(); return end
+        end
+        controlView()
+    end
+
     rescan(true)
     pollReactors()
     reactorTimer = os.startTimer(1)
@@ -1757,15 +1877,19 @@ function mainframe.run(config)
         elseif event == "key" and value == keys.c then
             controlView()
             render()
+        elseif event == "key" and value == keys.a then
+            openAlarmLocation()
+            render()
         elseif event == "monitor_touch" or event == "mouse_click" then
             local touchX, touchY = x, y
-            if silenceButton and ui.hit(silenceButton, touchX, touchY) then
+            if alarmButton and ui.hit(alarmButton, touchX, touchY) then
+                openAlarmLocation()
+            elseif silenceButton and ui.hit(silenceButton, touchX, touchY) then
                 silenceCurrentAlarm()
             elseif ui.hit(dashboardButtons.reactors, touchX, touchY) then reactorView()
             elseif ui.hit(dashboardButtons.turbines, touchX, touchY) then turbineView()
             elseif ui.hit(dashboardButtons.storage, touchX, touchY) then storageView()
             elseif ui.hit(dashboardButtons.control, touchX, touchY) then controlView()
-            elseif ui.hit(dashboardButtons.rescan, touchX, touchY) then rescan(true)
             elseif ui.hit(dashboardButtons.settings, touchX, touchY) then settings()
             end
             render()

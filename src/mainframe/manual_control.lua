@@ -16,19 +16,27 @@ function manual.newSafetyState()
     return { armed = false }
 end
 
-function manual.activateReactors(reactors, setActive)
+local function activateDevices(devices, setActive, kind)
     if type(setActive) ~= "function" then
-        return false, { "Reactor activation writer is unavailable" }
+        return false, { tostring(kind or "Device") .. " activation writer is unavailable" }
     end
     local errors = {}
-    for _, reactor in ipairs(reactors or {}) do
-        local ok, _, reason = setActive(reactor, true)
+    for _, device in ipairs(devices or {}) do
+        local ok, _, reason = setActive(device, true)
         if not ok then
-            errors[#errors + 1] = tostring(reactor.name or "reactor") ..
+            errors[#errors + 1] = tostring(device.name or string.lower(kind or "device")) ..
                 ": " .. tostring(reason or "activation rejected")
         end
     end
     return #errors == 0, errors
+end
+
+function manual.activateReactors(reactors, setActive)
+    return activateDevices(reactors, setActive, "Reactor")
+end
+
+function manual.activateTurbines(turbines, setActive)
+    return activateDevices(turbines, setActive, "Turbine")
 end
 
 function manual.shouldFailover(state, storages, threshold)

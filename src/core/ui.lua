@@ -2,6 +2,7 @@ local ui = {}
 -- @section UI STATE AND INPUT
 local idConflicts = {}
 local systemVersion
+local criticalAlarm = false
 
 function ui.setVersion(version)
     systemVersion = version and tostring(version) or nil
@@ -16,6 +17,10 @@ end
 
 function ui.hasIdConflict()
     return #idConflicts > 0
+end
+
+function ui.setCriticalAlarm(active)
+    criticalAlarm = active == true
 end
 
 function ui.button(label, colour)
@@ -83,6 +88,13 @@ function ui.header(role, subtitle)
         term.setTextColor(colors.white)
         local warning = " ID CONFLICT: " .. table.concat(idConflicts, ", ") .. " "
         print(string.sub(warning .. string.rep(" ", width), 1, width))
+        term.setBackgroundColor(colors.black)
+    end
+    if criticalAlarm then
+        local width = select(1, term.getSize())
+        term.setBackgroundColor(colors.red)
+        term.setTextColor(colors.white)
+        print(string.sub(" [ ALARM ] CRITICAL CONDITION ACTIVE " .. string.rep(" ", width), 1, width))
         term.setBackgroundColor(colors.black)
     end
     term.setTextColor(colors.yellow)
