@@ -324,6 +324,13 @@ both pause actuator commands and show an authority choice on HOME. Choosing
 persisted monitoring-only mode. Simultaneous control claims are resolved safely
 by computer ID, so only one governor can issue commands.
 
+Before a fresh mainframe installation begins, the installer listens for an
+existing HELIOS mainframe for three seconds. If one answers, installation is
+refused and the operator is directed to install a Remote Terminal instead.
+Reinstalling or upgrading the mainframe already configured on that computer is
+still allowed. Runtime authority protection remains active for simultaneous
+installs, copied disks, and mainframes that were offline during this check.
+
 ## Remote terminals
 
 Install HELIOS as a Remote Terminal and choose `reactor`, `turbine`, `battery`,

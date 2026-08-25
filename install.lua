@@ -51,6 +51,35 @@ local function confirm(prompt)
     return answer == "y" or answer == "yes"
 end
 
+local function findExistingMainframe(timeout)
+    local opened = {}
+    for _, name in ipairs(peripheral.getNames()) do
+        local isModem = false
+        for _, peripheralType in ipairs({ peripheral.getType(name) }) do
+            if peripheralType == "modem" then isModem = true break end
+        end
+        if isModem and not rednet.isOpen(name) then
+            local ok = pcall(rednet.open, name)
+            if ok then opened[#opened + 1] = name end
+        end
+    end
+
+    local timer = os.startTimer(timeout or 3)
+    local found
+    while not found do
+        local event, sender, message, protocol = os.pullEvent()
+        if event == "timer" and sender == timer then break end
+        if event == "rednet_message" and protocol == "helios.v1" and
+           sender ~= os.getComputerID() and type(message) == "table" and
+           message.helios == true and message.kind == "mainframe_presence" then
+            found = sender
+        end
+    end
+    if found then pcall(os.cancelTimer, timer) end
+    for _, name in ipairs(opened) do pcall(rednet.close, name) end
+    return found
+end
+
 local function writeFile(path, contents)
     local parent = fs.getDir(path)
     if parent ~= "" and not fs.exists(parent) then
@@ -6614,6 +6643,20 @@ local function runInstaller()
         { label = "Mainframe", value = "mainframe" },
         { label = "Remote Terminal", value = "terminal" },
     })
+
+    if role == "mainframe" and not (existingConfig and existingConfig.role == "mainframe") then
+        title("Checking HELIOS Network")
+        print("Looking for an existing mainframe...")
+        local existingMainframe = findExistingMainframe(3)
+        if existingMainframe then
+            error("Mainframe " .. tostring(existingMainframe) ..
+                " is already managing this HELIOS network. Install this computer as a " ..
+                "Remote Terminal instead.", 0)
+        end
+        term.setTextColor(colors.lime)
+        print("No existing HELIOS mainframe found.")
+        term.setTextColor(colors.white)
+    end
 
     local display
     if role == "terminal" then
