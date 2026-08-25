@@ -5733,6 +5733,7 @@ function terminal.run(config)
     display.start(config)
     local ui = dofile("/helios/core/ui.lua")
     ui.setVersion(config.version)
+    local gui = dofile("/helios/core/gui.lua")
     local configStore = dofile("/helios/core/config.lua")
     local network = dofile("/helios/core/network.lua")
     local powerFormat = dofile("/helios/core/power_format.lua")
@@ -5748,6 +5749,10 @@ function terminal.run(config)
     local sessionId = network.sessionId("terminal")
     local idConflicts = {}
     local previousButton, nextButton, silenceButton, testButton
+    local advanced = false
+    local graphicalPage = ({ reactor = "reactors", turbine = "turbines",
+        battery = "storage" })[config.display] or "overview"
+    local graphicalButtons = {}
 
     local function nameOf(rawName, state)
         local aliases = state.aliases or {}
@@ -5978,8 +5983,181 @@ function terminal.run(config)
         print("Q exits on the terminal keyboard")
     end
 
+    -- @section READ-ONLY GRAPHICAL VIEWS
+    local function graphicalStatus()
+        local link = statusLine()
+        if link ~= "ONLINE" then return link, link, colors.red end
+        if snapshot and snapshot.alarm then
+            local level = tonumber(snapshot.alarm.level) or 1
+            return level >= 3 and "FAULT" or "WARNING",
+                tostring(snapshot.alarm.message), level >= 3 and colors.red or colors.orange
+        end
+        local control = snapshot and snapshot.control or {}
+        for _, reactor in ipairs(snapshot and snapshot.reactors or {}) do
+            local state = string.upper(tostring(reactor.governor and reactor.governor.state or ""))
+            if string.find(state, "CALIBRAT", 1, true) then
+                return "CALIBRATING", nameOf(reactor.name, snapshot), colors.orange
+            end
+        end
+        for _, turbine in ipairs(snapshot and snapshot.turbines or {}) do
+            local state = string.upper(tostring(turbine.governor and turbine.governor.state or ""))
+            if string.find(state, "CALIBRAT", 1, true) or
+               string.find(state, "SPOOL", 1, true) or
+               string.find(state, "PRIM", 1, true) then
+                return "CALIBRATING", nameOf(turbine.name, snapshot) .. " - " .. state,
+                    colors.orange
+            end
+        end
+        if not snapshot then return "STARTING", "SEARCHING FOR MAINFRAME", colors.orange end
+        return "READY", string.upper(tostring(control.mode or "automatic")), colors.lime
+    end
+
+    local function graphicalHeader(title)
+        gui.prepare()
+        local width, height = term.getSize()
+        gui.text(1, 1, "HELIOS // REMOTE " .. title, colors.yellow)
+        local version = "v" .. tostring(config.version)
+        gui.text(math.max(1, width - #version + 1), 1, version, colors.yellow)
+        local state, detail, colour = graphicalStatus()
+        gui.text(1, 2, " " .. state .. " ", colors.black, colour)
+        gui.text(#state + 4, 2, detail, colour, colors.black,
+            math.max(0, width - #state - 3))
+        graphicalButtons = {}
+        local x = 1
+        graphicalButtons.overview = gui.button(x, 4, "HOME", colors.white,
+            graphicalPage == "overview" and colors.gray or colors.black)
+        x = graphicalButtons.overview.x2 + 2
+        graphicalButtons.reactors = gui.button(x, 4, "REACTORS", colors.red,
+            graphicalPage == "reactors" and colors.gray or colors.black)
+        x = graphicalButtons.reactors.x2 + 2
+        graphicalButtons.turbines = gui.button(x, 4, "TURBINES", colors.cyan,
+            graphicalPage == "turbines" and colors.gray or colors.black)
+        x = graphicalButtons.turbines.x2 + 2
+        graphicalButtons.storage = gui.button(x, 4, "POWER", colors.yellow,
+            graphicalPage == "storage" and colors.gray or colors.black)
+        graphicalButtons.advanced = gui.button(1, height, "ADVANCED", colors.white, colors.gray)
+    end
+
+    local function graphicalOverview()
+        graphicalHeader("OVERVIEW")
+        local width = select(1, term.getSize())
+        if not snapshot then
+            gui.text(1, 7, "SEARCHING FOR MAINFRAME", colors.orange)
+            return
+        end
+        local state, detail, colour = graphicalStatus()
+        gui.text(1, 6, "SYSTEM READINESS", colors.lightGray)
+        gui.text(1, 7, state, colour)
+        gui.text(1, 8, detail, colors.white, colors.black, width)
+        gui.text(1, 10, ("REACTORS  %d   TURBINES  %d   STORAGE  %d"):format(
+            #(snapshot.reactors or {}), #(snapshot.turbines or {}),
+            #(snapshot.storages or {})), colors.cyan)
+        local stored, capacity = 0, 0
+        for _, storage in ipairs(snapshot.storages or {}) do
+            stored = stored + (tonumber(storage.stored) or 0)
+            capacity = capacity + (tonumber(storage.capacity) or 0)
+        end
+        local percent = capacity > 0 and stored / capacity * 100 or 0
+        gui.text(1, 12, "COMBINED STORAGE", colors.lightGray)
+        gui.progress(1, 13, math.max(10, width - 8), percent,
+            percent < 20 and colors.orange or colors.lime, colors.gray)
+        gui.text(math.max(1, width - 6), 13, ("%5.1f%%"):format(percent), colors.white)
+        gui.text(1, 15, "REMOTE MONITORING - READ ONLY", colors.gray)
+    end
+
+    local function graphicalReactors()
+        graphicalHeader("REACTORS")
+        local list = snapshot and snapshot.reactors or {}
+        local width = select(1, term.getSize())
+        if #list == 0 then gui.text(1, 7, "NO REACTORS REPORTED", colors.orange) return end
+        selected = math.max(1, math.min(selected, #list))
+        local reactor = list[selected]
+        local output = reactor.mode == "steam" and reactor.steamProduction or reactor.energyProduction
+        local target = reactor.mode == "steam" and
+            tonumber(reactor.governor and reactor.governor.targetSteam) or nil
+        local outputPercent = target and target > 0 and
+            math.min(100, (tonumber(output) or 0) / target * 100) or tonumber(reactor.energyPercent) or 0
+        gui.text(1, 6, ("%d/%d  %s"):format(selected, #list,
+            nameOf(reactor.name, snapshot)), colors.cyan, colors.black, width)
+        gui.text(1, 7, ("TYPE %-8s  %s"):format(string.upper(reactor.mode or "unknown"),
+            reactor.active == true and "ACTIVE" or "OFFLINE"),
+            reactor.active == true and colors.lime or colors.orange)
+        gui.text(1, 9, "OUTPUT", colors.lightGray)
+        gui.progress(1, 10, math.max(10, width - 10), outputPercent,
+            reactor.active == true and colors.lime or colors.orange, colors.gray)
+        gui.text(math.max(1, width - 8), 10, output and ("%.0f"):format(output) or "N/A")
+        gui.text(1, 12, "FUEL", colors.lightGray)
+        gui.progress(1, 13, math.max(10, width - 10), reactor.fuelPercent or 0,
+            (reactor.fuelPercent or 0) < 20 and colors.orange or colors.lime, colors.gray)
+        gui.text(math.max(1, width - 8), 13,
+            reactor.fuelPercent and ("%6.1f%%"):format(reactor.fuelPercent) or "N/A")
+        local buffer = reactor.mode == "steam" and reactor.hotFluidPercent or reactor.energyPercent
+        gui.text(1, 15, ("CYANITE %s mB"):format(
+            reactor.waste and ("%.0f"):format(reactor.waste) or "N/A"), colors.cyan)
+        gui.text(math.max(24, width - 16), 15, ("BUFFER %s"):format(
+            buffer and ("%.1f%%"):format(buffer) or "N/A"), colors.cyan)
+        graphicalButtons.previous = gui.button(1, 17, "<", colors.cyan, colors.black)
+        graphicalButtons.next = gui.button(15, 17, ">", colors.cyan, colors.black)
+    end
+
+    local function graphicalTurbines()
+        graphicalHeader("TURBINES")
+        local list = snapshot and snapshot.turbines or {}
+        local width = select(1, term.getSize())
+        if #list == 0 then gui.text(1, 7, "NO TURBINES REPORTED", colors.orange) return end
+        selected = math.max(1, math.min(selected, #list))
+        local turbine = list[selected]
+        local rpm = tonumber(turbine.rotorSpeed) or 0
+        gui.text(1, 6, ("%d/%d  %s"):format(selected, #list,
+            nameOf(turbine.name, snapshot)), colors.cyan, colors.black, width)
+        gui.text(1, 7, turbine.active == true and "ACTIVE" or "OFFLINE",
+            turbine.active == true and colors.lime or colors.orange)
+        gui.text(1, 9, ("ROTOR %.1f RPM"):format(rpm), rpm >= 1900 and colors.red or colors.white)
+        local gaugeWidth = math.max(20, width - 1)
+        gui.rpmGauge(1, 10, gaugeWidth, rpm)
+        local lowLabel, highLabel = "[900 RPM]", "[1800 RPM]"
+        gui.text(math.max(1, math.floor(900 / 2100 * (gaugeWidth - 1)) - 3),
+            11, lowLabel, colors.lime)
+        gui.text(math.min(width - #highLabel + 1,
+            math.floor(1800 / 2100 * (gaugeWidth - 1)) - 3), 11, highLabel, colors.lime)
+        gui.text(1, 13, "STATE " .. tostring(turbine.governor and turbine.governor.state or "WAITING"))
+        gui.text(1, 14, "OUTPUT " .. powerFormat.power(turbine.energyProduction,
+            snapshot.power, true), colors.cyan)
+        graphicalButtons.previous = gui.button(1, 16, "<", colors.cyan, colors.black)
+        graphicalButtons.next = gui.button(15, 16, ">", colors.cyan, colors.black)
+    end
+
+    local function graphicalStorage()
+        graphicalHeader("POWER")
+        local list = snapshot and snapshot.storages or {}
+        local width = select(1, term.getSize())
+        if #list == 0 then gui.text(1, 7, "NO STORAGE REPORTED", colors.orange) return end
+        selected = math.max(1, math.min(selected, #list))
+        local storage = list[selected]
+        gui.text(1, 6, ("%d/%d  %s"):format(selected, #list,
+            nameOf(storage.name, snapshot)), colors.cyan, colors.black, width)
+        gui.text(1, 8, "CAPACITY", colors.lightGray)
+        gui.progress(1, 9, math.max(10, width - 10), storage.percent or 0,
+            (storage.percent or 0) < 20 and colors.orange or colors.lime, colors.gray)
+        gui.text(math.max(1, width - 8), 9,
+            storage.percent and ("%6.1f%%"):format(storage.percent) or "N/A")
+        gui.text(1, 11, "STORED  " .. powerFormat.power(storage.stored, snapshot.power, false))
+        gui.text(1, 12, "FILL    " .. powerFormat.power(storage.input, snapshot.power, true), colors.lime)
+        gui.text(1, 13, "DRAW    " .. powerFormat.power(storage.output, snapshot.power, true), colors.orange)
+        gui.text(1, 14, "STATE   " .. tostring(storage.state or "UNKNOWN"), colors.cyan)
+        graphicalButtons.previous = gui.button(1, 16, "<", colors.cyan, colors.black)
+        graphicalButtons.next = gui.button(15, 16, ">", colors.cyan, colors.black)
+    end
+
+    local function renderGraphical()
+        if graphicalPage == "reactors" then graphicalReactors()
+        elseif graphicalPage == "turbines" then graphicalTurbines()
+        elseif graphicalPage == "storage" then graphicalStorage()
+        else graphicalOverview() end
+    end
+
     -- @section EVENT LOOP AND RENDERING
-    local function render()
+    local function renderAdvanced()
         previousButton, nextButton, silenceButton, testButton = nil, nil, nil, nil
         ui.setIdConflicts(idConflicts)
         if not snapshot then
@@ -6002,6 +6180,10 @@ function terminal.run(config)
         else renderOverview(snapshot) end
     end
 
+    local function render()
+        if advanced then renderAdvanced() else renderGraphical() end
+    end
+
     sendHello()
     heartbeatTimer = os.startTimer(1)
     render()
@@ -6011,6 +6193,21 @@ function terminal.run(config)
             ui.prepare()
             display.stop()
             return
+        elseif event == "key" and value == keys.a then
+            advanced = true
+            render()
+        elseif event == "key" and value == keys.b and advanced then
+            advanced = false
+            render()
+        elseif event == "key" and value == keys.v and not advanced then
+            graphicalPage, selected = "reactors", 1
+            render()
+        elseif event == "key" and value == keys.g and not advanced then
+            graphicalPage, selected = "turbines", 1
+            render()
+        elseif event == "key" and value == keys.e and not advanced then
+            graphicalPage, selected = "storage", 1
+            render()
         elseif event == "key" and value == keys.left then
             selected = math.max(1, selected - 1)
             render()
@@ -6024,7 +6221,15 @@ function terminal.run(config)
             playSound("minecraft:block.note_block.bell", 0.8, 1.5)
         elseif event == "monitor_touch" then
             local x, y = message, protocol
-            if ui.hit(previousButton, x, y) then selected = math.max(1, selected - 1)
+            if not advanced then
+                if gui.hit(graphicalButtons.overview, x, y) then graphicalPage, selected = "overview", 1
+                elseif gui.hit(graphicalButtons.reactors, x, y) then graphicalPage, selected = "reactors", 1
+                elseif gui.hit(graphicalButtons.turbines, x, y) then graphicalPage, selected = "turbines", 1
+                elseif gui.hit(graphicalButtons.storage, x, y) then graphicalPage, selected = "storage", 1
+                elseif gui.hit(graphicalButtons.advanced, x, y) then advanced = true
+                elseif gui.hit(graphicalButtons.previous, x, y) then selected = math.max(1, selected - 1)
+                elseif gui.hit(graphicalButtons.next, x, y) then selected = selected + 1 end
+            elseif ui.hit(previousButton, x, y) then selected = math.max(1, selected - 1)
             elseif ui.hit(nextButton, x, y) then selected = selected + 1
             elseif ui.hit(silenceButton, x, y) and snapshot and snapshot.alarm then
                 localSilenced = alarmSignature(snapshot.alarm)

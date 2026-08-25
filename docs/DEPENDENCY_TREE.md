@@ -93,6 +93,7 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 
 - depends on → `core/config.lua`
 - depends on → `core/display.lua`
+- depends on → `core/gui.lua`
 - depends on → `core/network.lua`
 - depends on → `core/power_format.lua`
 - depends on → `core/ui.lua`
@@ -125,6 +126,7 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 ### `core/gui.lua`
 
 - used by ← `mainframe/main.lua`
+- used by ← `terminal/main.lua`
 
 ### `core/module_loader.lua`
 

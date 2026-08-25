@@ -13,7 +13,8 @@ fallback and exclusive manual-control interface.
 The first read-only graphical monitor is now available as the default mainframe
 view. It provides plant readiness, startup/calibration/error reporting, reactor
 output and fuel bars, a five-zone turbine RPM gauge, and storage capacity/fill/
-draw telemetry. See [`docs/GUI.md`](docs/GUI.md).
+draw telemetry. Remote terminals render the same graphical pages from their
+assigned read-only snapshots. See [`docs/GUI.md`](docs/GUI.md).
 
 HELIOS Core and its peripheral adapters are now independently versioned. The
 mainframe installer retrieves the official Module Pack from GitHub; remote

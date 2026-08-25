@@ -2,7 +2,8 @@
 
 The first graphical interface is a read-only plant overview built on
 `helios.ui` contract version 1. It is the default mainframe display in
-`v1.6.0-alpha.4`.
+`v1.6.0-alpha.4`. Remote terminals use the same graphical overview and facility
+pages with their configured reactor/turbine/storage/all snapshot assignment.
 
 ## Navigation
 
@@ -10,6 +11,9 @@ The first graphical interface is a read-only plant overview built on
 page. `ADVANCED` opens the complete text interface. Keyboard equivalents remain
 available: `V` for reactors, `G` for turbines, `E` for power, and `A` for the
 Advanced text interface.
+
+On a remote terminal, Advanced remains read-only and preserves local alarm
+silence and speaker testing. `B` returns from Advanced to the graphical display.
 
 ## Overview
 
