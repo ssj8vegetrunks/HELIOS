@@ -83,12 +83,15 @@ The existing touch interface and network-ID protection remain online:
 - confirmed turbine overspeed becomes a system-wide critical alarm;
 - rejected or unverifiable actuator commands become system-wide control-fault warnings;
 - the dashboard reports live automatic, calibration, maintenance, and fault state instead of the obsolete observe-only banner;
-- one steam reactor follows the summed configured intake of all active turbines;
+- calibrated steam reactors share the summed configured intake of all active turbines;
 - managed turbine calibration waits for its steam reactor to start and supply
   the full intake instead of failing while reactor output is still rising;
 - an offline steam reactor is started through verified activation control when
   active turbine demand exists;
-- power-mode reactors remain telemetry-only and never enter steam alarms or control;
+- newly discovered steam and power reactors enter a sequential commissioning
+  queue, learn their capability, and return to ready/standby when unneeded;
+- calibrated power reactors are staged from storage reserve and measured draw,
+  and stop when storage reaches its configured high threshold;
 - reactor exposure is spread as evenly as possible across every fuel column;
 - one-percent insertion differences provide 0.01 rod-equivalent fine control;
 - steam control uses a rolling average and a 2.5% reserve above turbine demand;
@@ -238,8 +241,8 @@ threshold is 20% and the critical threshold is 5%. Clicking
 `[ SILENCE ALARM ]` silences only the current condition. A different or more
 severe alarm can still sound, and silence resets after the condition clears.
 
-For one steam reactor, HELIOS totals the configured intake requested by
-all active turbines and regulates exposed rod-equivalents until reactor steam
+HELIOS totals the configured intake requested by all active turbines and
+distributes it across calibrated steam reactors, regulating exposed rod-equivalents until steam
 production matches that demand plus a 15% reserve. Total exposure is spread
 across every fuel column as evenly as integer insertion levels allow. For
 example, 0.26 equivalent on 25 rods becomes one rod at 98% insertion and 24 at
@@ -257,9 +260,10 @@ Peripherals without readable buffer capacity retain the full-steam preflight
 fallback. A power-mode reactor is never considered a steam source.
 
 The reactor governor holds during maintenance, ID conflict, missing or
-untrusted turbine telemetry, unsupported rod control, or when more than one
-steam reactor is active. Multiple reactor loops need explicit routing before
-HELIOS will control them.
+untrusted turbine telemetry, or unsupported rod control. Reactor commissioning
+is sequential so only one new unit performs a learning test at a time. Power
+commissioning pauses while storage is full rather than generating into a
+saturated network.
 
 The adapter is deliberately tolerant of several Extreme Reactors API naming
 variants. Unsupported measurements display `N/A` rather than stopping HELIOS.
@@ -396,7 +400,7 @@ trusting directed telemetry.
 
 ## Scope boundary
 
-Remote terminals remain read-only. The mainframe may control only turbine flow
-limits, turbine inductors, and the verified active state and individual rods of
-one steam reactor. Multi-reactor routing, storage coordination, graphs, and
-additional specialized storage adapters come later.
+Remote terminals remain read-only. The mainframe controls turbine flow limits,
+turbine inductors, verified reactor active state, and individual steam-reactor
+rods. It does not alter fluid or item port modes. Facility-level orchestration
+and additional specialized storage adapters come later.

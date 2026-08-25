@@ -92,6 +92,11 @@ function config.load()
         loaded.control.reactorMinimumResponseTime + 5,
         tonumber(loaded.control.reactorSettleTimeout) or 90)
     loaded.control.reactorProfiles = loaded.control.reactorProfiles or {}
+    loaded.control.powerReactorProfiles = loaded.control.powerReactorProfiles or {}
+    loaded.control.powerReactorCalibrationSamples = math.max(3,
+        math.floor(tonumber(loaded.control.powerReactorCalibrationSamples) or 10))
+    loaded.control.reactorCommissioningSteamTarget = math.max(1,
+        tonumber(loaded.control.reactorCommissioningSteamTarget) or 1000)
     loaded.control.reactorCooldownWindow = math.max(5,
         tonumber(loaded.control.reactorCooldownWindow) or 10)
     loaded.control.reactorCooldownStallTimeout = math.max(60,

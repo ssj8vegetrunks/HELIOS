@@ -283,8 +283,8 @@ do
     local memory = governor.new()
     local power = reactor(0, 0, { mode = "power", steamProduction = nil })
     local plan = governor.evaluate(memory, power, control, {}, 2000, 1)
-    equal(plan.state, "MONITOR ONLY", "power reactor steam exclusion")
-    equal(plan.managed, false, "power reactor management flag")
+    equal(plan.state, "QUEUED", "uncalibrated power reactor enters commissioning")
+    equal(plan.managed, true, "power reactor management flag")
 
     local offline = reactor(0, 0, { active = false })
     plan = governor.evaluate(memory, offline, control, {}, 2000, 1)
@@ -807,9 +807,20 @@ do
     local memory = governor.new()
     local reactors = { reactor(1800, 1), reactor(1800, 1) }
     reactors[2].name = "reactor_1"
-    governor.evaluateAll(memory, reactors, { turbine(4000) }, control, {})
-    equal(reactors[1].governor.trusted, false, "ambiguous first reactor")
-    equal(reactors[2].governor.trusted, false, "ambiguous second reactor")
+    local fleetControl = {}
+    for key, value in pairs(control) do fleetControl[key] = value end
+    fleetControl.reactorProfiles = {
+        reactor_0 = { exposure = 1, steam = 1800, targetSteam = 1800,
+            learnedMaximumSteam = 2500 },
+        reactor_1 = { exposure = 1, steam = 1800, targetSteam = 1800,
+            learnedMaximumSteam = 5000 },
+    }
+    governor.evaluateAll(memory, reactors, { turbine(4000) }, fleetControl, {})
+    equal(reactors[1].governor.trusted, true, "first fleet reactor is managed")
+    equal(reactors[2].governor.trusted, true, "second fleet reactor is managed")
+    equal(reactors[1].governor.requestedSteam +
+        reactors[2].governor.requestedSteam, 4000,
+        "fleet dispatch distributes complete turbine demand")
 end
 
 do
@@ -882,6 +893,97 @@ do
     equal(saved, false, "power reactor calibration is rejected")
     equal(reason, "Only steam reactors can be calibrated",
         "power reactor calibration rejection explains why")
+end
+
+do
+    local fleetControl = {}
+    for key, value in pairs(control) do fleetControl[key] = value end
+    fleetControl.reactorProfiles = {}
+    fleetControl.powerReactorProfiles = {}
+    fleetControl.powerReactorCalibrationSamples = 3
+    local memory = governor.new()
+    local first = reactor(0, 0, {
+        name = "power_0", mode = "power", steamProduction = nil,
+        energyProduction = 1000,
+    })
+    local second = reactor(0, 0, {
+        name = "power_1", mode = "power", steamProduction = nil,
+        energyProduction = 2000,
+    })
+    governor.evaluateAll(memory, { first, second }, {}, fleetControl,
+        { now = 1, powerReserve = 50, powerDemand = 0 })
+    equal(first.governor.state, "CALIBRATING",
+        "first new power reactor starts sequential commissioning")
+    equal(second.governor.state, "QUEUED",
+        "second new power reactor waits in the commissioning queue")
+    local completed = false
+    for now = 2, 5 do
+        governor.evaluateAll(memory, { first, second }, {}, fleetControl,
+            { now = now, powerReserve = 50, powerDemand = 0 })
+        completed = completed or first.governor.state == "CALIBRATION COMPLETE"
+    end
+    equal(completed, true,
+        "power commissioning records a stable maximum")
+    equal(fleetControl.powerReactorProfiles.power_0.maximumPower, 1000,
+        "power profile saves observed generation capability")
+    equal(second.governor.state, "CALIBRATING",
+        "commissioning advances to the next queued reactor")
+    equal(second.governor.commissioningIndex, 2,
+        "commissioning progress reports the fleet index")
+
+    local fullMemory = governor.new()
+    local fullControl = {}
+    for key, value in pairs(fleetControl) do fullControl[key] = value end
+    fullControl.powerReactorProfiles = {}
+    local full = reactor(0, 0, {
+        name = "power_full", mode = "power", steamProduction = nil,
+        energyProduction = 0, active = false,
+    })
+    governor.evaluateAll(fullMemory, { full }, {}, fullControl,
+        { now = 1, powerReserve = 100, powerDemand = 0 })
+    equal(full.governor.state, "WAITING FOR STORAGE CAPACITY",
+        "full storage safely pauses power-reactor commissioning")
+    equal(full.governor.recommendedActive, false,
+        "full storage does not start a commissioning reactor")
+
+    local dispatchMemory = governor.new()
+    local dispatchControl = {}
+    for key, value in pairs(fleetControl) do dispatchControl[key] = value end
+    dispatchControl.powerReactorProfiles = {
+        power_0 = { maximumPower = 1000 },
+        power_1 = { maximumPower = 1000 },
+    }
+    governor.evaluateAll(dispatchMemory, { first, second }, {}, dispatchControl,
+        { now = 1, powerReserve = 20, powerDemand = 1500 })
+    equal(first.governor.recommendedActive, true,
+        "low reserve dispatches the first calibrated power reactor")
+    equal(second.governor.recommendedActive, true,
+        "demand beyond one reactor dispatches the second reactor")
+    governor.evaluateAll(dispatchMemory, { first, second }, {}, dispatchControl,
+        { now = 2, powerReserve = 100, powerDemand = 1500 })
+    equal(first.governor.recommendedActive, false,
+        "full storage returns power reactors to standby")
+    equal(second.governor.recommendedActive, false,
+        "full storage removes excess fleet generation")
+end
+
+do
+    local fleetControl = {}
+    for key, value in pairs(control) do fleetControl[key] = value end
+    fleetControl.reactorProfiles = {}
+    fleetControl.powerReactorProfiles = {}
+    local memory = governor.new()
+    local first = reactor(0, 0, { name = "steam_0" })
+    local second = reactor(0, 0, { name = "steam_1" })
+    governor.evaluateAll(memory, { first, second }, {}, fleetControl,
+        { now = 1, powerReserve = 50, powerDemand = 0 })
+    equal(first.governor.state, "AVERAGING",
+        "steam commissioning begins without turbine demand")
+    equal(first.governor.requestedSteam,
+        fleetControl.reactorCommissioningSteamTarget or 1000,
+        "commissioning supplies an independent steam learning target")
+    equal(second.governor.state, "QUEUED",
+        "additional steam reactors wait for clean sequential measurements")
 end
 
 print("reactor governor tests passed")

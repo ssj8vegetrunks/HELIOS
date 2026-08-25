@@ -60,8 +60,7 @@ The Power Control screen now runs a guarded automatic turbine governor.
 - Mainframe monitors may navigate the interface by touch.
 - Remote terminals remain read-only.
 
-The mainframe also runs a guarded steam-demand governor for one actively
-cooled reactor:
+The mainframe runs a guarded reactor-fleet governor:
 
 - Trusted demand is the sum of configured intake limits for all active turbines.
 - Active steam production targets 15% above trusted turbine demand so reactor,
@@ -71,8 +70,13 @@ cooled reactor:
   prepared before turbine calibration begins.
 - Trusted turbine demand starts an offline steam reactor through verified
   `setActive(true)` control and read-back.
-- Power-mode reactors are telemetry-only and are excluded from every steam
-  demand, readiness, and capacity decision.
+- Newly discovered reactors are commissioned one at a time. Steam reactors
+  learn against an independent test target even without turbine demand; power
+  reactors record observed FE/t capability.
+- Calibrated power reactors are dispatched from external storage reserve and
+  draw telemetry. Full storage returns them to standby and pauses unfinished
+  power-reactor commissioning.
+- Steam demand is assigned across calibrated steam reactors by learned capacity.
 - HELIOS spreads each rod-equivalent setting across all fuel columns as evenly as possible.
 - A 25-rod setting of 0.26 equivalent becomes one rod at 98% insertion and 24 at 99%.
 - A new or unbalanced bank first moves to zero exposure and cools before learning begins.
@@ -105,7 +109,8 @@ cooled reactor:
   reserve output after the loop is stable.
 - Zero active turbine demand gradually inserts all rods to 100%.
 - Missing or untrusted turbine demand, maintenance, ID conflict, and unsupported telemetry hold.
-- More than one steam reactor holds until explicit reactor-to-turbine routing is implemented.
+- Multiple steam reactors report aggregate readiness while each retains its
+  own assigned demand and learned-capacity display.
 - Reactor actuator rejection or read-back mismatch raises a global control fault.
 - A reactor that cannot meet demand at 0% insertion, or cannot reduce output at 100%, raises a global steam-capacity warning.
 

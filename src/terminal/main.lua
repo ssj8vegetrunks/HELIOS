@@ -350,14 +350,17 @@ function terminal.run(config)
         local reactor = list[selected]
         local output = reactor.mode == "steam" and reactor.steamProduction or reactor.energyProduction
         local target = reactor.mode == "steam" and
-            tonumber(reactor.governor and reactor.governor.targetSteam) or nil
+            tonumber(reactor.governor and reactor.governor.targetSteam) or
+            tonumber(reactor.governor and reactor.governor.targetPower)
         local profile = reactor.mode == "steam" and
             (((snapshot.control or {}).reactorProfiles or {})[reactor.name] or
-                (reactor.governor and reactor.governor.learnedProfile)) or nil
-        local maximum = profile and tonumber(profile.learnedMaximumSteam) or nil
+                (reactor.governor and reactor.governor.learnedProfile)) or
+            (((snapshot.control or {}).powerReactorProfiles or {})[reactor.name])
+        local maximum = profile and (reactor.mode == "steam" and
+            tonumber(profile.learnedMaximumSteam) or tonumber(profile.maximumPower)) or nil
         local scale = maximum and maximum > 0 and maximum or
             math.max(1, tonumber(target) or 0, tonumber(output) or 0)
-        local outputPercent = reactor.mode == "steam" and
+        local outputPercent = maximum and maximum > 0 and
             math.min(100, (tonumber(output) or 0) / scale * 100) or
             tonumber(reactor.energyPercent) or 0
         local barWidth = math.max(10, width - 10)
@@ -366,16 +369,17 @@ function terminal.run(config)
         gui.text(1, 7, ("TYPE %-8s  %s"):format(string.upper(reactor.mode or "unknown"),
             reactor.active == true and "ACTIVE" or "OFFLINE"),
             reactor.active == true and colors.lime or colors.orange)
-        gui.text(1, 8, reactor.mode == "steam" and
-            (maximum and ("OUTPUT %.0f / %.0f mB/t"):format(output or 0, maximum) or
-                ("OUTPUT %.0f / LEARNING"):format(output or 0)) or "OUTPUT",
+        local unit = reactor.mode == "steam" and "mB/t" or "FE/t"
+        gui.text(1, 8,
+            maximum and ("OUTPUT %.0f / %.0f %s"):format(output or 0, maximum, unit) or
+                ("OUTPUT %.0f / LEARNING"):format(output or 0),
             colors.lightGray, colors.black, width)
-        if reactor.mode == "steam" and target then
-            gui.text(1, 9, ("DEMAND %.0f mB/t"):format(target), colors.yellow)
+        if target then
+            gui.text(1, 9, ("DEMAND %.0f %s"):format(target, unit), colors.yellow)
         end
         gui.progress(1, 10, barWidth, outputPercent,
             reactor.active == true and colors.lime or colors.orange, colors.gray)
-        if reactor.mode == "steam" and target and maximum and maximum > 0 then
+        if target and maximum and maximum > 0 then
             local marker = math.floor(math.max(0, math.min(100,
                 target / maximum * 100)) / 100 * (barWidth - 1))
             gui.text(1 + marker, 10, "|", colors.yellow)

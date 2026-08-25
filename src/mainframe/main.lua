@@ -197,6 +197,10 @@ function mainframe.run(config)
             elseif reactor.governor and reactor.governor.state == "STEAM SURPLUS" then
                 add(2, reactor.name .. ":steam-surplus",
                     alarmName(reactor.name) .. " STEAM OUTPUT CANNOT REDUCE")
+            elseif reactor.governor and reactor.governor.state == "CALIBRATION FAILED" then
+                addConfirmed(2, reactor.name .. ":calibration",
+                    alarmName(reactor.name) .. " CALIBRATION FAILED: " ..
+                    tostring(reactor.governor.reason or "invalid operating result"))
             elseif reactor.governor and reactor.governor.state == "RODS NOT UNIFORM" then
                 add(2, reactor.name .. ":rod-levels",
                     alarmName(reactor.name) .. " CONTROL RODS NOT UNIFORM")
@@ -294,6 +298,10 @@ function mainframe.run(config)
         local now = os.epoch("utc") / 1000
         local steamPrimeRequested = turbineGovernor.needsSteamPrime(
             governorMemory, turbines)
+        local powerDemand = 0
+        for _, storage in ipairs(storages) do
+            powerDemand = powerDemand + math.max(0, tonumber(storage.output) or 0)
+        end
         local _, steamDemand = reactorGovernor.evaluateAll(reactorGovernorMemory,
             reactors, turbines, config.control, {
                 maintenance = maintenance or manualAuthority or authorityPaused,
@@ -301,6 +309,8 @@ function mainframe.run(config)
                 idConflicts = idConflicts,
                 now = now,
                 steamPrimeRequested = steamPrimeRequested,
+                powerReserve = minimumPowerReserve(),
+                powerDemand = powerDemand,
             })
         for _, reactor in ipairs(reactors) do
             if reactor.governor and reactor.governor.calibrationCompleted == true then
@@ -531,8 +541,12 @@ function mainframe.run(config)
         end
         for _, reactor in ipairs(reactors) do
             local plan = reactor.governor or {}
-            if plan.actuatorState == "FAULT" then
+            if plan.actuatorState == "FAULT" or plan.state == "CALIBRATION FAILED" then
                 return "CONTROL FAULT / ATTENTION REQUIRED", colors.red
+            elseif plan.state == "QUEUED" or plan.state == "CALIBRATING" or
+                   plan.state == "CALIBRATION COMPLETE" then
+                return ("AUTOMATIC / COMMISSIONING %d OF %d"):format(
+                    plan.commissioningIndex or 1, plan.commissioningTotal or 1), colors.orange
             elseif plan.state == "STARTING" or plan.state == "BASELINING" or
                    plan.state == "AVERAGING" or plan.state == "RESPONDING" or
                    plan.state == "STEAM LOW" or plan.state == "STEAM HIGH" or
@@ -2099,14 +2113,17 @@ function mainframe.run(config)
             local reactor = reactors[selected.reactors]
             local output = reactor.mode == "steam" and reactor.steamProduction or reactor.energyProduction
             local target = reactor.mode == "steam" and
-                tonumber(reactor.governor and reactor.governor.targetSteam) or nil
+                tonumber(reactor.governor and reactor.governor.targetSteam) or
+                tonumber(reactor.governor and reactor.governor.targetPower)
             local profile = reactor.mode == "steam" and
                 ((config.control.reactorProfiles or {})[reactor.name] or
-                    (reactor.governor and reactor.governor.learnedProfile)) or nil
-            local maximum = profile and tonumber(profile.learnedMaximumSteam) or nil
+                    (reactor.governor and reactor.governor.learnedProfile)) or
+                ((config.control.powerReactorProfiles or {})[reactor.name])
+            local maximum = profile and (reactor.mode == "steam" and
+                tonumber(profile.learnedMaximumSteam) or tonumber(profile.maximumPower)) or nil
             local scale = maximum and maximum > 0 and maximum or
                 math.max(1, tonumber(target) or 0, tonumber(output) or 0)
-            local outputPercent = reactor.mode == "steam" and
+            local outputPercent = maximum and maximum > 0 and
                 math.min(100, (tonumber(output) or 0) / scale * 100) or
                 tonumber(reactor.energyPercent) or 0
             local barWidth = math.max(10, width - 10)
@@ -2115,16 +2132,17 @@ function mainframe.run(config)
             gui.text(1, 7, ("TYPE %-8s  %s"):format(string.upper(reactor.mode or "unknown"),
                 reactor.active == true and "ACTIVE" or "OFFLINE"),
                 reactor.active == true and colors.lime or colors.orange)
-            gui.text(1, 8, reactor.mode == "steam" and
-                (maximum and ("OUTPUT %.0f / %.0f mB/t"):format(output or 0, maximum) or
-                    ("OUTPUT %.0f / LEARNING"):format(output or 0)) or "OUTPUT",
+            local unit = reactor.mode == "steam" and "mB/t" or "FE/t"
+            gui.text(1, 8,
+                maximum and ("OUTPUT %.0f / %.0f %s"):format(output or 0, maximum, unit) or
+                    ("OUTPUT %.0f / LEARNING"):format(output or 0),
                 colors.lightGray, colors.black, width)
-            if reactor.mode == "steam" and target then
-                gui.text(1, 9, ("DEMAND %.0f mB/t"):format(target), colors.yellow)
+            if target then
+                gui.text(1, 9, ("DEMAND %.0f %s"):format(target, unit), colors.yellow)
             end
             gui.progress(1, 10, barWidth, outputPercent,
                 reactor.active == true and colors.lime or colors.orange, colors.gray)
-            if reactor.mode == "steam" and target and maximum and maximum > 0 then
+            if target and maximum and maximum > 0 then
                 local marker = math.floor(math.max(0, math.min(100,
                     target / maximum * 100)) / 100 * (barWidth - 1))
                 gui.text(1 + marker, 10, "|", colors.yellow)

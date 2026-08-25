@@ -164,6 +164,104 @@ function governor.saveCurrentCalibration(memory, control, reactor, context)
     return true
 end
 
+local function evaluatePower(memory, reactor, control, context)
+    local name = tostring(reactor.name or "unknown")
+    local previous = memory.reactors[name] or {}
+    control.powerReactorProfiles = control.powerReactorProfiles or {}
+    local profile = control.powerReactorProfiles[name]
+    local production = tonumber(reactor.energyProduction)
+
+    if context.commissioning == true then
+        local reserve = tonumber(context.powerReserve)
+        if reserve == nil then
+            local result = hold("WAITING FOR STORAGE TELEMETRY",
+                "Power-reactor commissioning requires a trusted external storage buffer")
+            result.managed = true
+            result.currentActive = reactor.active
+            result.recommendedActive = false
+            result.activeChange = reactor.active == true
+            result.action = result.activeChange and "STOP REACTOR" or "HOLD"
+            return result
+        elseif reserve >= (tonumber(control.storageHigh) or 85) then
+            local result = hold("WAITING FOR STORAGE CAPACITY",
+                ("Commissioning power reactor %d of %d is paused while storage is full"):
+                    format(context.commissioningIndex or 1,
+                        context.commissioningTotal or 1))
+            result.managed = true
+            result.currentActive = reactor.active
+            result.recommendedActive = false
+            result.activeChange = reactor.active == true
+            result.action = result.activeChange and "STOP REACTOR" or "HOLD"
+            return result
+        elseif reactor.active == false then
+            local result = hold("CALIBRATING", ("Commissioning power reactor %d of %d; starting output test"):
+                format(context.commissioningIndex or 1, context.commissioningTotal or 1))
+            result.managed, result.currentActive = true, false
+            result.recommendedActive, result.activeChange = true, true
+            return result
+        elseif reactor.active ~= true then
+            return hold("CALIBRATION FAILED", "Power-reactor active state is unavailable", false)
+        elseif production == nil then
+            return hold("CALIBRATION FAILED", "Power-production telemetry is unavailable", false)
+        end
+
+        local wanted = math.max(3, math.floor(tonumber(
+            control.powerReactorCalibrationSamples) or 10))
+        previous.powerSamples = previous.powerSamples or {}
+        previous.powerSamples[#previous.powerSamples + 1] = math.max(0, production)
+        while #previous.powerSamples > wanted do table.remove(previous.powerSamples, 1) end
+        local maximum = 0
+        for _, sample in ipairs(previous.powerSamples) do maximum = math.max(maximum, sample) end
+        memory.reactors[name] = previous
+        if #previous.powerSamples < wanted then
+            local result = hold("CALIBRATING", ("Commissioning power reactor %d of %d; collecting output %d/%d"):
+                format(context.commissioningIndex or 1,
+                    context.commissioningTotal or 1, #previous.powerSamples, wanted))
+            result.managed = true
+            result.powerProduction = production
+            return result
+        elseif maximum <= 0 then
+            memory.commissioningFailures = memory.commissioningFailures or {}
+            memory.commissioningFailures[name] =
+                "No output observed; storage may be full or the reactor may be disconnected"
+            return hold("CALIBRATION FAILED", memory.commissioningFailures[name], false)
+        end
+
+        control.powerReactorProfiles[name] = {
+            maximumPower = round(maximum, 1),
+            updatedAt = tonumber(context.now) or 0,
+        }
+        memory.profileDirty = true
+        previous.powerSamples = nil
+        local result = hold("CALIBRATION COMPLETE",
+            ("Learned maximum %.0f FE/t; placing reactor in standby"):format(maximum))
+        result.managed, result.currentActive = true, true
+        result.recommendedActive, result.activeChange = false, true
+        result.maximumPower, result.powerProduction = maximum, production
+        return result
+    end
+
+    if type(profile) ~= "table" then
+        local result = hold("QUEUED", "Waiting for sequential reactor commissioning")
+        result.managed = true
+        return result
+    end
+    local wantedActive = context.powerDispatched == true
+    local result = hold(wantedActive and "ACTIVE" or "READY / STANDBY",
+        wantedActive and "Storage demand assigned to this power reactor" or
+            "Calibrated power reactor is not currently required")
+    result.managed = true
+    result.currentActive = reactor.active
+    result.recommendedActive = wantedActive
+    result.activeChange = reactor.active ~= wantedActive
+    result.action = result.activeChange and
+        (wantedActive and "START REACTOR" or "STOP REACTOR") or "HOLD"
+    result.maximumPower = tonumber(profile.maximumPower)
+    result.powerProduction = production
+    result.targetPower = tonumber(context.powerDemand) or 0
+    return result
+end
+
 -- @section STEAM DEMAND AND SOURCE STATUS
 function governor.steamDemand(turbines, control)
     if #(turbines or {}) == 0 then
@@ -200,52 +298,55 @@ function governor.steamSourceStatus(reactors, demand, control)
     end
     if #sources == 0 then
         return { managed = false, ready = true, state = "UNMANAGED" }
-    elseif #sources > 1 then
-        return {
-            managed = true,
-            ready = false,
-            state = "ROUTING REQUIRED",
-            reason = "Multiple steam reactors require routing assignments",
-        }
     end
-
-    local reactor = sources[1]
-    local plan = reactor.governor or {}
     local required = math.max(0, tonumber(demand) or 0)
-    local production = tonumber(plan.averageSteamProduction)
-    local samples = tonumber(plan.averageSteamSamples) or 0
+    local production, bufferPercent, assigned, prepared = 0, nil, 0, true
     local wantedSamples = math.max(3,
         math.floor(tonumber((control or {}).reactorSteamAverageSamples) or 10))
+    for _, reactor in ipairs(sources) do
+        local plan = reactor.governor or {}
+        local requested = tonumber(plan.requestedSteam)
+        if requested == nil and #sources == 1 then requested = required end
+        if (requested or 0) > 0 and
+           plan.recalibrating ~= true then
+            assigned = assigned + 1
+            production = production +
+                (tonumber(plan.averageSteamProduction) or 0)
+            local buffer = tonumber(reactor.hotFluidPercent)
+            if buffer then bufferPercent = bufferPercent and
+                math.min(bufferPercent, buffer) or buffer end
+            if reactor.active ~= true or plan.trusted == false or
+               (tonumber(plan.averageSteamSamples) or 0) < wantedSamples then
+                prepared = false
+            end
+        end
+    end
     local ratio = clamp(tonumber((control or {}).calibrationSteamRatio) or 0.98,
         0.1, 1)
-    local ready = required <= 0 or (
-        reactor.active == true and plan.trusted ~= false and
-        production ~= nil and samples >= wantedSamples and
-        production >= required * ratio)
+    local ready = required <= 0 or
+        (assigned > 0 and prepared and production >= required * ratio)
     local reason
-    if reactor.active ~= true then
-        reason = "Starting steam reactor"
-    elseif plan.trusted == false then
-        reason = tostring(plan.reason or "Steam reactor telemetry is untrusted")
-    elseif samples < wantedSamples then
-        reason = ("Averaging reactor steam %d/%d"):format(samples, wantedSamples)
-    elseif production == nil then
-        reason = "Waiting for reactor steam telemetry"
+    if assigned == 0 and required > 0 then
+        reason = "Dispatching calibrated steam capacity"
+    elseif not prepared then
+        reason = ("Preparing %d assigned steam reactor%s"):
+            format(assigned, assigned == 1 and "" or "s")
     elseif not ready then
-        reason = ("Reactor supplying %.0f of %.0f mB/t"):format(production, required)
+        reason = ("Reactor fleet supplying %.0f of %.0f mB/t"):
+            format(production, required)
     else
-        reason = ("Reactor supplying %.0f mB/t for %.0f mB/t demand"):format(
-            production, required)
+        reason = ("Reactor fleet supplying %.0f mB/t for %.0f mB/t demand"):
+            format(production, required)
     end
     return {
         managed = true,
         ready = ready,
         state = ready and "READY" or "PREPARING",
         reason = reason,
-        reactor = reactor.name,
+        reactors = assigned,
         demand = required,
         production = production,
-        bufferPercent = tonumber(reactor.hotFluidPercent),
+        bufferPercent = bufferPercent,
     }
 end
 
@@ -453,9 +554,7 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
     elseif reactor.error then
         result = hold("NO TRUSTED DATA", tostring(reactor.error), false)
     elseif reactor.mode == "power" then
-        result = hold("MONITOR ONLY", "Power reactor is excluded from steam control")
-        result.managed = false
-        result.actuatorState = "MONITOR"
+        result = evaluatePower(memory, reactor, control, context)
     elseif reactor.mode ~= "steam" then
         result = hold("UNKNOWN MODE", "Reactor cooling mode is unavailable", false)
     elseif tonumber(targetSteam) == nil then
@@ -481,7 +580,11 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
                 activeTurbines = activeTurbines or 0,
             }
         else
-            result = hold("OFFLINE", "No turbine demand requires this reactor")
+            local profile = (control.reactorProfiles or {})[name]
+            result = hold(type(profile) == "table" and "READY / STANDBY" or "OFFLINE",
+                type(profile) == "table" and
+                    "Calibrated steam reactor is not currently required" or
+                    "No turbine demand requires this reactor")
             result.managed = true
         end
     elseif reactor.active ~= true then
@@ -931,6 +1034,15 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
                 coolingSince = previous.cooldownStartedAt,
                 coolingLastProgressAt = previous.cooldownLastProgressAt,
             }
+            if requestedSteam <= 0 and type(profile) == "table" and
+               previous.recalibrating ~= true and exposure <= 0.005 then
+                result.state = "READY / STANDBY"
+                result.action = "STOP REACTOR"
+                result.reason = "Calibration complete; no steam demand requires this reactor"
+                result.currentActive = true
+                result.recommendedActive = false
+                result.activeChange = true
+            end
         end
     end
 
@@ -943,6 +1055,11 @@ end
 
 -- @section MULTI-REACTOR EVALUATION
 function governor.evaluateAll(memory, reactors, turbines, control, context)
+    memory.commissioningOrder = memory.commissioningOrder or {}
+    memory.commissioningDone = memory.commissioningDone or {}
+    memory.commissioningFailures = memory.commissioningFailures or {}
+    control.reactorProfiles = control.reactorProfiles or {}
+    control.powerReactorProfiles = control.powerReactorProfiles or {}
     local demand, activeTurbines, demandError = governor.steamDemand(turbines, control)
     local turbineBufferPercent, bufferReadings = nil, 0
     for _, turbine in ipairs(turbines or {}) do
@@ -956,27 +1073,150 @@ function governor.evaluateAll(memory, reactors, turbines, control, context)
             end
         end
     end
-    local steamReactors = 0
+    local known = {}
     for _, reactor in ipairs(reactors or {}) do
-        if reactor.mode == "steam" and not reactor.error then
-            steamReactors = steamReactors + 1
+        local name = tostring(reactor.name)
+        known[name] = reactor
+        local profile = reactor.mode == "steam" and control.reactorProfiles[name] or
+            reactor.mode == "power" and control.powerReactorProfiles[name] or nil
+        local queued = false
+        for _, queuedName in ipairs(memory.commissioningOrder) do
+            if queuedName == name then queued = true break end
+        end
+        if not reactor.error and (reactor.mode == "steam" or reactor.mode == "power") and
+           type(profile) ~= "table" and not queued and
+           not memory.commissioningFailures[name] then
+            memory.commissioningOrder[#memory.commissioningOrder + 1] = name
         end
     end
-    if steamReactors > 1 then
-        demand = nil
-        demandError = "Multiple steam reactors require routing assignments"
+    for _, name in ipairs(memory.commissioningOrder) do
+        local reactor = known[name]
+        local profile = reactor and (reactor.mode == "steam" and
+            control.reactorProfiles[name] or reactor.mode == "power" and
+            control.powerReactorProfiles[name]) or nil
+        if type(profile) == "table" or memory.commissioningFailures[name] or not reactor then
+            memory.commissioningDone[name] = true
+        end
     end
+    local commissioningName, completed = nil, 0
+    local commissioningPending = {}
+    for _, name in ipairs(memory.commissioningOrder) do
+        if memory.commissioningDone[name] then completed = completed + 1
+        else
+            commissioningPending[name] = true
+            if not commissioningName then commissioningName = name end
+        end
+    end
+    local commissioningTotal = #memory.commissioningOrder
+    if commissioningName then
+        local unit = known[commissioningName]
+        local previous = memory.reactors[commissioningName] or {}
+        if unit and unit.mode == "steam" and previous.recalibrating ~= true then
+            governor.beginRecalibration(memory, control, commissioningName)
+        end
+    elseif commissioningTotal > 0 then
+        memory.commissioningOrder, memory.commissioningDone = {}, {}
+        commissioningTotal, completed = 0, 0
+    end
+
+    if demand == nil and activeTurbines == 0 then demand, demandError = 0, nil end
+
+    local reserveMargin = math.max(0, math.min(0.25,
+        tonumber(control.reactorSteamReserveMargin) or 0.15))
+    local remainingSteam = tonumber(demand)
+    local steamAllocation, steamSources = {}, {}
+    for _, reactor in ipairs(reactors or {}) do
+        local profile = control.reactorProfiles[tostring(reactor.name)]
+        if reactor.mode == "steam" and type(profile) == "table" and
+           tostring(reactor.name) ~= commissioningName then
+            steamSources[#steamSources + 1] = reactor
+        end
+    end
+    table.sort(steamSources, function(a, b)
+        if a.active ~= b.active then return a.active == true end
+        local ap = control.reactorProfiles[tostring(a.name)] or {}
+        local bp = control.reactorProfiles[tostring(b.name)] or {}
+        return (tonumber(ap.learnedMaximumSteam) or math.huge) <
+            (tonumber(bp.learnedMaximumSteam) or math.huge)
+    end)
+    if remainingSteam then
+        for index, reactor in ipairs(steamSources) do
+            local profile = control.reactorProfiles[tostring(reactor.name)] or {}
+            local capacity = tonumber(profile.learnedMaximumSteam) or
+                tonumber(profile.steam) or 0
+            local available = index == #steamSources and remainingSteam or
+                (capacity > 0 and capacity / (1 + reserveMargin) or remainingSteam)
+            local assigned = math.min(math.max(0, remainingSteam), available)
+            steamAllocation[tostring(reactor.name)] = assigned
+            remainingSteam = math.max(0, remainingSteam - assigned)
+        end
+    end
+
+    local powerSources, powerDispatch, powerAssignment = {}, {}, {}
+    for _, reactor in ipairs(reactors or {}) do
+        local profile = control.powerReactorProfiles[tostring(reactor.name)]
+        if reactor.mode == "power" and type(profile) == "table" and
+           tostring(reactor.name) ~= commissioningName then
+            powerSources[#powerSources + 1] = reactor
+        end
+    end
+    table.sort(powerSources, function(a, b)
+        if a.active ~= b.active then return a.active == true end
+        local ap = control.powerReactorProfiles[tostring(a.name)] or {}
+        local bp = control.powerReactorProfiles[tostring(b.name)] or {}
+        return (tonumber(ap.maximumPower) or math.huge) <
+            (tonumber(bp.maximumPower) or math.huge)
+    end)
+    local reserve = tonumber(context and context.powerReserve)
+    local powerDemand = math.max(0, tonumber(context and context.powerDemand) or 0)
+    local wantedPower = reserve and reserve < (tonumber(control.storageHigh) or 85) and
+        powerDemand or 0
+    if reserve and reserve < (tonumber(control.storageLow) or 25) and wantedPower <= 0 and
+       #powerSources > 0 then
+        local firstProfile = control.powerReactorProfiles[tostring(powerSources[1].name)] or {}
+        wantedPower = tonumber(firstProfile.maximumPower) or 1
+    end
+    local remainingPower = wantedPower
+    for _, reactor in ipairs(powerSources) do
+        local maximum = tonumber((control.powerReactorProfiles[tostring(reactor.name)] or {}).maximumPower) or 0
+        if remainingPower > 0 then
+            local name = tostring(reactor.name)
+            powerDispatch[name] = true
+            powerAssignment[name] = math.min(remainingPower, maximum > 0 and maximum or remainingPower)
+            remainingPower = math.max(0, remainingPower - maximum)
+        end
+    end
+
     local present = {}
     for _, reactor in ipairs(reactors or {}) do
-        present[tostring(reactor.name)] = true
+        local name = tostring(reactor.name)
+        present[name] = true
         local reactorContext = {}
         for key, value in pairs(context or {}) do reactorContext[key] = value end
         reactorContext.demandError = demandError
         reactorContext.turbineBufferPercent = turbineBufferPercent
         reactorContext.turbineBufferTelemetryComplete = activeTurbines > 0 and
             bufferReadings == activeTurbines
-        reactor.governor = governor.evaluate(memory, reactor, control, reactorContext,
-            demand, activeTurbines)
+        reactorContext.commissioning = name == commissioningName
+        reactorContext.commissioningIndex = completed + 1
+        reactorContext.commissioningTotal = commissioningTotal
+        reactorContext.powerDispatched = powerDispatch[name] == true
+        reactorContext.powerDemand = powerAssignment[name] or 0
+        local target = steamAllocation[name]
+        if name == commissioningName and reactor.mode == "steam" then
+            target = math.max(1, tonumber(control.reactorCommissioningSteamTarget) or 1000)
+        end
+        if name ~= commissioningName and commissioningPending[name] and
+           (reactor.mode == "steam" or reactor.mode == "power") then
+            reactor.governor = hold("QUEUED", ("Waiting for calibration %d of %d"):
+                format(completed + 1, commissioningTotal))
+            reactor.governor.managed = true
+        else
+            reactor.governor = governor.evaluate(memory, reactor, control, reactorContext,
+                target, activeTurbines)
+        end
+        reactor.governor.commissioningIndex = completed + 1
+        reactor.governor.commissioningTotal = commissioningTotal
     end
     for name in pairs(memory.reactors or {}) do
         if not present[name] then memory.reactors[name] = nil end
