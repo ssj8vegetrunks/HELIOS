@@ -1272,6 +1272,19 @@ function mainframe.run(config)
         end
     end
 
+    local function facilityHeader(role, subtitle)
+        local buttons = {}
+        ui.header(role, subtitle, function()
+            buttons.reactors = ui.inlineButton("REACTORS", colors.red)
+            write(" ")
+            buttons.turbines = ui.inlineButton("TURBINES", colors.blue)
+            write(" ")
+            buttons.storage = ui.inlineButton("POWER", colors.yellow)
+            print("")
+        end)
+        return buttons
+    end
+
     -- @section REACTOR VIEW AND CALIBRATION
     local function reactorView()
         local selected = 1
@@ -1281,6 +1294,7 @@ function mainframe.run(config)
         local backButton
         local calibrationButton
         local notice
+        local navigationButtons = {}
 
         local function formatValue(value, suffix)
             if value == nil then return "N/A" end
@@ -1530,7 +1544,7 @@ function mainframe.run(config)
         end
 
         local function draw()
-            ui.header("REACTORS", "Live telemetry and steam governor")
+            navigationButtons = facilityHeader("REACTORS", "Live telemetry and steam governor")
             if #reactors == 0 then
                 ui.status("Status", "NO REACTORS FOUND", colors.orange)
                 print("")
@@ -1602,19 +1616,34 @@ function mainframe.run(config)
             draw()
             local event, value, x, y = os.pullEvent()
             if event == "key" and value == keys.b then
-                return
+                return "dashboard"
+            elseif event == "key" and value == keys.v then
+                return "reactors"
+            elseif event == "key" and value == keys.g then
+                return "turbines"
+            elseif event == "key" and value == keys.e then
+                return "storage"
             elseif event == "key" and value == keys.left and #reactors > 0 then
                 selected = ((selected - 2) % #reactors) + 1
             elseif event == "key" and value == keys.right and #reactors > 0 then
                 selected = (selected % #reactors) + 1
             elseif (event == "mouse_click" or event == "monitor_touch") and ui.hit(viewSilenceButton, x, y) then
                 silenceCurrentAlarm()
+            elseif (event == "mouse_click" or event == "monitor_touch") and
+                   ui.hit(navigationButtons.reactors, x, y) then
+                return "reactors"
+            elseif (event == "mouse_click" or event == "monitor_touch") and
+                   ui.hit(navigationButtons.turbines, x, y) then
+                return "turbines"
+            elseif (event == "mouse_click" or event == "monitor_touch") and
+                   ui.hit(navigationButtons.storage, x, y) then
+                return "storage"
             elseif (event == "mouse_click" or event == "monitor_touch") and ui.hit(previousButton, x, y) and #reactors > 0 then
                 selected = ((selected - 2) % #reactors) + 1
             elseif (event == "mouse_click" or event == "monitor_touch") and ui.hit(nextButton, x, y) and #reactors > 0 then
                 selected = (selected % #reactors) + 1
             elseif (event == "mouse_click" or event == "monitor_touch") and ui.hit(backButton, x, y) then
-                return
+                return "dashboard"
             elseif (event == "mouse_click" or event == "monitor_touch") and
                    ui.hit(calibrationButton, x, y) and #reactors > 0 then
                 local reactor = reactors[selected]
@@ -1654,6 +1683,7 @@ function mainframe.run(config)
     local function turbineView()
         local selected = 1
         local previousButton, nextButton, backButton
+        local navigationButtons = {}
 
         local function formatValue(value, suffix)
             if value == nil then return "N/A" end
@@ -1661,7 +1691,7 @@ function mainframe.run(config)
         end
 
         local function draw()
-            ui.header("TURBINES", "Live telemetry and governor plan")
+            navigationButtons = facilityHeader("TURBINES", "Live telemetry and governor plan")
             if #turbines == 0 then
                 ui.status("Status", "NO TURBINES FOUND", colors.orange)
                 print("")
@@ -1710,7 +1740,13 @@ function mainframe.run(config)
             local event, value, message, protocol = os.pullEvent()
             local touchX, touchY = ui.eventPoint(event, value, message, protocol)
             if event == "key" and value == keys.b then
-                return
+                return "dashboard"
+            elseif event == "key" and value == keys.v then
+                return "reactors"
+            elseif event == "key" and value == keys.g then
+                return "turbines"
+            elseif event == "key" and value == keys.e then
+                return "storage"
             elseif event == "key" and value == keys.left and #turbines > 0 then
                 selected = ((selected - 2) % #turbines) + 1
             elseif event == "key" and value == keys.right and #turbines > 0 then
@@ -1719,8 +1755,14 @@ function mainframe.run(config)
                 selected = ((selected - 2) % #turbines) + 1
             elseif ui.hit(nextButton, touchX, touchY) and #turbines > 0 then
                 selected = (selected % #turbines) + 1
+            elseif ui.hit(navigationButtons.reactors, touchX, touchY) then
+                return "reactors"
+            elseif ui.hit(navigationButtons.turbines, touchX, touchY) then
+                return "turbines"
+            elseif ui.hit(navigationButtons.storage, touchX, touchY) then
+                return "storage"
             elseif ui.hit(backButton, touchX, touchY) then
-                return
+                return "dashboard"
             elseif event == "rednet_message" then
                 handleNetwork(value, message, protocol)
             elseif event == "peripheral" or event == "peripheral_detach" then
@@ -1743,6 +1785,7 @@ function mainframe.run(config)
     local function storageView()
         local selected = 1
         local previousButton, nextButton, backButton
+        local navigationButtons = {}
 
         local function formatPercent(value)
             if value == nil then return "N/A" end
@@ -1757,7 +1800,7 @@ function mainframe.run(config)
         end
 
         local function draw()
-            ui.header("ENERGY STORAGE", "Universal read-only telemetry")
+            navigationButtons = facilityHeader("ENERGY STORAGE", "Universal read-only telemetry")
             if #storages == 0 then
                 ui.status("Status", "NO SUPPORTED STORAGE FOUND", colors.orange)
                 print("")
@@ -1806,7 +1849,13 @@ function mainframe.run(config)
             local event, value, message, protocol = os.pullEvent()
             local touchX, touchY = ui.eventPoint(event, value, message, protocol)
             if event == "key" and value == keys.b then
-                return
+                return "dashboard"
+            elseif event == "key" and value == keys.v then
+                return "reactors"
+            elseif event == "key" and value == keys.g then
+                return "turbines"
+            elseif event == "key" and value == keys.e then
+                return "storage"
             elseif event == "key" and value == keys.left and #storages > 0 then
                 selected = ((selected - 2) % #storages) + 1
             elseif event == "key" and value == keys.right and #storages > 0 then
@@ -1815,8 +1864,14 @@ function mainframe.run(config)
                 selected = ((selected - 2) % #storages) + 1
             elseif ui.hit(nextButton, touchX, touchY) and #storages > 0 then
                 selected = (selected % #storages) + 1
+            elseif ui.hit(navigationButtons.reactors, touchX, touchY) then
+                return "reactors"
+            elseif ui.hit(navigationButtons.turbines, touchX, touchY) then
+                return "turbines"
+            elseif ui.hit(navigationButtons.storage, touchX, touchY) then
+                return "storage"
             elseif ui.hit(backButton, touchX, touchY) then
-                return
+                return "dashboard"
             elseif event == "rednet_message" then
                 handleNetwork(value, message, protocol)
             elseif event == "peripheral" or event == "peripheral_detach" then
@@ -1835,17 +1890,31 @@ function mainframe.run(config)
         end
     end
 
+    local function openFacility(route)
+        while route and route ~= "dashboard" do
+            if route == "reactors" then
+                route = reactorView()
+            elseif route == "turbines" then
+                route = turbineView()
+            elseif route == "storage" then
+                route = storageView()
+            else
+                return
+            end
+        end
+    end
+
     local function openAlarmLocation()
         if not currentAlarm then return end
         local name = tostring(currentAlarm.key or ""):match("^(.-):")
         for _, reactor in ipairs(reactors) do
-            if reactor.name == name then reactorView(); return end
+            if reactor.name == name then openFacility("reactors"); return end
         end
         for _, turbine in ipairs(turbines) do
-            if turbine.name == name then turbineView(); return end
+            if turbine.name == name then openFacility("turbines"); return end
         end
         for _, storage in ipairs(storages) do
-            if storage.name == name then storageView(); return end
+            if storage.name == name then openFacility("storage"); return end
         end
         controlView()
     end
@@ -1867,13 +1936,13 @@ function mainframe.run(config)
             settings()
             render()
         elseif event == "key" and value == keys.v then
-            reactorView()
+            openFacility("reactors")
             render()
         elseif event == "key" and value == keys.g then
-            turbineView()
+            openFacility("turbines")
             render()
         elseif event == "key" and value == keys.e then
-            storageView()
+            openFacility("storage")
             render()
         elseif event == "key" and value == keys.c then
             controlView()
@@ -1887,9 +1956,9 @@ function mainframe.run(config)
                 openAlarmLocation()
             elseif silenceButton and ui.hit(silenceButton, touchX, touchY) then
                 silenceCurrentAlarm()
-            elseif ui.hit(dashboardButtons.reactors, touchX, touchY) then reactorView()
-            elseif ui.hit(dashboardButtons.turbines, touchX, touchY) then turbineView()
-            elseif ui.hit(dashboardButtons.storage, touchX, touchY) then storageView()
+            elseif ui.hit(dashboardButtons.reactors, touchX, touchY) then openFacility("reactors")
+            elseif ui.hit(dashboardButtons.turbines, touchX, touchY) then openFacility("turbines")
+            elseif ui.hit(dashboardButtons.storage, touchX, touchY) then openFacility("storage")
             elseif ui.hit(dashboardButtons.control, touchX, touchY) then controlView()
             elseif ui.hit(dashboardButtons.settings, touchX, touchY) then settings()
             end
