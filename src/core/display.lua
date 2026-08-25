@@ -58,14 +58,15 @@ local function buildProxy()
     target.getCursorBlink = function(...) return native.getCursorBlink(...) end
     target.isColor = function(...) return native.isColor(...) end
     target.getSize = function(...)
-        local width, height = native.getSize(...)
+        local width, height
         for _, monitor in ipairs(monitors) do
             local ok, monitorWidth, monitorHeight = pcall(monitor.getSize)
             if ok then
-                width = math.min(width, monitorWidth)
-                height = math.min(height, monitorHeight)
+                width = width and math.min(width, monitorWidth) or monitorWidth
+                height = height and math.min(height, monitorHeight) or monitorHeight
             end
         end
+        if not width then width, height = native.getSize(...) end
         return width, height
     end
     target.scroll = function(...) return mirror("scroll", ...) end

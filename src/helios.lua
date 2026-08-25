@@ -2,6 +2,37 @@
 local args = { ... }
 local config = dofile("/helios/core/config.lua").load()
 
+if args[1] == "gui" then
+    local loader = dofile("/helios/core/gui_loader.lua")
+    local action = args[2] or "status"
+    if action == "list" or action == "rescan" then
+        for _, module in ipairs(loader.scan(config.version)) do
+            local selected = module.id == config.ui.renderer and " *" or ""
+            print(("%s - %s%s"):format(module.id, module.name, selected))
+        end
+    elseif action == "set" then
+        local id = tostring(args[3] or "")
+        local module, reason = loader.resolve(id, config.version)
+        if not module then error(reason, 0) end
+        config.ui.renderer = id
+        local ok, saveReason = dofile("/helios/core/config.lua").save(config)
+        if not ok then error(saveReason, 0) end
+        print("Graphical interface set to " .. module.name .. ". Restart HELIOS to apply it.")
+    elseif action == "install" then
+        local module, reason = loader.install(args[3], config.version)
+        if not module then error(reason, 0) end
+        print("Installed GUI module " .. module.name .. ".")
+        print("Select it with: helios gui set " .. module.id)
+    elseif action == "status" then
+        local module, reason = loader.resolve(config.ui.renderer, config.version)
+        print("Selected GUI: " .. tostring(module and module.name or config.ui.renderer))
+        if reason then print("Status: ERROR - " .. reason) end
+    else
+        error("Usage: helios gui [list|rescan|status|set <id>|install <url>]", 0)
+    end
+    return
+end
+
 if args[1] == "modules" and args[2] == "update" then
     if config.role ~= "mainframe" then
         error("Only a HELIOS mainframe installs peripheral modules.", 0)

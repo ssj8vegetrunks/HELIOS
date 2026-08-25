@@ -83,7 +83,7 @@ system.
 
 ## Graphical module lifecycle
 
-A future GUI module will:
+A GUI module:
 
 1. declare a compatible `helios.ui` contract version;
 2. receive normalized snapshots from Core;
@@ -92,6 +92,12 @@ A future GUI module will:
 5. tolerate missing telemetry as `N/A` or stale;
 6. surrender cleanly to the built-in text UI after failure or operator choice.
 
-The first graphical milestone should be a read-only facility overview. Manual
-graphical control should be introduced only after that renderer survives normal,
-missing-telemetry, alarm, resize, and module-failure testing.
+GUI modules are discovered under `/helios/gui/<id>/`. Each folder contains a
+`manifest.lua` and its declared renderer entry point. HELIOS validates API
+version 1, Core compatibility, safe paths, and minimum display dimensions.
+Selection is persisted in `config.ui.renderer`; failures fall back to the
+built-in graphical interface.
+
+Use `helios gui list`, `helios gui set <id>`, `helios gui status`, or
+`helios gui install <raw-base-url>`. Selection is also available under
+Advanced > Settings > GUI Module.

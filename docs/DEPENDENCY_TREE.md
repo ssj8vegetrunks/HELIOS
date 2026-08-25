@@ -18,6 +18,10 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 
 - No HELIOS module dependencies detected.
 
+### `core/gui_loader.lua`
+
+- No HELIOS module dependencies detected.
+
 ### `core/mainframe_authority.lua`
 
 - No HELIOS module dependencies detected.
@@ -46,9 +50,18 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 
 - No HELIOS module dependencies detected.
 
+### `gui/control-room/manifest.lua`
+
+- No HELIOS module dependencies detected.
+
+### `gui/control-room/renderer.lua`
+
+- No HELIOS module dependencies detected.
+
 ### `helios.lua`
 
 - depends on → `core/config.lua`
+- depends on → `core/gui_loader.lua`
 - depends on → `core/module_loader.lua`
 - depends on → `core/module_manager.lua`
 - depends on → `core/power_format.lua`
@@ -68,6 +81,7 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 - depends on → `core/config.lua`
 - depends on → `core/display.lua`
 - depends on → `core/gui.lua`
+- depends on → `core/gui_loader.lua`
 - depends on → `core/mainframe_authority.lua`
 - depends on → `core/module_loader.lua`
 - depends on → `core/network.lua`
@@ -99,6 +113,7 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 - depends on → `core/config.lua`
 - depends on → `core/display.lua`
 - depends on → `core/gui.lua`
+- depends on → `core/gui_loader.lua`
 - depends on → `core/network.lua`
 - depends on → `core/power_format.lua`
 - depends on → `core/ui.lua`
@@ -133,6 +148,12 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 - used by ← `mainframe/main.lua`
 - used by ← `terminal/main.lua`
 
+### `core/gui_loader.lua`
+
+- used by ← `helios.lua`
+- used by ← `mainframe/main.lua`
+- used by ← `terminal/main.lua`
+
 ### `core/mainframe_authority.lua`
 
 - used by ← `mainframe/main.lua`
@@ -165,6 +186,14 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 ### `core/ui_contract.lua`
 
 - used by ← `mainframe/main.lua`
+
+### `gui/control-room/manifest.lua`
+
+- No HELIOS modules directly depend on this module.
+
+### `gui/control-room/renderer.lua`
+
+- No HELIOS modules directly depend on this module.
 
 ### `helios.lua`
 

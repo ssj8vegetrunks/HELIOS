@@ -16,6 +16,11 @@ output and fuel bars, a five-zone turbine RPM gauge, and storage capacity/fill/
 draw telemetry. Remote terminals render the same graphical pages from their
 assigned read-only snapshots. See [`docs/GUI.md`](docs/GUI.md).
 
+The selectable `control-room` GUI module adds a fixed large-screen instrument
+layout with aggregate plant dials and a live governor-activity panel. Select it
+under Advanced > Settings > GUI Module or run `helios gui set control-room`.
+Smaller displays automatically retain the built-in interface.
+
 HELIOS Core and its peripheral adapters are now independently versioned. The
 mainframe installer retrieves the official Module Pack from GitHub; remote
 terminals install Core only. The tested reactor, turbine, and storage adapter

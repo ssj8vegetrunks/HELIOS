@@ -7,6 +7,7 @@ function terminal.run(config)
     local ui = dofile("/helios/core/ui.lua")
     ui.setVersion(config.version)
     local gui = dofile("/helios/core/gui.lua")
+    local guiLoader = dofile("/helios/core/gui_loader.lua")
     local configStore = dofile("/helios/core/config.lua")
     local network = dofile("/helios/core/network.lua")
     local powerFormat = dofile("/helios/core/power_format.lua")
@@ -26,6 +27,8 @@ function terminal.run(config)
     local graphicalPage = ({ reactor = "reactors", turbine = "turbines",
         battery = "storage" })[config.display] or "overview"
     local graphicalButtons = {}
+    local customRenderer = guiLoader.load(config.ui.renderer, config.version, term.getSize())
+    local customState, customButtons = {}, {}
 
     local function nameOf(rawName, state)
         local aliases = state.aliases or {}
@@ -454,7 +457,16 @@ function terminal.run(config)
     end
 
     local function render()
-        if advanced then renderAdvanced() else renderGraphical() end
+        if advanced then
+            renderAdvanced()
+        elseif customRenderer and snapshot then
+            local ok, result = pcall(customRenderer.render, snapshot, customState, {
+                gui = gui, powerFormat = powerFormat,
+            })
+            if ok then customButtons = result or {} else customRenderer = nil; renderGraphical() end
+        else
+            renderGraphical()
+        end
     end
 
     sendHello()
@@ -462,6 +474,12 @@ function terminal.run(config)
     render()
     while true do
         local event, value, message, protocol = os.pullEvent()
+        if customRenderer and snapshot and not advanced then
+            local ok, action = pcall(customRenderer.handle, customState, customButtons,
+                event, value, message, protocol, { eventPoint = ui.eventPoint, hit = gui.hit })
+            if not ok then customRenderer = nil
+            elseif action == "advanced" then advanced = true end
+        end
         if event == "key" and value == keys.q then
             ui.prepare()
             display.stop()

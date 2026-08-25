@@ -39,3 +39,12 @@ The graphical interface contains no manual-control actions. Reactor rods,
 reactor/turbine power state, turbine flow, authority changes, calibration
 commands, and configuration remain inside the Advanced text interface. The GUI
 does not receive hardware handles and cannot call adapters.
+
+## Control Room GUI module v1
+
+`control-room` is the first selectable GUI module. It requires at least `50x31`
+characters, corresponding to a large 4x3 monitor at text scale 0.5. HOME presents
+combined storage, steam production versus demand, total plant generation, and
+net storage flow. Its activity panel lists live governor states and reasons.
+Device tabs retain raw telemetry, while ADVANCED opens the established text-only
+configuration and manual-control interface.

@@ -7,6 +7,7 @@ function mainframe.run(config)
     local ui = dofile("/helios/core/ui.lua")
     ui.setVersion(config.version)
     local gui = dofile("/helios/core/gui.lua")
+    local guiLoader = dofile("/helios/core/gui_loader.lua")
     local uiContract = dofile("/helios/core/ui_contract.lua")
     local configStore = dofile("/helios/core/config.lua")
     local moduleLoader = dofile("/helios/core/module_loader.lua")
@@ -1234,6 +1235,9 @@ function mainframe.run(config)
             ui.status("Current mode", modeName(), maintenance and colors.orange or colors.white)
             ui.status("Peripheral names", config.ui.showPeripheralNames and "SHOWN" or "HIDDEN")
             ui.status("Power display", config.power.unit .. " / " .. string.upper(config.power.numberFormat))
+            local selectedGui = guiLoader.resolve(config.ui.renderer, config.version)
+            ui.status("Graphical interface", selectedGui and selectedGui.name or
+                (tostring(config.ui.renderer) .. " (UNAVAILABLE)"), selectedGui and colors.cyan or colors.orange)
             if registryStale then
                 ui.status("Registry", "OUTDATED", colors.orange)
             end
@@ -1257,6 +1261,8 @@ function mainframe.run(config)
             print("")
             buttons.alarms = ui.inlineButton("ALARM SETTINGS", colors.cyan)
             write(" ")
+            buttons.gui = ui.inlineButton("GUI MODULE", colors.cyan)
+            print("")
             buttons.back = ui.inlineButton("BACK", colors.cyan)
             print("")
         end
@@ -1290,6 +1296,44 @@ function mainframe.run(config)
                 powerSettings()
             elseif (event == "key" and value == keys.a) or ui.hit(buttons.alarms, touchX, touchY) then
                 alarmSettings()
+            elseif (event == "key" and value == keys.g) or ui.hit(buttons.gui, touchX, touchY) then
+                local modules = guiLoader.scan(config.version)
+                local index = 1
+                for moduleIndex, module in ipairs(modules) do
+                    if module.id == config.ui.renderer then index = moduleIndex break end
+                end
+                while true do
+                    ui.header("GUI MODULES", "Installed graphical interfaces")
+                    local module = modules[index]
+                    ui.status("Selected", module.name, colors.cyan)
+                    ui.status("Module ID", module.id)
+                    ui.status("Minimum display", ("%dx%d characters"):format(
+                        module.minimumWidth or 1, module.minimumHeight or 1))
+                    print("")
+                    local previous = ui.inlineButton("< PREVIOUS", colors.cyan)
+                    write(" ")
+                    local nextButton = ui.inlineButton("NEXT >", colors.cyan)
+                    print("")
+                    local apply = ui.inlineButton("USE THIS GUI", colors.lime)
+                    write(" ")
+                    local back = ui.inlineButton("BACK", colors.cyan)
+                    print("")
+                    local subEvent, subValue, subMessage, subProtocol = os.pullEvent()
+                    local sx, sy = ui.eventPoint(subEvent, subValue, subMessage, subProtocol)
+                    if (subEvent == "key" and subValue == keys.b) or ui.hit(back, sx, sy) then break
+                    elseif (subEvent == "key" and subValue == keys.left) or ui.hit(previous, sx, sy) then
+                        index = ((index - 2) % #modules) + 1
+                    elseif (subEvent == "key" and subValue == keys.right) or ui.hit(nextButton, sx, sy) then
+                        index = (index % #modules) + 1
+                    elseif (subEvent == "key" and subValue == keys.enter) or ui.hit(apply, sx, sy) then
+                        config.ui.renderer = module.id
+                        saveConfig()
+                        break
+                    elseif subEvent == "rednet_message" then handleNetwork(subValue, subMessage, subProtocol)
+                    elseif subEvent == "timer" and subValue == reactorTimer then
+                        pollReactors(); broadcastSnapshots(); reactorTimer = os.startTimer(1)
+                    end
+                end
             elseif event == "rednet_message" then
                 handleNetwork(value, message, protocol)
             elseif event == "peripheral" or event == "peripheral_detach" then
@@ -1932,6 +1976,42 @@ function mainframe.run(config)
 
     -- @section READ-ONLY GRAPHICAL INTERFACE
     local function graphicalView()
+        local customRenderer, customManifest = guiLoader.load(config.ui.renderer, config.version,
+            term.getSize())
+        if customRenderer then
+            local customState, customButtons = {}, {}
+            while true do
+                local ok, rendered = pcall(customRenderer.render, snapshotFor("all"), customState, {
+                    gui = gui, powerFormat = powerFormat,
+                })
+                if not ok then
+                    customRenderer = nil
+                    break
+                end
+                customButtons = rendered or {}
+                local event, value, message, protocol = os.pullEvent()
+                local handled, action = pcall(customRenderer.handle, customState, customButtons,
+                    event, value, message, protocol, {
+                        eventPoint = ui.eventPoint, hit = gui.hit,
+                    })
+                if not handled then customRenderer = nil break end
+                if action == "advanced" then return "advanced" end
+                if event == "key" and value == keys.q then return "quit"
+                elseif event == "rednet_message" then handleNetwork(value, message, protocol)
+                elseif event == "peripheral" or event == "peripheral_detach" then
+                    if maintenance or config.discovery.defaultMode == "manual" then registryStale = true else rescan() end
+                elseif event == "term_resize" or event == "monitor_resize" then
+                    local width, height = term.getSize()
+                    if width < customManifest.minimumWidth or height < customManifest.minimumHeight then break end
+                elseif event == "timer" then
+                    if maintenance and value == maintenanceTimer then stopMaintenance()
+                    elseif maintenance and value == countdownTimer then countdownTimer = os.startTimer(1)
+                    elseif value == reactorTimer then
+                        pollReactors(); broadcastSnapshots(); reactorTimer = os.startTimer(1)
+                    end
+                end
+            end
+        end
         local page = "overview"
         local selected = { reactors = 1, turbines = 1, storage = 1 }
         local buttons = {}
