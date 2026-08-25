@@ -112,6 +112,7 @@ function governor.evaluate(memory, turbine, control, context)
     local previous = memory.turbines[name] or {
         overspeedCount = 0,
         primeRequested = true,
+        startRequested = true,
     }
     local profile = profileFor(control, name)
     local lowBand = tonumber(control.lowBandRpm) or 900
@@ -160,7 +161,7 @@ function governor.evaluate(memory, turbine, control, context)
                 mode = "automatic",
                 state = "STARTING",
                 action = "START TURBINE",
-                reason = "Calibration requested; activate and verify this turbine",
+                reason = "Automatic startup requested; activate and verify this turbine",
                 trusted = true,
                 currentActive = false,
                 recommendedActive = true,

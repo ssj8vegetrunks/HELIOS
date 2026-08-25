@@ -356,10 +356,10 @@ overspeed readings engage the inductor, cut steam, and raise a global alarm.
 Missing or untrusted telemetry always produces HOLD.
 
 `AUTOMATIC` remains selected and tuning controls remain locked. HELIOS may
-change a turbine's configured flow limit and inductor state, plus the individual
-control-rod insertion and active state of one steam reactor. It still cannot
-control a power-mode reactor, start or stop a turbine, change venting, eject
-fuel, or eject waste.
+start a newly discovered inactive turbine, change its configured flow limit and
+inductor state, plus control the individual rods and active state of one steam
+reactor. It still cannot control a power-mode reactor, automatically stop a
+turbine, change venting, eject fuel, or eject waste.
 
 See [`docs/CONTROL.md`](docs/CONTROL.md) for the concise control boundary and
 planned governor order.

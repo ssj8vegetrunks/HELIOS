@@ -52,7 +52,9 @@ The Power Control screen now runs a guarded automatic turbine governor.
   aborts calibration, saves no profile, and raises a global warning.
 - Three consecutive samples at or above 2000 RPM confirm overspeed and propose
   a zero flow limit with the inductor engaged.
-- Missing, inactive, conflicting, maintenance, or unsupported telemetry produces `HOLD`.
+- A newly discovered inactive turbine receives one verified automatic startup
+  command so a factory-default plant can enter calibration. Missing, conflicting,
+  maintenance, or unsupported telemetry still produces `HOLD`.
 - Rejected, unsupported, or unverifiable writes produce a global control-fault warning.
 - Governor state and recommendations are sent to assigned remote terminals.
 - Mainframe monitors may navigate the interface by touch.
@@ -137,7 +139,7 @@ interface until user tuning controls and their validation limits are implemented
 
 ## Next implementation order
 
-1. Validate coordinated reactor-first startup on the live plant
+1. Validate coordinated factory-default startup on the live plant
 2. Explicit reactor-to-turbine routing for multiple steam loops
 3. Storage-based plant demand coordinator
 4. Action history and user-defined tuning controls

@@ -3426,7 +3426,12 @@ function mainframe.run(config)
                 (reactor.fuelPercent or 0) < 20 and colors.orange or colors.lime, colors.gray)
             gui.text(math.max(1, width - 8), 13,
                 reactor.fuelPercent and ("%6.1f%%"):format(reactor.fuelPercent) or "   N/A", colors.white)
-            gui.text(1, 15, "[<] PREVIOUS     NEXT [>]", colors.cyan)
+            local buffer = reactor.mode == "steam" and reactor.hotFluidPercent or reactor.energyPercent
+            gui.text(1, 15, ("CYANITE %s mB"):format(
+                reactor.waste and ("%.0f"):format(reactor.waste) or "N/A"), colors.cyan)
+            gui.text(math.max(24, width - 16), 15, ("BUFFER %s"):format(
+                buffer and ("%.1f%%"):format(buffer) or "N/A"), colors.cyan)
+            gui.text(1, 17, "[<] PREVIOUS     NEXT [>]", colors.cyan)
         end
 
         local function turbinePage()
@@ -3444,8 +3449,17 @@ function mainframe.run(config)
             gui.text(1, 7, turbine.active == true and "ACTIVE" or "OFFLINE",
                 turbine.active == true and colors.lime or colors.orange)
             gui.text(1, 9, ("ROTOR %.1f RPM"):format(rpm), rpm >= 1900 and colors.red or colors.white)
-            gui.rpmGauge(1, 10, math.max(20, width - 1), rpm)
-            gui.text(1, 11, "ORANGE | 900 | ORANGE | 1800 | RED", colors.lightGray)
+            local gaugeWidth = math.max(20, width - 1)
+            gui.rpmGauge(1, 10, gaugeWidth, rpm)
+            local lowLabel = "[900 RPM]"
+            local highLabel = "[1800 RPM]"
+            local lowX = math.max(1, math.floor(900 / 2100 * (gaugeWidth - 1)) -
+                math.floor(#lowLabel / 2) + 1)
+            local highX = math.min(width - #highLabel + 1,
+                math.floor(1800 / 2100 * (gaugeWidth - 1)) -
+                math.floor(#highLabel / 2) + 1)
+            gui.text(lowX, 11, lowLabel, colors.lime)
+            gui.text(highX, 11, highLabel, colors.lime)
             local plan = turbine.governor or {}
             gui.text(1, 13, "STATE " .. tostring(plan.state or "WAITING"), colors.white)
             gui.text(1, 14, "OUTPUT " .. powerFormat.power(turbine.energyProduction,
@@ -3517,7 +3531,7 @@ function mainframe.run(config)
                     selected.storage = (selected.storage % #storages) + 1
                 end
             elseif event == "mouse_click" or event == "monitor_touch" then
-                if touchY == 15 and page == "reactors" and #reactors > 0 then
+                if touchY == 17 and page == "reactors" and #reactors > 0 then
                     selected.reactors = touchX < 15 and ((selected.reactors - 2) % #reactors) + 1 or
                         (selected.reactors % #reactors) + 1
                 elseif touchY == 16 and page == "turbines" and #turbines > 0 then
@@ -4913,6 +4927,7 @@ function governor.evaluate(memory, turbine, control, context)
     local previous = memory.turbines[name] or {
         overspeedCount = 0,
         primeRequested = true,
+        startRequested = true,
     }
     local profile = profileFor(control, name)
     local lowBand = tonumber(control.lowBandRpm) or 900
@@ -4961,7 +4976,7 @@ function governor.evaluate(memory, turbine, control, context)
                 mode = "automatic",
                 state = "STARTING",
                 action = "START TURBINE",
-                reason = "Calibration requested; activate and verify this turbine",
+                reason = "Automatic startup requested; activate and verify this turbine",
                 trusted = true,
                 currentActive = false,
                 recommendedActive = true,

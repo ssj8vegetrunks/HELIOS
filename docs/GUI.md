@@ -19,9 +19,10 @@ shows equipment counts and minimum trusted storage reserve.
 
 ## Facility pages
 
-- Reactors show type, active state, output, and fuel percentage as bars.
-- Turbines show a five-zone RPM gauge: orange, green 900, orange, green 1800,
-  and red overspeed, plus governor state and power output.
+- Reactors show type, active state, output and fuel bars, cyanite amount in cyan,
+  and the relevant steam/energy buffer percentage.
+- Turbines show a five-zone RPM gauge with labels centered below the green
+  `[900 RPM]` and `[1800 RPM]` bands, plus governor state and power output.
 - Power shows storage capacity percentage, stored energy, fill rate, draw rate,
   and charging/draining state.
 
