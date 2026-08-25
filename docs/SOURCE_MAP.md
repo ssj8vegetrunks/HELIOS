@@ -4,7 +4,7 @@
 
 Authoritative file: `install.lua`
 
-Total physical lines: **7263**
+Total physical lines: **7287**
 
 This map uses the actual line numbers in the bundled `install.lua`.
 
@@ -22,14 +22,14 @@ This map uses the actual line numbers in the bundled `install.lua`.
 - Lines 1272-1420: **core/ui.lua** (module contents 1273-1419)
 - Lines 1422-1523: **core/ui_contract.lua** (module contents 1423-1522)
 - Lines 1525-1537: **gui/control-room/manifest.lua** (module contents 1526-1536)
-- Lines 1539-1681: **gui/control-room/renderer.lua** (module contents 1540-1680)
-- Lines 1683-1821: **helios.lua** (module contents 1684-1820)
-- Lines 1823-1927: **mainframe/device_registry.lua** (module contents 1824-1926)
-- Lines 1929-4330: **mainframe/main.lua** (module contents 1930-4329)
-- Lines 4332-4389: **mainframe/manual_control.lua** (module contents 4333-4388)
-- Lines 4391-5460: **mainframe/reactor_governor.lua** (module contents 4392-5459)
-- Lines 5462-6372: **mainframe/turbine_governor.lua** (module contents 5463-6371)
-- Lines 6374-6945: **terminal/main.lua** (module contents 6375-6944)
+- Lines 1539-1690: **gui/control-room/renderer.lua** (module contents 1540-1689)
+- Lines 1692-1830: **helios.lua** (module contents 1693-1829)
+- Lines 1832-1936: **mainframe/device_registry.lua** (module contents 1833-1935)
+- Lines 1938-4339: **mainframe/main.lua** (module contents 1939-4338)
+- Lines 4341-4398: **mainframe/manual_control.lua** (module contents 4342-4397)
+- Lines 4400-5484: **mainframe/reactor_governor.lua** (module contents 4401-5483)
+- Lines 5486-6396: **mainframe/turbine_governor.lua** (module contents 5487-6395)
+- Lines 6398-6969: **terminal/main.lua** (module contents 6399-6968)
 
 ## Installer code outside bundled modules
 
@@ -46,14 +46,14 @@ This map uses the actual line numbers in the bundled `install.lua`.
 - Lines 1421-1421: **Bundle table separator / installer code**
 - Lines 1524-1524: **Bundle table separator / installer code**
 - Lines 1538-1538: **Bundle table separator / installer code**
-- Lines 1682-1682: **Bundle table separator / installer code**
-- Lines 1822-1822: **Bundle table separator / installer code**
-- Lines 1928-1928: **Bundle table separator / installer code**
-- Lines 4331-4331: **Bundle table separator / installer code**
-- Lines 4390-4390: **Bundle table separator / installer code**
-- Lines 5461-5461: **Bundle table separator / installer code**
-- Lines 6373-6373: **Bundle table separator / installer code**
-- Lines 6946-7263: **Installer/configuration/execution code**
+- Lines 1691-1691: **Bundle table separator / installer code**
+- Lines 1831-1831: **Bundle table separator / installer code**
+- Lines 1937-1937: **Bundle table separator / installer code**
+- Lines 4340-4340: **Bundle table separator / installer code**
+- Lines 4399-4399: **Bundle table separator / installer code**
+- Lines 5485-5485: **Bundle table separator / installer code**
+- Lines 6397-6397: **Bundle table separator / installer code**
+- Lines 6970-7287: **Installer/configuration/execution code**
 
 ## External Module Pack files
 

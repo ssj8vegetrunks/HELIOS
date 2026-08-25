@@ -404,6 +404,7 @@ saveProfile = function(memory, control, name, exposure, production, target, cont
             bufferDemand = old and old.bufferDemand or nil,
             bufferSteam = old and old.bufferSteam or nil,
             bufferUpdatedAt = old and old.bufferUpdatedAt or nil,
+            learnedMaximumSteam = old and old.learnedMaximumSteam or nil,
         }
         memory.profileDirty = true
     end
@@ -548,6 +549,20 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
             local _, responding, response = observeResponse(previous, reactor, control,
                 context, production, productionLow, productionHigh,
                 averageSamples, target)
+            -- Once calibration has produced a trusted operating point, project
+            -- that measured steam-per-exposed-rod response to full exposure.
+            -- This records plant capability without deliberately flooding the
+            -- steam network with a separate full-output GUI test.
+            if averageReady and type(profile) == "table" and rodCount > 0 and
+               exposure >= 0.25 then
+                local estimatedMaximum = math.max(productionHigh,
+                    production / exposure * rodCount)
+                local previousMaximum = tonumber(profile.learnedMaximumSteam) or 0
+                if estimatedMaximum > previousMaximum * 1.01 then
+                    profile.learnedMaximumSteam = round(estimatedMaximum, 1)
+                    memory.profileDirty = true
+                end
+            end
             local stable = (previous.stableSamples or 0) >= stableRequired
             -- Steam is evaluated as a rolling operating band after the normal
             -- post-write delay. Casing drift remains diagnostic, and a bounded

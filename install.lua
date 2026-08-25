@@ -1597,22 +1597,31 @@ function renderer.render(snapshot, state, services)
         local reserve = capacity > 0 and stored / capacity * 100 or 0
         local steam = sum(snapshot.reactors, "steamProduction")
         local demand = sum(snapshot.turbines, "flowRate")
+        local steamMaximum, maximumKnown = 0, true
+        local reactorProfiles = snapshot.control and snapshot.control.reactorProfiles or {}
+        for _, reactor in ipairs(snapshot.reactors or {}) do
+            if reactor.mode == "steam" then
+                local profile = reactorProfiles[reactor.name] or
+                    (reactor.governor and reactor.governor.learnedProfile) or {}
+                local maximum = tonumber(profile.learnedMaximumSteam)
+                if maximum then steamMaximum = steamMaximum + maximum else maximumKnown = false end
+            end
+        end
         local generation = sum(snapshot.reactors, "energyProduction") + sum(snapshot.turbines, "energyProduction")
         local fill, draw = sum(snapshot.storages, "input"), sum(snapshot.storages, "output")
         local net = fill - draw
         instrument(gui, 1, 6, left, "POWER STORAGE", reserve,
             ("%.1f%%  %s"):format(reserve, formatter.power(stored, snapshot.power, false)),
             reserve < 20 and colors.orange or colors.lime)
-        -- Demand sits at 80% of the scale, leaving visible room for surplus
-        -- production instead of clipping every value above demand to full.
-        local steamScale = demand > 0 and demand * 1.25 or math.max(1, steam)
+        local steamScale = maximumKnown and steamMaximum > 0 and steamMaximum or math.max(1, steam)
         local steamPercent = math.min(100, steam / steamScale * 100)
         local steamRatio = demand > 0 and steam / demand or 0
         local steamColour = demand > 0 and steamRatio >= 0.95 and steamRatio <= 1.10 and
             colors.cyan or colors.orange
         instrument(gui, 1, 12, left, "STEAM PRODUCTION", steamPercent,
-            ("%.0f / %.0f mB/t"):format(steam, demand), steamColour,
-            demand > 0 and 80 or nil)
+            maximumKnown and ("%.0f / %.0f mB/t"):format(steam, steamMaximum) or
+                (("%.0f / LEARNING"):format(steam)), steamColour,
+            maximumKnown and steamMaximum > 0 and math.min(100, demand / steamMaximum * 100) or nil)
         instrument(gui, 1, 18, left, "POWER PRODUCTION", math.min(100, generation / math.max(1, generation + draw) * 100),
             formatter.power(generation, snapshot.power, true), colors.lime)
         instrument(gui, 1, 24, left, "NET POWER FLOW", net >= 0 and math.min(100, 50 + net / math.max(1, fill + draw) * 50) or math.max(0, 50 + net / math.max(1, fill + draw) * 50),
@@ -4795,6 +4804,7 @@ saveProfile = function(memory, control, name, exposure, production, target, cont
             bufferDemand = old and old.bufferDemand or nil,
             bufferSteam = old and old.bufferSteam or nil,
             bufferUpdatedAt = old and old.bufferUpdatedAt or nil,
+            learnedMaximumSteam = old and old.learnedMaximumSteam or nil,
         }
         memory.profileDirty = true
     end
@@ -4939,6 +4949,20 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
             local _, responding, response = observeResponse(previous, reactor, control,
                 context, production, productionLow, productionHigh,
                 averageSamples, target)
+            -- Once calibration has produced a trusted operating point, project
+            -- that measured steam-per-exposed-rod response to full exposure.
+            -- This records plant capability without deliberately flooding the
+            -- steam network with a separate full-output GUI test.
+            if averageReady and type(profile) == "table" and rodCount > 0 and
+               exposure >= 0.25 then
+                local estimatedMaximum = math.max(productionHigh,
+                    production / exposure * rodCount)
+                local previousMaximum = tonumber(profile.learnedMaximumSteam) or 0
+                if estimatedMaximum > previousMaximum * 1.01 then
+                    profile.learnedMaximumSteam = round(estimatedMaximum, 1)
+                    memory.profileDirty = true
+                end
+            end
             local stable = (previous.stableSamples or 0) >= stableRequired
             -- Steam is evaluated as a rolling operating band after the normal
             -- post-write delay. Casing drift remains diagnostic, and a bounded

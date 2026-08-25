@@ -17,7 +17,8 @@ local renderer = dofile("src/gui/control-room/renderer.lua")
 local state = {}
 local buttons = renderer.render({
     version="1.6.0-alpha.4", aliases={}, power={unit="FE"},
-    reactors={{name="R0",steamProduction=1000,energyProduction=0,active=true,
+    control={reactorProfiles={R0={learnedMaximumSteam=5000}}},
+    reactors={{name="R0",mode="steam",steamProduction=1000,energyProduction=0,active=true,
         governor={state="STABLE",reason="Steam target held"}}},
     turbines={{name="T0",flowRate=900,energyProduction=500,active=true,
         governor={state="HOLDING",reason="Holding 1800 RPM"}}},
@@ -29,6 +30,6 @@ assert(string.find(output, "POWER STORAGE", 1, true), "home must show combined s
 assert(string.find(output, "STEAM PRODUCTION", 1, true), "home must show aggregate steam")
 assert(string.find(output, "POWER PRODUCTION", 1, true), "home must show aggregate power")
 assert(string.find(output, "HELIOS ACTIVITY", 1, true), "home must explain governor activity")
-assert(string.find(output, "1000 / 900 mB/t", 1, true),
-    "steam instrument must show aggregate production and demand")
+assert(string.find(output, "1000 / 5000 mB/t", 1, true),
+    "steam instrument must show actual output against learned maximum")
 print("control room GUI tests passed")

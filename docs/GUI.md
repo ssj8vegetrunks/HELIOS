@@ -56,7 +56,8 @@ Advanced is rendered through the compact mirrored interface. If the custom
 renderer fails or the monitor becomes too small, the built-in GUI resumes on
 the monitor as well.
 
-The steam instrument reserves the final 20% of its scale for surplus output.
-Its yellow target marker represents 100% demand, while the live marker can move
-beyond it. Excess production therefore remains visible instead of every value
-above demand appearing as the same full bar.
+The steam instrument scales to the combined learned maximum output of all steam
+reactors. Its fill and numeric readout show actual production, while the yellow
+marker shows current turbine demand against that capability. HELIOS derives and
+persists maximum capability from trusted calibration response; until every steam
+reactor has a learned maximum, the readout reports `LEARNING`.

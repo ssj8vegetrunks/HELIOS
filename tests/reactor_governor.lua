@@ -388,6 +388,9 @@ do
     local stable = settle(memory, reactor(2050, 1.25), 2000, 0, 8)
     equal(stable.state, "LEARNED", "stable operating point")
     assert(control.reactorProfiles.reactor_0, "stable profile was not saved")
+    settle(memory, reactor(2050, 1.25), 2000, 20, control.reactorSteamAverageSamples)
+    assert((control.reactorProfiles.reactor_0.learnedMaximumSteam or 0) >= 2050,
+        "trusted calibration must persist learned maximum steam capability")
     assert(governor.consumeProfileChanges(memory), "profile change was not reported")
 end
 
