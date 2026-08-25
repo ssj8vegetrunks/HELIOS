@@ -55,12 +55,18 @@ term = {
 
 local ui = dofile("src/core/ui.lua")
 ui.setVersion("1.4.1-alpha.23")
-ui.header("mainframe", "Central control authority")
+ui.header("mainframe", "Central control authority", function()
+    print("[REACTORS] [TURBINES] [POWER]")
+end)
 
 assert(rows[1]:sub(1, 19) == "HELIOS // MAINFRAME",
     "header role is not left aligned")
 assert(rows[1]:sub(width - #"v1.4.1-alpha.23" + 1) == "v1.4.1-alpha.23",
     "installed version is not right aligned")
+assert(rows[2]:sub(1, 29) == "[REACTORS] [TURBINES] [POWER]",
+    "dashboard navigation is not directly below the title")
+assert(rows[3]:sub(1, #"Central control authority") == "Central control authority",
+    "header subtitle must follow dashboard navigation")
 
 rows, cursorX, cursorY, scrollCount = {}, 1, 5, 0
 ui.status("Control", string.rep("LONG STATUS ", 10), colors.red)

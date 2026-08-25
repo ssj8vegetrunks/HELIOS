@@ -954,7 +954,7 @@ function ui.block(value, colour, maxRows)
     return rows
 end
 
-function ui.header(role, subtitle)
+function ui.header(role, subtitle, afterTitle)
     ui.prepare()
     if #idConflicts > 0 then
         local width = select(1, term.getSize())
@@ -986,6 +986,7 @@ function ui.header(role, subtitle)
         write(string.sub(heading, 1, width))
     end
     term.setCursorPos(1, row + 1)
+    if type(afterTitle) == "function" then afterTitle() end
     term.setTextColor(colors.lightGray)
     print(subtitle)
     term.setTextColor(colors.gray)
@@ -1771,7 +1772,15 @@ function mainframe.run(config)
     -- @section MAIN DASHBOARD
     local function render()
         ui.setIdConflicts(idConflicts)
-        ui.header("HELIOS", "Central power management")
+        dashboardButtons = {}
+        ui.header("HELIOS", "Central power management", function()
+            dashboardButtons.reactors = ui.inlineButton("REACTORS", colors.red)
+            write(" ")
+            dashboardButtons.turbines = ui.inlineButton("TURBINES", colors.blue)
+            write(" ")
+            dashboardButtons.storage = ui.inlineButton("POWER", colors.yellow)
+            print("")
+        end)
         ui.status("System", "ONLINE", colors.lime)
         ui.status("Computer ID", config.computerId)
         ui.status("Attached hardware", #devices, #devices > 0 and colors.lime or colors.orange)
@@ -1813,7 +1822,7 @@ function mainframe.run(config)
 
         -- Keep the controls on fixed bottom rows. Alarm and device text may
         -- consume only the space above this footer, preserving touch hitboxes.
-        local footerRow = math.max(1, height - 2)
+        local footerRow = math.max(1, height - 1)
         local contentRow = select(2, term.getCursorPos())
         local availableRows = math.max(0, footerRow - contentRow)
         if #devices > availableRows then
@@ -1828,13 +1837,6 @@ function mainframe.run(config)
             print(("+ %d more (run: helios scan)"):format(#devices - availableRows))
         end
         term.setCursorPos(1, footerRow)
-        dashboardButtons = {}
-        dashboardButtons.reactors = ui.inlineButton("REACTORS", colors.red)
-        write(" ")
-        dashboardButtons.turbines = ui.inlineButton("TURBINES", colors.blue)
-        write(" ")
-        dashboardButtons.storage = ui.inlineButton("POWER", colors.yellow)
-        print("")
         dashboardButtons.control = ui.inlineButton("CONTROL", colors.lime)
         write(" ")
         dashboardButtons.settings = ui.inlineButton("SETTINGS", colors.cyan)

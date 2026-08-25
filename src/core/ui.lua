@@ -80,7 +80,7 @@ function ui.block(value, colour, maxRows)
     return rows
 end
 
-function ui.header(role, subtitle)
+function ui.header(role, subtitle, afterTitle)
     ui.prepare()
     if #idConflicts > 0 then
         local width = select(1, term.getSize())
@@ -112,6 +112,7 @@ function ui.header(role, subtitle)
         write(string.sub(heading, 1, width))
     end
     term.setCursorPos(1, row + 1)
+    if type(afterTitle) == "function" then afterTitle() end
     term.setTextColor(colors.lightGray)
     print(subtitle)
     term.setTextColor(colors.gray)
