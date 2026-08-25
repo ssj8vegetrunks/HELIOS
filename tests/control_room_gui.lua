@@ -29,4 +29,6 @@ assert(string.find(output, "POWER STORAGE", 1, true), "home must show combined s
 assert(string.find(output, "STEAM PRODUCTION", 1, true), "home must show aggregate steam")
 assert(string.find(output, "POWER PRODUCTION", 1, true), "home must show aggregate power")
 assert(string.find(output, "HELIOS ACTIVITY", 1, true), "home must explain governor activity")
+assert(string.find(output, "1000 / 900 mB/t", 1, true),
+    "steam instrument must show aggregate production and demand")
 print("control room GUI tests passed")

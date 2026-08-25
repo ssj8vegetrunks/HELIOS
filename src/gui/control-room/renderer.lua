@@ -6,13 +6,18 @@ local function sum(list, field)
     return total
 end
 
-local function instrument(gui, x, y, width, title, percent, value, colour)
+local function instrument(gui, x, y, width, title, percent, value, colour, targetPercent)
     width = math.max(12, width)
     gui.text(x, y, "+" .. string.rep("-", width - 2) .. "+", colors.gray)
     gui.text(x, y + 1, "| " .. title, colors.lightGray, colors.black, width)
     gui.text(x + width - 1, y + 1, "|", colors.gray)
     local gaugeWidth = width - 4
     gui.progress(x + 2, y + 3, gaugeWidth, percent, colour, colors.gray)
+    if targetPercent then
+        local target = math.floor(math.max(0, math.min(100, targetPercent)) / 100 *
+            (gaugeWidth - 1))
+        gui.text(x + 2 + target, y + 2, "v", colors.yellow, colors.black)
+    end
     local marker = math.floor(math.max(0, math.min(100, percent or 0)) / 100 * (gaugeWidth - 1))
     gui.text(x + 2 + marker, y + 3, "^", colors.white, colors.black)
     gui.text(x + 2, y + 4, value, colors.white, colors.black, width - 4)
@@ -59,8 +64,16 @@ function renderer.render(snapshot, state, services)
         instrument(gui, 1, 6, left, "POWER STORAGE", reserve,
             ("%.1f%%  %s"):format(reserve, formatter.power(stored, snapshot.power, false)),
             reserve < 20 and colors.orange or colors.lime)
-        instrument(gui, 1, 12, left, "STEAM PRODUCTION", demand > 0 and math.min(100, steam / demand * 100) or 0,
-            ("%.0f / %.0f mB/t"):format(steam, demand), colors.cyan)
+        -- Demand sits at 80% of the scale, leaving visible room for surplus
+        -- production instead of clipping every value above demand to full.
+        local steamScale = demand > 0 and demand * 1.25 or math.max(1, steam)
+        local steamPercent = math.min(100, steam / steamScale * 100)
+        local steamRatio = demand > 0 and steam / demand or 0
+        local steamColour = demand > 0 and steamRatio >= 0.95 and steamRatio <= 1.10 and
+            colors.cyan or colors.orange
+        instrument(gui, 1, 12, left, "STEAM PRODUCTION", steamPercent,
+            ("%.0f / %.0f mB/t"):format(steam, demand), steamColour,
+            demand > 0 and 80 or nil)
         instrument(gui, 1, 18, left, "POWER PRODUCTION", math.min(100, generation / math.max(1, generation + draw) * 100),
             formatter.power(generation, snapshot.power, true), colors.lime)
         instrument(gui, 1, 24, left, "NET POWER FLOW", net >= 0 and math.min(100, 50 + net / math.max(1, fill + draw) * 50) or math.max(0, 50 + net / math.max(1, fill + draw) * 50),

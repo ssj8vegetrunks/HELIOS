@@ -55,3 +55,8 @@ qualifying attached monitor displays Control Room with monitor-touch controls.
 Advanced is rendered through the compact mirrored interface. If the custom
 renderer fails or the monitor becomes too small, the built-in GUI resumes on
 the monitor as well.
+
+The steam instrument reserves the final 20% of its scale for surplus output.
+Its yellow target marker represents 100% demand, while the live marker can move
+beyond it. Excess production therefore remains visible instead of every value
+above demand appearing as the same full bar.
