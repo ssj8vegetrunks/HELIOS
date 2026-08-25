@@ -97,12 +97,16 @@ function renderer.render(snapshot, state, services)
         for _, reactor in ipairs(snapshot.reactors or {}) do
             local plan = reactor.governor or {}
             line("R " .. nameOf(reactor.name, snapshot) .. ": " .. tostring(plan.state or "MONITORING"), colors.orange)
-            line("  " .. tostring(plan.reason or (reactor.active and "ONLINE" or "OFFLINE")), colors.lightGray)
+            local dispatch = plan.dispatchRequested == true and "DISPATCHED" or
+                (reactor.mode == "power" and "STANDBY" or nil)
+            line("  " .. (dispatch and (dispatch .. " - ") or "") ..
+                tostring(plan.reason or (reactor.active and "ONLINE" or "OFFLINE")), colors.lightGray)
         end
         for _, turbine in ipairs(snapshot.turbines or {}) do
             local plan = turbine.governor or {}
             line("T " .. nameOf(turbine.name, snapshot) .. ": " .. tostring(plan.state or "MONITORING"), colors.cyan)
-            line("  " .. tostring(plan.reason or (turbine.active and "ONLINE" or "OFFLINE")), colors.lightGray)
+            line("  " .. tostring(plan.dispatchMode or turbine.dispatchMode or "UNKNOWN") ..
+                " - " .. tostring(plan.reason or (turbine.active and "ONLINE" or "OFFLINE")), colors.lightGray)
         end
         line(("Storage reserve %.1f%%"):format(reserve), reserve < 20 and colors.orange or colors.lime)
         gui.text(rightX, height - 1, "+" .. string.rep("-", rightWidth - 2) .. "+", colors.gray)
@@ -115,7 +119,7 @@ function renderer.render(snapshot, state, services)
             local item = list[state.selected[key]]
             gui.text(1, 7, ("%d/%d  %s"):format(state.selected[key], #list, nameOf(item.name, snapshot)), colors.cyan)
             local row = 9
-            for _, field in ipairs({"active", "state", "rotorSpeed", "steamProduction", "energyProduction", "fuelPercent", "waste", "percent", "input", "output", "stored", "capacity"}) do
+            for _, field in ipairs({"active", "state", "dispatchMode", "powerDispatchRequested", "rotorSpeed", "steamProduction", "energyProduction", "fuelPercent", "waste", "percent", "input", "output", "stored", "capacity"}) do
                 if item[field] ~= nil then gui.text(1, row, string.upper(field) .. ": " .. tostring(item[field]), colors.white); row = row + 1 end
             end
             local plan = item.governor or {}

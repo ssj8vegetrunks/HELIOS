@@ -259,6 +259,7 @@ local function evaluatePower(memory, reactor, control, context)
     result.maximumPower = tonumber(profile.maximumPower)
     result.powerProduction = production
     result.targetPower = tonumber(context.powerDemand) or 0
+    result.dispatchRequested = wantedActive
     return result
 end
 

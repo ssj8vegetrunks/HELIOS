@@ -1645,12 +1645,16 @@ function renderer.render(snapshot, state, services)
         for _, reactor in ipairs(snapshot.reactors or {}) do
             local plan = reactor.governor or {}
             line("R " .. nameOf(reactor.name, snapshot) .. ": " .. tostring(plan.state or "MONITORING"), colors.orange)
-            line("  " .. tostring(plan.reason or (reactor.active and "ONLINE" or "OFFLINE")), colors.lightGray)
+            local dispatch = plan.dispatchRequested == true and "DISPATCHED" or
+                (reactor.mode == "power" and "STANDBY" or nil)
+            line("  " .. (dispatch and (dispatch .. " - ") or "") ..
+                tostring(plan.reason or (reactor.active and "ONLINE" or "OFFLINE")), colors.lightGray)
         end
         for _, turbine in ipairs(snapshot.turbines or {}) do
             local plan = turbine.governor or {}
             line("T " .. nameOf(turbine.name, snapshot) .. ": " .. tostring(plan.state or "MONITORING"), colors.cyan)
-            line("  " .. tostring(plan.reason or (turbine.active and "ONLINE" or "OFFLINE")), colors.lightGray)
+            line("  " .. tostring(plan.dispatchMode or turbine.dispatchMode or "UNKNOWN") ..
+                " - " .. tostring(plan.reason or (turbine.active and "ONLINE" or "OFFLINE")), colors.lightGray)
         end
         line(("Storage reserve %.1f%%"):format(reserve), reserve < 20 and colors.orange or colors.lime)
         gui.text(rightX, height - 1, "+" .. string.rep("-", rightWidth - 2) .. "+", colors.gray)
@@ -1663,7 +1667,7 @@ function renderer.render(snapshot, state, services)
             local item = list[state.selected[key]]
             gui.text(1, 7, ("%d/%d  %s"):format(state.selected[key], #list, nameOf(item.name, snapshot)), colors.cyan)
             local row = 9
-            for _, field in ipairs({"active", "state", "rotorSpeed", "steamProduction", "energyProduction", "fuelPercent", "waste", "percent", "input", "output", "stored", "capacity"}) do
+            for _, field in ipairs({"active", "state", "dispatchMode", "powerDispatchRequested", "rotorSpeed", "steamProduction", "energyProduction", "fuelPercent", "waste", "percent", "input", "output", "stored", "capacity"}) do
                 if item[field] ~= nil then gui.text(1, row, string.upper(field) .. ": " .. tostring(item[field]), colors.white); row = row + 1 end
             end
             local plan = item.governor or {}
@@ -2037,7 +2041,11 @@ function mainframe.run(config)
                 sources[#sources + 1] = {
                     kind = "turbine", unit = turbine, profile = profile,
                     capacity = tonumber(profile.maximumPower) or 0,
-                    priority = assisted and 1 or warm and 2 or 4,
+                    -- Direct power reactors are the primary recharge plant.  A
+                    -- turbine remains the fast-response path, but it must not
+                    -- silently displace a calibrated power source while the
+                    -- storage bank is below its recharge target.
+                    priority = assisted and 3 or warm and 4 or 5,
                 }
             end
         end
@@ -2050,12 +2058,18 @@ function mainframe.run(config)
                 sources[#sources + 1] = {
                     kind = "reactor", unit = reactor, profile = profile,
                     capacity = tonumber(profile.maximumPower) or 0,
-                    priority = reactor.active == true and 2 or 3,
+                    priority = reactor.active == true and 1 or 2,
                 }
             end
         end
         table.sort(sources, function(a, b)
             if a.priority ~= b.priority then return a.priority < b.priority end
+            -- An unlearned source has no usable capacity estimate.  It is a
+            -- fallback, never evidence that the requested generation has
+            -- already been assigned.
+            local aKnown = (tonumber(a.capacity) or 0) > 0
+            local bKnown = (tonumber(b.capacity) or 0) > 0
+            if aKnown ~= bKnown then return aKnown end
             if a.capacity ~= b.capacity then return a.capacity > b.capacity end
             return tostring(a.unit.name) < tostring(b.unit.name)
         end)
@@ -2074,10 +2088,18 @@ function mainframe.run(config)
         end
         local remaining = plantRechargeActive and math.max(1,
             tonumber(powerDemand) or 0, rechargeTarget) or 0
+        local unknownFallbackAssigned = false
         for _, source in ipairs(sources) do
             if remaining > 0 then
-                local assigned = source.capacity > 0 and
+                local knownCapacity = (tonumber(source.capacity) or 0) > 0
+                -- Select at most one unlearned fallback.  Crucially, do not
+                -- consume the demand with it: later calibrated sources still
+                -- need to be dispatched to satisfy the recharge target.
+                local select = knownCapacity or not unknownFallbackAssigned
+                local assigned = knownCapacity and
                     math.min(remaining, source.capacity) or remaining
+                if not knownCapacity then unknownFallbackAssigned = true end
+                if select then
                 if source.kind == "turbine" then
                     source.unit.dispatchRequested = true
                     source.unit.dispatchMode = "GENERATING"
@@ -2086,8 +2108,10 @@ function mainframe.run(config)
                     source.unit.powerDispatchRequested = true
                     source.unit.powerDispatchTarget = assigned
                 end
-                remaining = source.capacity > 0 and
-                    math.max(0, remaining - source.capacity) or 0
+                end
+                if knownCapacity then
+                    remaining = math.max(0, remaining - source.capacity)
+                end
             end
         end
 
@@ -4839,6 +4863,7 @@ local function evaluatePower(memory, reactor, control, context)
     result.maximumPower = tonumber(profile.maximumPower)
     result.powerProduction = production
     result.targetPower = tonumber(context.powerDemand) or 0
+    result.dispatchRequested = wantedActive
     return result
 end
 
