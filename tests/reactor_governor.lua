@@ -954,6 +954,12 @@ do
         power_1 = { maximumPower = 1000 },
     }
     governor.evaluateAll(dispatchMemory, { first, second }, {}, dispatchControl,
+        { now = 0, powerReserve = 50, powerDemand = 0 })
+    equal(first.governor.recommendedActive, true,
+        "startup below the high threshold begins storage recharge")
+    equal(second.governor.recommendedActive, true,
+        "recharge service uses the calibrated power fleet")
+    governor.evaluateAll(dispatchMemory, { first, second }, {}, dispatchControl,
         { now = 1, powerReserve = 20, powerDemand = 1500 })
     equal(first.governor.recommendedActive, true,
         "low reserve dispatches the first calibrated power reactor")
@@ -965,6 +971,14 @@ do
         "full storage returns power reactors to standby")
     equal(second.governor.recommendedActive, false,
         "full storage removes excess fleet generation")
+    governor.evaluateAll(dispatchMemory, { first, second }, {}, dispatchControl,
+        { now = 3, powerReserve = 50, powerDemand = 0 })
+    equal(first.governor.recommendedActive, false,
+        "recharge remains off inside the low/high hysteresis band")
+    governor.evaluateAll(dispatchMemory, { first, second }, {}, dispatchControl,
+        { now = 4, powerReserve = 20, powerDemand = 0 })
+    equal(first.governor.recommendedActive, true,
+        "falling below the low threshold restarts recharge service")
 end
 
 do

@@ -2242,9 +2242,17 @@ function mainframe.run(config)
         local steamPrimeRequested = turbineGovernor.needsSteamPrime(
             governorMemory, turbines)
         local powerDemand = 0
+        local powerStored, powerCapacity = 0, 0
         for _, storage in ipairs(storages) do
             powerDemand = powerDemand + math.max(0, tonumber(storage.output) or 0)
+            if storage.telemetryOk ~= false and tonumber(storage.stored) and
+               tonumber(storage.capacity) and tonumber(storage.capacity) > 0 then
+                powerStored = powerStored + tonumber(storage.stored)
+                powerCapacity = powerCapacity + tonumber(storage.capacity)
+            end
         end
+        local combinedPowerReserve = powerCapacity > 0 and
+            powerStored / powerCapacity * 100 or nil
         local _, steamDemand = reactorGovernor.evaluateAll(reactorGovernorMemory,
             reactors, turbines, config.control, {
                 maintenance = maintenance or manualAuthority or authorityPaused,
@@ -2252,7 +2260,7 @@ function mainframe.run(config)
                 idConflicts = idConflicts,
                 now = now,
                 steamPrimeRequested = steamPrimeRequested,
-                powerReserve = minimumPowerReserve(),
+                powerReserve = combinedPowerReserve,
                 powerDemand = powerDemand,
             })
         for _, reactor in ipairs(reactors) do
@@ -5611,13 +5619,26 @@ function governor.evaluateAll(memory, reactors, turbines, control, context)
             (tonumber(bp.maximumPower) or math.huge)
     end)
     local reserve = tonumber(context and context.powerReserve)
-    local powerDemand = math.max(0, tonumber(context and context.powerDemand) or 0)
-    local wantedPower = reserve and reserve < (tonumber(control.storageHigh) or 85) and
-        powerDemand or 0
-    if reserve and reserve < (tonumber(control.storageLow) or 25) and wantedPower <= 0 and
-       #powerSources > 0 then
-        local firstProfile = control.powerReactorProfiles[tostring(powerSources[1].name)] or {}
-        wantedPower = tonumber(firstProfile.maximumPower) or 1
+    local storageLow = tonumber(control.storageLow) or 25
+    local storageHigh = tonumber(control.storageHigh) or 85
+    if reserve ~= nil then
+        if memory.powerRechargeActive == nil then
+            memory.powerRechargeActive = reserve < storageHigh
+        elseif reserve >= storageHigh then
+            memory.powerRechargeActive = false
+        elseif reserve < storageLow then
+            memory.powerRechargeActive = true
+        end
+    else
+        memory.powerRechargeActive = false
+    end
+    local wantedPower = 0
+    if memory.powerRechargeActive == true then
+        wantedPower = 0
+        for _, reactor in ipairs(powerSources) do
+            wantedPower = wantedPower +
+                (tonumber((control.powerReactorProfiles[tostring(reactor.name)] or {}).maximumPower) or 0)
+        end
     end
     local remainingPower = wantedPower
     for _, reactor in ipairs(powerSources) do

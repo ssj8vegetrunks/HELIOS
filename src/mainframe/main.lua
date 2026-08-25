@@ -299,9 +299,17 @@ function mainframe.run(config)
         local steamPrimeRequested = turbineGovernor.needsSteamPrime(
             governorMemory, turbines)
         local powerDemand = 0
+        local powerStored, powerCapacity = 0, 0
         for _, storage in ipairs(storages) do
             powerDemand = powerDemand + math.max(0, tonumber(storage.output) or 0)
+            if storage.telemetryOk ~= false and tonumber(storage.stored) and
+               tonumber(storage.capacity) and tonumber(storage.capacity) > 0 then
+                powerStored = powerStored + tonumber(storage.stored)
+                powerCapacity = powerCapacity + tonumber(storage.capacity)
+            end
         end
+        local combinedPowerReserve = powerCapacity > 0 and
+            powerStored / powerCapacity * 100 or nil
         local _, steamDemand = reactorGovernor.evaluateAll(reactorGovernorMemory,
             reactors, turbines, config.control, {
                 maintenance = maintenance or manualAuthority or authorityPaused,
@@ -309,7 +317,7 @@ function mainframe.run(config)
                 idConflicts = idConflicts,
                 now = now,
                 steamPrimeRequested = steamPrimeRequested,
-                powerReserve = minimumPowerReserve(),
+                powerReserve = combinedPowerReserve,
                 powerDemand = powerDemand,
             })
         for _, reactor in ipairs(reactors) do

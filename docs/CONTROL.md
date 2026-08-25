@@ -73,9 +73,11 @@ The mainframe runs a guarded reactor-fleet governor:
 - Newly discovered reactors are commissioned one at a time. Steam reactors
   learn against an independent test target even without turbine demand; power
   reactors record observed FE/t capability.
-- Calibrated power reactors are dispatched from external storage reserve and
-  draw telemetry. Full storage returns them to standby and pauses unfinished
-  power-reactor commissioning.
+- Calibrated power reactors recharge against the combined, capacity-weighted
+  external storage reserve. They start below the low threshold (or on startup
+  when below the high threshold), charge to the high threshold, then remain in
+  standby until reserve falls below the low threshold again. Full storage also
+  pauses unfinished power-reactor commissioning.
 - Steam demand is assigned across calibrated steam reactors by learned capacity.
 - HELIOS spreads each rod-equivalent setting across all fuel columns as evenly as possible.
 - A 25-rod setting of 0.26 equivalent becomes one rod at 98% insertion and 24 at 99%.
