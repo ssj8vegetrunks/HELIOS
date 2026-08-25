@@ -7,7 +7,13 @@ build and introduces the first versioned graphical UI boundary. Renderers now
 receive sanitized, serializable snapshots and may submit only documented
 command envelopes through guarded Core handlers. See
 [`docs/UI_API.md`](docs/UI_API.md). No graphical renderer or new actuator path
-is enabled yet; the finished text UI remains the dependable built-in fallback.
+is given actuator access; the finished text UI remains the dependable built-in
+fallback and exclusive manual-control interface.
+
+The first read-only graphical monitor is now available as the default mainframe
+view. It provides plant readiness, startup/calibration/error reporting, reactor
+output and fuel bars, a five-zone turbine RPM gauge, and storage capacity/fill/
+draw telemetry. See [`docs/GUI.md`](docs/GUI.md).
 
 HELIOS Core and its peripheral adapters are now independently versioned. The
 mainframe installer retrieves the official Module Pack from GitHub; remote

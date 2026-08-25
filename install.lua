@@ -457,6 +457,86 @@ end
 return display
 ]=],
 
+    ["core/gui.lua"] = [=[
+local gui = {}
+
+local function clamp(value, low, high)
+    value = tonumber(value) or 0
+    return math.max(low, math.min(high, value))
+end
+
+function gui.prepare()
+    term.setBackgroundColor(colors.black)
+    term.setTextColor(colors.white)
+    term.clear()
+    term.setCursorPos(1, 1)
+end
+
+function gui.text(x, y, value, foreground, background, width)
+    local screenWidth, screenHeight = term.getSize()
+    if y < 1 or y > screenHeight or x > screenWidth then return end
+    x = math.max(1, x)
+    local text = tostring(value or "")
+    width = math.max(0, math.min(tonumber(width) or #text, screenWidth - x + 1))
+    text = string.sub(text, 1, width)
+    if #text < width then text = text .. string.rep(" ", width - #text) end
+    term.setCursorPos(x, y)
+    term.setBackgroundColor(background or colors.black)
+    term.setTextColor(foreground or colors.white)
+    term.write(text)
+    term.setBackgroundColor(colors.black)
+    term.setTextColor(colors.white)
+end
+
+function gui.button(x, y, label, foreground, background)
+    local text = "[" .. tostring(label) .. "]"
+    gui.text(x, y, text, foreground, background)
+    return { x1 = x, x2 = x + #text - 1, y = y }
+end
+
+function gui.hit(button, x, y)
+    return button and x and y and y == button.y and x >= button.x1 and x <= button.x2
+end
+
+function gui.progress(x, y, width, percent, foreground, background)
+    width = math.max(1, math.floor(tonumber(width) or 1))
+    percent = clamp(percent, 0, 100)
+    local filled = math.floor(width * percent / 100 + 0.5)
+    gui.text(x, y, string.rep(" ", filled), colors.white, foreground or colors.lime)
+    gui.text(x + filled, y, string.rep(" ", width - filled), colors.white,
+        background or colors.gray)
+    return filled
+end
+
+function gui.rpmGauge(x, y, width, rpm)
+    width = math.max(10, math.floor(tonumber(width) or 10))
+    local zones = {
+        { limit = 800, colour = colors.orange },
+        { limit = 1000, colour = colors.lime },
+        { limit = 1700, colour = colors.orange },
+        { limit = 1900, colour = colors.lime },
+        { limit = 2100, colour = colors.red },
+    }
+    local previous, used = 0, 0
+    for index, zone in ipairs(zones) do
+        local segment
+        if index == #zones then
+            segment = width - used
+        else
+            segment = math.max(1, math.floor(width * (zone.limit - previous) / 2100))
+        end
+        gui.text(x + used, y, string.rep(" ", segment), colors.white, zone.colour)
+        used = used + segment
+        previous = zone.limit
+    end
+    local marker = math.floor(clamp(rpm, 0, 2100) / 2100 * (width - 1))
+    gui.text(x + marker, y, "^", colors.white, colors.black)
+    return marker
+end
+
+return gui
+]=],
+
     ["core/module_loader.lua"] = [=[
 -- @section MODULE PACK MANIFEST
 local loader = {}
@@ -1348,6 +1428,7 @@ function mainframe.run(config)
     display.start(config)
     local ui = dofile("/helios/core/ui.lua")
     ui.setVersion(config.version)
+    local gui = dofile("/helios/core/gui.lua")
     local uiContract = dofile("/helios/core/ui_contract.lua")
     local configStore = dofile("/helios/core/config.lua")
     local moduleLoader = dofile("/helios/core/module_loader.lua")
@@ -3233,6 +3314,237 @@ function mainframe.run(config)
         end
     end
 
+    -- @section READ-ONLY GRAPHICAL INTERFACE
+    local function graphicalView()
+        local page = "overview"
+        local selected = { reactors = 1, turbines = 1, storage = 1 }
+        local buttons = {}
+
+        local function readiness()
+            if #idConflicts > 0 then return "FAULT", "DUPLICATE COMPUTER ID", colors.red end
+            local alarmLevel = currentAlarm and tonumber(currentAlarm.level) or nil
+            if currentAlarm and alarmLevel and alarmLevel >= 3 then
+                return "FAULT", currentAlarm.message, colors.red
+            end
+            if currentAlarm then return "WARNING", currentAlarm.message, colors.orange end
+            for _, reactor in ipairs(reactors) do
+                local state = string.upper(tostring(reactor.governor and reactor.governor.state or ""))
+                if string.find(state, "CALIBRAT", 1, true) then
+                    return "CALIBRATING", deviceName(reactor.name), colors.orange
+                end
+            end
+            for _, turbine in ipairs(turbines) do
+                local state = string.upper(tostring(turbine.governor and turbine.governor.state or ""))
+                if string.find(state, "CALIBRAT", 1, true) or
+                   string.find(state, "SPOOL", 1, true) or
+                   string.find(state, "PRIM", 1, true) then
+                    return "CALIBRATING", deviceName(turbine.name) .. " - " .. state, colors.orange
+                end
+            end
+            if #reactors == 0 and #turbines == 0 and #storages == 0 then
+                return "STARTING", "WAITING FOR PLANT TELEMETRY", colors.orange
+            end
+            local controlText = select(1, controlStatus())
+            if string.find(controlText, "WAITING", 1, true) then
+                return "STARTING", controlText, colors.orange
+            end
+            return "READY", controlText, colors.lime
+        end
+
+        local function header(title)
+            gui.prepare()
+            local width = select(1, term.getSize())
+            gui.text(1, 1, "HELIOS // " .. title, colors.yellow)
+            local version = "v" .. tostring(config.version)
+            gui.text(math.max(1, width - #version + 1), 1, version, colors.yellow)
+            local state, detail, colour = readiness()
+            gui.text(1, 2, " " .. state .. " ", colors.black, colour)
+            gui.text(#state + 4, 2, detail, colour, colors.black,
+                math.max(0, width - #state - 3))
+            buttons = {}
+            local x = 1
+            buttons.overview = gui.button(x, 4, "HOME", colors.white,
+                page == "overview" and colors.gray or colors.black)
+            x = buttons.overview.x2 + 2
+            buttons.reactors = gui.button(x, 4, "REACTORS", colors.red,
+                page == "reactors" and colors.gray or colors.black)
+            x = buttons.reactors.x2 + 2
+            buttons.turbines = gui.button(x, 4, "TURBINES", colors.cyan,
+                page == "turbines" and colors.gray or colors.black)
+            x = buttons.turbines.x2 + 2
+            buttons.storage = gui.button(x, 4, "POWER", colors.yellow,
+                page == "storage" and colors.gray or colors.black)
+            buttons.advanced = gui.button(1, select(2, term.getSize()), "ADVANCED",
+                colors.white, colors.gray)
+        end
+
+        local function overview()
+            header("PLANT OVERVIEW")
+            local width = select(1, term.getSize())
+            gui.text(1, 6, "SYSTEM READINESS", colors.lightGray)
+            local state, detail, colour = readiness()
+            gui.text(1, 7, state, colour)
+            gui.text(1, 8, detail, colors.white, colors.black, width)
+            gui.text(1, 10, ("REACTORS  %d   TURBINES  %d   STORAGE  %d"):format(
+                #reactors, #turbines, #storages), colors.cyan)
+            local reserve = minimumPowerReserve()
+            gui.text(1, 12, "POWER RESERVE", colors.lightGray)
+            gui.progress(1, 13, math.max(10, width - 8), reserve or 0,
+                reserve and reserve > 20 and colors.lime or colors.orange, colors.gray)
+            gui.text(math.max(1, width - 6), 13,
+                reserve and ("%5.1f%%"):format(reserve) or "  N/A", colors.white)
+            gui.text(1, 15, "Graphical monitoring only", colors.gray)
+            gui.text(1, 16, "Manual control: ADVANCED text interface", colors.gray)
+        end
+
+        local function reactorPage()
+            header("REACTORS")
+            local width = select(1, term.getSize())
+            if #reactors == 0 then
+                gui.text(1, 7, "NO REACTORS FOUND", colors.orange)
+                return
+            end
+            selected.reactors = math.max(1, math.min(selected.reactors, #reactors))
+            local reactor = reactors[selected.reactors]
+            local output = reactor.mode == "steam" and reactor.steamProduction or reactor.energyProduction
+            local target = reactor.mode == "steam" and
+                tonumber(reactor.governor and reactor.governor.targetSteam) or nil
+            local outputPercent = target and target > 0 and math.min(100, (tonumber(output) or 0) / target * 100) or
+                tonumber(reactor.energyPercent) or 0
+            gui.text(1, 6, ("%d/%d  %s"):format(selected.reactors, #reactors,
+                deviceName(reactor.name)), colors.cyan, colors.black, width)
+            gui.text(1, 7, ("TYPE %-8s  %s"):format(string.upper(reactor.mode or "unknown"),
+                reactor.active == true and "ACTIVE" or "OFFLINE"),
+                reactor.active == true and colors.lime or colors.orange)
+            gui.text(1, 9, "OUTPUT", colors.lightGray)
+            gui.progress(1, 10, math.max(10, width - 10), outputPercent,
+                reactor.active == true and colors.lime or colors.orange, colors.gray)
+            gui.text(math.max(1, width - 8), 10,
+                output and ("%.0f"):format(output) or "N/A", colors.white)
+            gui.text(1, 12, "FUEL", colors.lightGray)
+            gui.progress(1, 13, math.max(10, width - 10), reactor.fuelPercent or 0,
+                (reactor.fuelPercent or 0) < 20 and colors.orange or colors.lime, colors.gray)
+            gui.text(math.max(1, width - 8), 13,
+                reactor.fuelPercent and ("%6.1f%%"):format(reactor.fuelPercent) or "   N/A", colors.white)
+            gui.text(1, 15, "[<] PREVIOUS     NEXT [>]", colors.cyan)
+        end
+
+        local function turbinePage()
+            header("TURBINES")
+            local width = select(1, term.getSize())
+            if #turbines == 0 then
+                gui.text(1, 7, "NO TURBINES FOUND", colors.orange)
+                return
+            end
+            selected.turbines = math.max(1, math.min(selected.turbines, #turbines))
+            local turbine = turbines[selected.turbines]
+            local rpm = tonumber(turbine.rotorSpeed) or 0
+            gui.text(1, 6, ("%d/%d  %s"):format(selected.turbines, #turbines,
+                deviceName(turbine.name)), colors.cyan, colors.black, width)
+            gui.text(1, 7, turbine.active == true and "ACTIVE" or "OFFLINE",
+                turbine.active == true and colors.lime or colors.orange)
+            gui.text(1, 9, ("ROTOR %.1f RPM"):format(rpm), rpm >= 1900 and colors.red or colors.white)
+            gui.rpmGauge(1, 10, math.max(20, width - 1), rpm)
+            gui.text(1, 11, "ORANGE | 900 | ORANGE | 1800 | RED", colors.lightGray)
+            local plan = turbine.governor or {}
+            gui.text(1, 13, "STATE " .. tostring(plan.state or "WAITING"), colors.white)
+            gui.text(1, 14, "OUTPUT " .. powerFormat.power(turbine.energyProduction,
+                config.power, true), colors.cyan)
+            gui.text(1, 16, "[<] PREVIOUS     NEXT [>]", colors.cyan)
+        end
+
+        local function storagePage()
+            header("POWER STORAGE")
+            local width = select(1, term.getSize())
+            if #storages == 0 then
+                gui.text(1, 7, "NO SUPPORTED STORAGE FOUND", colors.orange)
+                return
+            end
+            selected.storage = math.max(1, math.min(selected.storage, #storages))
+            local storage = storages[selected.storage]
+            gui.text(1, 6, ("%d/%d  %s"):format(selected.storage, #storages,
+                deviceName(storage.name)), colors.cyan, colors.black, width)
+            gui.text(1, 8, "CAPACITY", colors.lightGray)
+            gui.progress(1, 9, math.max(10, width - 10), storage.percent or 0,
+                (storage.percent or 0) < 20 and colors.orange or colors.lime, colors.gray)
+            gui.text(math.max(1, width - 8), 9,
+                storage.percent and ("%6.1f%%"):format(storage.percent) or "   N/A", colors.white)
+            gui.text(1, 11, "STORED  " .. powerFormat.power(storage.stored,
+                config.power, false), colors.white)
+            gui.text(1, 12, "FILL    " .. powerFormat.power(storage.input,
+                config.power, true), colors.lime)
+            gui.text(1, 13, "DRAW    " .. powerFormat.power(storage.output,
+                config.power, true), colors.orange)
+            gui.text(1, 14, "STATE   " .. tostring(storage.state or "UNKNOWN"), colors.cyan)
+            gui.text(1, 16, "[<] PREVIOUS     NEXT [>]", colors.cyan)
+        end
+
+        local function draw()
+            if page == "reactors" then reactorPage()
+            elseif page == "turbines" then turbinePage()
+            elseif page == "storage" then storagePage()
+            else overview() end
+        end
+
+        while true do
+            draw()
+            local event, value, message, protocol = os.pullEvent()
+            local touchX, touchY = ui.eventPoint(event, value, message, protocol)
+            if event == "key" and value == keys.q then return "quit"
+            elseif event == "key" and value == keys.v then page = "reactors"
+            elseif event == "key" and value == keys.g then page = "turbines"
+            elseif event == "key" and value == keys.e then page = "storage"
+            elseif event == "key" and value == keys.a then return "advanced"
+            elseif gui.hit(buttons.overview, touchX, touchY) then page = "overview"
+            elseif gui.hit(buttons.reactors, touchX, touchY) then page = "reactors"
+            elseif gui.hit(buttons.turbines, touchX, touchY) then page = "turbines"
+            elseif gui.hit(buttons.storage, touchX, touchY) then page = "storage"
+            elseif gui.hit(buttons.advanced, touchX, touchY) then return "advanced"
+            elseif event == "key" and value == keys.left then
+                if page == "reactors" and #reactors > 0 then
+                    selected.reactors = ((selected.reactors - 2) % #reactors) + 1
+                elseif page == "turbines" and #turbines > 0 then
+                    selected.turbines = ((selected.turbines - 2) % #turbines) + 1
+                elseif page == "storage" and #storages > 0 then
+                    selected.storage = ((selected.storage - 2) % #storages) + 1
+                end
+            elseif event == "key" and value == keys.right then
+                if page == "reactors" and #reactors > 0 then
+                    selected.reactors = (selected.reactors % #reactors) + 1
+                elseif page == "turbines" and #turbines > 0 then
+                    selected.turbines = (selected.turbines % #turbines) + 1
+                elseif page == "storage" and #storages > 0 then
+                    selected.storage = (selected.storage % #storages) + 1
+                end
+            elseif event == "mouse_click" or event == "monitor_touch" then
+                if touchY == 15 and page == "reactors" and #reactors > 0 then
+                    selected.reactors = touchX < 15 and ((selected.reactors - 2) % #reactors) + 1 or
+                        (selected.reactors % #reactors) + 1
+                elseif touchY == 16 and page == "turbines" and #turbines > 0 then
+                    selected.turbines = touchX < 15 and ((selected.turbines - 2) % #turbines) + 1 or
+                        (selected.turbines % #turbines) + 1
+                elseif touchY == 16 and page == "storage" and #storages > 0 then
+                    selected.storage = touchX < 15 and ((selected.storage - 2) % #storages) + 1 or
+                        (selected.storage % #storages) + 1
+                end
+            elseif event == "rednet_message" then
+                handleNetwork(value, message, protocol)
+            elseif event == "peripheral" or event == "peripheral_detach" then
+                if maintenance or config.discovery.defaultMode == "manual" then registryStale = true else rescan() end
+            elseif event == "timer" then
+                if maintenance and value == maintenanceTimer then
+                    stopMaintenance()
+                elseif maintenance and value == countdownTimer then
+                    countdownTimer = os.startTimer(1)
+                elseif value == reactorTimer then
+                    pollReactors()
+                    broadcastSnapshots()
+                    reactorTimer = os.startTimer(1)
+                end
+            end
+        end
+    end
+
     local function openFacility(route)
         while route and route ~= "dashboard" do
             if route == "reactors" then
@@ -3265,13 +3577,15 @@ function mainframe.run(config)
     rescan(true)
     pollReactors()
     reactorTimer = os.startTimer(1)
-    render()
-    while true do
+
+    local function advancedDashboard()
+        render()
+        while true do
         local event, value, x, y = os.pullEvent()
         if event == "key" and value == keys.q then
-            ui.prepare()
-            display.stop()
-            return
+            return "quit"
+        elseif event == "key" and value == keys.b then
+            return "graphical"
         elseif event == "key" and value == keys.r then
             rescan(true)
             render()
@@ -3331,6 +3645,22 @@ function mainframe.run(config)
             end
         elseif event == "term_resize" then
             render()
+        end
+        end
+    end
+
+    while true do
+        local result = graphicalView()
+        if result == "quit" then
+            ui.prepare()
+            display.stop()
+            return
+        end
+        result = advancedDashboard()
+        if result == "quit" then
+            ui.prepare()
+            display.stop()
+            return
         end
     end
 end
