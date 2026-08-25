@@ -49,6 +49,10 @@ function config.load()
         math.floor(tonumber(loaded.control.overspeedSamples) or 3))
     loaded.control.storageLow = tonumber(loaded.control.storageLow) or 25
     loaded.control.storageHigh = tonumber(loaded.control.storageHigh) or 85
+    loaded.control.assistedIdleRpmRatio = math.max(0.25, math.min(0.95,
+        tonumber(loaded.control.assistedIdleRpmRatio) or 0.75))
+    loaded.control.assistedIdleFlow = math.max(1,
+        tonumber(loaded.control.assistedIdleFlow) or 250)
     loaded.control.maxRodStep = math.max(1, math.min(10,
         tonumber(loaded.control.maxRodStep) or 5))
     loaded.control.reactorAdjustmentInterval = math.max(2,

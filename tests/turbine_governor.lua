@@ -530,4 +530,40 @@ do
     equal(result.actuatorState, "PAUSED", "maintenance actuator state")
 end
 
+do
+    local memory = governor.new()
+    setProfile("coasting", 1800, 1800, 1500)
+    local plan = governor.evaluate(memory, turbine("coasting", 1750, 900), control,
+        { now = 1, dispatchMode = "COASTING" })
+    equal(plan.state, "COASTING", "undispatched turbine coasts")
+    equal(plan.recommendedFlow, 0, "coasting closes steam")
+    equal(plan.recommendedInductor, false, "coasting disengages the inductor")
+end
+
+do
+    local memory = governor.new()
+    setProfile("warm", 1800, 1800, 1500)
+    control.turbineProfiles.warm.assistedIdle = true
+    local hold = governor.evaluate(memory, turbine("warm", 1500, 0,
+        { inductorEngaged = false }), control,
+        { now = 1, dispatchMode = "ASSISTED IDLE" })
+    equal(hold.state, "ASSISTED IDLE", "warm reserve coasts above its idle floor")
+    local boost = governor.evaluate(memory, turbine("warm", 1200, 0,
+        { inductorEngaged = false }), control,
+        { now = 2, dispatchMode = "ASSISTED IDLE" })
+    equal(boost.state, "IDLE BOOST", "warm reserve receives a steam pulse below its floor")
+    assert(boost.recommendedFlow > 0, "idle boost opens a limited steam pulse")
+end
+
+do
+    local memory = governor.new()
+    setProfile("spool", 1800, 1800, 1500)
+    local plan = governor.evaluate(memory, turbine("spool", 1000, 0,
+        { inductorEngaged = false }), control,
+        { now = 1, dispatchMode = "GENERATING" })
+    equal(plan.state, "SPOOLING", "dispatched cold turbine spools unloaded")
+    equal(plan.recommendedInductor, false, "spooling preserves an unloaded rotor")
+    equal(plan.recommendedFlow, 1500, "spooling restores learned steam flow")
+end
+
 print("turbine governor tests passed")

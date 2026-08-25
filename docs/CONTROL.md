@@ -62,7 +62,8 @@ The Power Control screen now runs a guarded automatic turbine governor.
 
 The mainframe runs a guarded reactor-fleet governor:
 
-- Trusted demand is the sum of configured intake limits for all active turbines.
+- Trusted demand is the sum of requested intake for dispatched turbines, plus
+  any limited assisted-idle pulse currently needed to preserve warm reserve.
 - Active steam production targets 15% above trusted turbine demand so reactor,
   pipe, reservoir, and turbine buffers stay charged. Full-buffer overflow is
   exhausted by the loop rather than causing HELIOS to cancel that reserve.
@@ -79,6 +80,15 @@ The mainframe runs a guarded reactor-fleet governor:
   standby until reserve falls below the low threshold again. Full storage also
   pauses unfinished power-reactor commissioning.
 - Steam demand is assigned across calibrated steam reactors by learned capacity.
+- A plant dispatcher first decides whether storage requires recharge. It stages
+  only enough learned generation capacity for the measured draw, preferring
+  steam-assisted idle turbines, then already-warm equipment, before cold
+  turbines. Undispatched turbines coast with steam closed and inductors
+  disengaged.
+- Each calibrated turbine has a persistent **Steam-assisted idle** option.
+  Enabled turbines remain as warm reserve: HELIOS sends a limited steam pulse
+  only after rotor speed falls below its standby floor; disabled turbines simply
+  coast until a large demand selects them for unloaded spooling.
 - HELIOS spreads each rod-equivalent setting across all fuel columns as evenly as possible.
 - A 25-rod setting of 0.26 equivalent becomes one rod at 98% insertion and 24 at 99%.
 - A new or unbalanced bank first moves to zero exposure and cools before learning begins.

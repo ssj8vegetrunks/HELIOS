@@ -270,7 +270,9 @@ function governor.steamDemand(turbines, control)
     control = control or {}
     local total, active = 0, 0
     for _, turbine in ipairs(turbines or {}) do
-        if turbine.active == true then
+        if turbine.active == true and
+           (turbine.dispatchRequested == nil or turbine.dispatchRequested == true or
+            (tonumber(turbine.requestedSteam) or 0) > 0) then
             if turbine.error then
                 return nil, active, "Active turbine telemetry is unavailable"
             end
@@ -278,7 +280,8 @@ function governor.steamDemand(turbines, control)
                 return nil, active, "Active turbine telemetry is untrusted"
             end
             local profile = (control.turbineProfiles or {})[tostring(turbine.name)]
-            local requested = profile and tonumber(profile.flowLimit) or
+            local requested = tonumber(turbine.requestedSteam) or
+                (profile and tonumber(profile.flowLimit)) or
                 tonumber(turbine.flowRateLimit) or tonumber(turbine.flowRateMax)
             if requested == nil then
                 return nil, active, "Active turbine intake setting is unavailable"
@@ -1182,21 +1185,31 @@ function governor.evaluateAll(memory, reactors, turbines, control, context)
         memory.powerRechargeActive = false
     end
     local wantedPower = 0
-    if memory.powerRechargeActive == true then
+    if context and context.plantDispatch == true then
+        for _, reactor in ipairs(powerSources) do
+            local name = tostring(reactor.name)
+            if reactor.powerDispatchRequested == true then
+                powerDispatch[name] = true
+                powerAssignment[name] = tonumber(reactor.powerDispatchTarget) or 0
+            end
+        end
+    elseif memory.powerRechargeActive == true then
         wantedPower = 0
         for _, reactor in ipairs(powerSources) do
             wantedPower = wantedPower +
                 (tonumber((control.powerReactorProfiles[tostring(reactor.name)] or {}).maximumPower) or 0)
         end
     end
-    local remainingPower = wantedPower
-    for _, reactor in ipairs(powerSources) do
-        local maximum = tonumber((control.powerReactorProfiles[tostring(reactor.name)] or {}).maximumPower) or 0
-        if remainingPower > 0 then
-            local name = tostring(reactor.name)
-            powerDispatch[name] = true
-            powerAssignment[name] = math.min(remainingPower, maximum > 0 and maximum or remainingPower)
-            remainingPower = math.max(0, remainingPower - maximum)
+    if not (context and context.plantDispatch == true) then
+        local remainingPower = wantedPower
+        for _, reactor in ipairs(powerSources) do
+            local maximum = tonumber((control.powerReactorProfiles[tostring(reactor.name)] or {}).maximumPower) or 0
+            if remainingPower > 0 then
+                local name = tostring(reactor.name)
+                powerDispatch[name] = true
+                powerAssignment[name] = math.min(remainingPower, maximum > 0 and maximum or remainingPower)
+                remainingPower = math.max(0, remainingPower - maximum)
+            end
         end
     end
 

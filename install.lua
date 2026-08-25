@@ -274,6 +274,10 @@ function config.load()
         math.floor(tonumber(loaded.control.overspeedSamples) or 3))
     loaded.control.storageLow = tonumber(loaded.control.storageLow) or 25
     loaded.control.storageHigh = tonumber(loaded.control.storageHigh) or 85
+    loaded.control.assistedIdleRpmRatio = math.max(0.25, math.min(0.95,
+        tonumber(loaded.control.assistedIdleRpmRatio) or 0.75))
+    loaded.control.assistedIdleFlow = math.max(1,
+        tonumber(loaded.control.assistedIdleFlow) or 250)
     loaded.control.maxRodStep = math.max(1, math.min(10,
         tonumber(loaded.control.maxRodStep) or 5))
     loaded.control.reactorAdjustmentInterval = math.max(2,
@@ -1994,10 +1998,103 @@ function mainframe.run(config)
     local dashboardButtons = {}
     local governorMemory = turbineGovernor.new()
     local reactorGovernorMemory = reactorGovernor.new()
+    local plantRechargeActive
     local manualNotice
     local manualSafetyState = manualControl.newSafetyState()
     local minimumPowerReserve
     local returnToAutomatic
+
+    local function planGeneration(powerReserve, powerDemand)
+        local low = tonumber(config.control.storageLow) or 25
+        local high = tonumber(config.control.storageHigh) or 85
+        if powerReserve == nil then
+            plantRechargeActive = false
+        elseif plantRechargeActive == nil then
+            plantRechargeActive = powerReserve < high
+        elseif powerReserve >= high then
+            plantRechargeActive = false
+        elseif powerReserve < low then
+            plantRechargeActive = true
+        end
+
+        local sources = {}
+        for _, turbine in ipairs(turbines) do
+            turbine.dispatchRequested = false
+            turbine.dispatchMode = "COASTING"
+            turbine.requestedSteam = 0
+            local profile = (config.control.turbineProfiles or {})[tostring(turbine.name)]
+            if type(profile) == "table" and profile.calibrated == true and
+               turbine.error == nil then
+                local observed = tonumber(turbine.energyProduction) or 0
+                if observed > (tonumber(profile.maximumPower) or 0) then
+                    profile.maximumPower = observed
+                    governorMemory.profileDirty = true
+                end
+                local assisted = profile.assistedIdle == true
+                local target = tonumber(profile.targetRpm) or config.control.highBandRpm
+                local warm = (tonumber(turbine.rotorSpeed) or 0) >=
+                    target * (tonumber(config.control.assistedIdleRpmRatio) or 0.75)
+                sources[#sources + 1] = {
+                    kind = "turbine", unit = turbine, profile = profile,
+                    capacity = tonumber(profile.maximumPower) or 0,
+                    priority = assisted and 1 or warm and 2 or 4,
+                }
+            end
+        end
+        for _, reactor in ipairs(reactors) do
+            reactor.powerDispatchRequested = false
+            reactor.powerDispatchTarget = 0
+            local profile = (config.control.powerReactorProfiles or {})[tostring(reactor.name)]
+            if reactor.mode == "power" and type(profile) == "table" and
+               reactor.error == nil then
+                sources[#sources + 1] = {
+                    kind = "reactor", unit = reactor, profile = profile,
+                    capacity = tonumber(profile.maximumPower) or 0,
+                    priority = reactor.active == true and 2 or 3,
+                }
+            end
+        end
+        table.sort(sources, function(a, b)
+            if a.priority ~= b.priority then return a.priority < b.priority end
+            if a.capacity ~= b.capacity then return a.capacity > b.capacity end
+            return tostring(a.unit.name) < tostring(b.unit.name)
+        end)
+
+        local remaining = plantRechargeActive and
+            math.max(1, tonumber(powerDemand) or 0) or 0
+        for _, source in ipairs(sources) do
+            if remaining > 0 then
+                local assigned = source.capacity > 0 and
+                    math.min(remaining, source.capacity) or remaining
+                if source.kind == "turbine" then
+                    source.unit.dispatchRequested = true
+                    source.unit.dispatchMode = "GENERATING"
+                    source.unit.requestedSteam = tonumber(source.profile.flowLimit) or 0
+                else
+                    source.unit.powerDispatchRequested = true
+                    source.unit.powerDispatchTarget = assigned
+                end
+                remaining = source.capacity > 0 and
+                    math.max(0, remaining - source.capacity) or 0
+            end
+        end
+
+        for _, turbine in ipairs(turbines) do
+            local profile = (config.control.turbineProfiles or {})[tostring(turbine.name)]
+            if turbine.dispatchRequested ~= true and type(profile) == "table" and
+               profile.assistedIdle == true then
+                local target = tonumber(profile.targetRpm) or config.control.highBandRpm
+                local floor = target * (tonumber(config.control.assistedIdleRpmRatio) or 0.75)
+                turbine.dispatchMode = "ASSISTED IDLE"
+                if (tonumber(turbine.rotorSpeed) or 0) < floor then
+                    turbine.requestedSteam = math.min(
+                        tonumber(profile.flowLimit) or math.huge,
+                        tonumber(config.control.assistedIdleFlow) or 250)
+                end
+            end
+        end
+        return plantRechargeActive == true
+    end
 
     local timeoutChoices = { 300, 900, 1800, 3600 }
 
@@ -2253,6 +2350,7 @@ function mainframe.run(config)
         end
         local combinedPowerReserve = powerCapacity > 0 and
             powerStored / powerCapacity * 100 or nil
+        local generationNeeded = planGeneration(combinedPowerReserve, powerDemand)
         local _, steamDemand = reactorGovernor.evaluateAll(reactorGovernorMemory,
             reactors, turbines, config.control, {
                 maintenance = maintenance or manualAuthority or authorityPaused,
@@ -2262,6 +2360,8 @@ function mainframe.run(config)
                 steamPrimeRequested = steamPrimeRequested,
                 powerReserve = combinedPowerReserve,
                 powerDemand = powerDemand,
+                plantDispatch = true,
+                generationNeeded = generationNeeded,
             })
         for _, reactor in ipairs(reactors) do
             if reactor.governor and reactor.governor.calibrationCompleted == true then
@@ -2290,6 +2390,7 @@ function mainframe.run(config)
             steamSourceReady = steamSource.ready,
             steamSourceReason = steamSource.reason,
             steamSourceBufferPercent = steamSource.bufferPercent,
+            generationNeeded = generationNeeded,
         })
         if turbineGovernor.consumeProfileChanges(governorMemory) then
             configStore.save(config)
@@ -3731,7 +3832,7 @@ function mainframe.run(config)
     -- @section TURBINE VIEW
     local function turbineView()
         local selected = 1
-        local previousButton, nextButton, backButton
+        local previousButton, nextButton, backButton, idleButton
         local navigationButtons = {}
 
         local function formatValue(value, suffix)
@@ -3744,7 +3845,7 @@ function mainframe.run(config)
             if #turbines == 0 then
                 ui.status("Status", "NO TURBINES FOUND", colors.orange)
                 print("")
-                previousButton, nextButton = nil, nil
+                previousButton, nextButton, idleButton = nil, nil, nil
                 backButton = ui.button("BACK", colors.cyan)
                 return
             end
@@ -3774,6 +3875,15 @@ function mainframe.run(config)
                 ui.status("Tanks in / out", formatValue(turbine.inputPercent, "%") .. " / " ..
                     formatValue(turbine.outputPercent, "%"))
                 ui.status("Inductor", turbine.inductorEngaged == true and "ENGAGED" or turbine.inductorEngaged == false and "DISENGAGED" or "N/A")
+                local profile = (config.control.turbineProfiles or {})[tostring(turbine.name)]
+                if type(profile) == "table" and profile.calibrated == true then
+                    idleButton = ui.button(profile.assistedIdle == true and
+                        "STEAM-ASSISTED IDLE: ENABLED" or
+                        "STEAM-ASSISTED IDLE: DISABLED",
+                        profile.assistedIdle == true and colors.lime or colors.gray)
+                else
+                    idleButton = nil
+                end
             end
             print("")
             previousButton = ui.inlineButton("< PREVIOUS", colors.cyan)
@@ -3804,6 +3914,13 @@ function mainframe.run(config)
                 selected = ((selected - 2) % #turbines) + 1
             elseif ui.hit(nextButton, touchX, touchY) and #turbines > 0 then
                 selected = (selected % #turbines) + 1
+            elseif ui.hit(idleButton, touchX, touchY) and #turbines > 0 then
+                local name = tostring(turbines[selected].name)
+                local profile = (config.control.turbineProfiles or {})[name]
+                if type(profile) == "table" and profile.calibrated == true then
+                    profile.assistedIdle = profile.assistedIdle ~= true
+                    configStore.save(config)
+                end
             elseif ui.hit(navigationButtons.reactors, touchX, touchY) then
                 return "reactors"
             elseif ui.hit(navigationButtons.turbines, touchX, touchY) then
@@ -4721,7 +4838,9 @@ function governor.steamDemand(turbines, control)
     control = control or {}
     local total, active = 0, 0
     for _, turbine in ipairs(turbines or {}) do
-        if turbine.active == true then
+        if turbine.active == true and
+           (turbine.dispatchRequested == nil or turbine.dispatchRequested == true or
+            (tonumber(turbine.requestedSteam) or 0) > 0) then
             if turbine.error then
                 return nil, active, "Active turbine telemetry is unavailable"
             end
@@ -4729,7 +4848,8 @@ function governor.steamDemand(turbines, control)
                 return nil, active, "Active turbine telemetry is untrusted"
             end
             local profile = (control.turbineProfiles or {})[tostring(turbine.name)]
-            local requested = profile and tonumber(profile.flowLimit) or
+            local requested = tonumber(turbine.requestedSteam) or
+                (profile and tonumber(profile.flowLimit)) or
                 tonumber(turbine.flowRateLimit) or tonumber(turbine.flowRateMax)
             if requested == nil then
                 return nil, active, "Active turbine intake setting is unavailable"
@@ -5633,21 +5753,31 @@ function governor.evaluateAll(memory, reactors, turbines, control, context)
         memory.powerRechargeActive = false
     end
     local wantedPower = 0
-    if memory.powerRechargeActive == true then
+    if context and context.plantDispatch == true then
+        for _, reactor in ipairs(powerSources) do
+            local name = tostring(reactor.name)
+            if reactor.powerDispatchRequested == true then
+                powerDispatch[name] = true
+                powerAssignment[name] = tonumber(reactor.powerDispatchTarget) or 0
+            end
+        end
+    elseif memory.powerRechargeActive == true then
         wantedPower = 0
         for _, reactor in ipairs(powerSources) do
             wantedPower = wantedPower +
                 (tonumber((control.powerReactorProfiles[tostring(reactor.name)] or {}).maximumPower) or 0)
         end
     end
-    local remainingPower = wantedPower
-    for _, reactor in ipairs(powerSources) do
-        local maximum = tonumber((control.powerReactorProfiles[tostring(reactor.name)] or {}).maximumPower) or 0
-        if remainingPower > 0 then
-            local name = tostring(reactor.name)
-            powerDispatch[name] = true
-            powerAssignment[name] = math.min(remainingPower, maximum > 0 and maximum or remainingPower)
-            remainingPower = math.max(0, remainingPower - maximum)
+    if not (context and context.plantDispatch == true) then
+        local remainingPower = wantedPower
+        for _, reactor in ipairs(powerSources) do
+            local maximum = tonumber((control.powerReactorProfiles[tostring(reactor.name)] or {}).maximumPower) or 0
+            if remainingPower > 0 then
+                local name = tostring(reactor.name)
+                powerDispatch[name] = true
+                powerAssignment[name] = math.min(remainingPower, maximum > 0 and maximum or remainingPower)
+                remainingPower = math.max(0, remainingPower - maximum)
+            end
         end
     end
 
@@ -5844,11 +5974,14 @@ local function saveProfile(memory, control, name, learnedRpm, learnedFlow)
     local target = math.abs(learnedRpm - lowBand) <= math.abs(learnedRpm - highBand)
         and lowBand or highBand
     control.turbineProfiles = control.turbineProfiles or {}
+    local existing = control.turbineProfiles[name] or {}
     control.turbineProfiles[name] = {
         targetRpm = target,
         learnedRpm = learnedRpm,
         flowLimit = learnedFlow and round(learnedFlow) or nil,
         calibrated = true,
+        assistedIdle = existing.assistedIdle == true,
+        maximumPower = tonumber(existing.maximumPower),
     }
     memory.profileDirty = true
     return control.turbineProfiles[name]
@@ -5954,7 +6087,10 @@ function governor.evaluate(memory, turbine, control, context)
     elseif turbine.error then
         result = hold("NO TRUSTED DATA", tostring(turbine.error), false)
     elseif turbine.active == false then
-        if previous.startRequested == true then
+        local dispatchMode = tostring(context.dispatchMode or "COASTING")
+        local shouldStart = profile == nil or dispatchMode == "GENERATING" or
+            dispatchMode == "ASSISTED IDLE"
+        if shouldStart then
             result = {
                 mode = "automatic",
                 state = "STARTING",
@@ -5967,7 +6103,8 @@ function governor.evaluate(memory, turbine, control, context)
                 actionSamples = 1,
             }
         else
-            result = hold("OFFLINE", "Turbine is not active")
+            result = hold("OFFLINE", shouldStart and "Turbine is not active" or
+                "No plant generation or assisted-idle request")
         end
     elseif turbine.active ~= true then
         result = hold("NO STATE DATA", "Turbine active-state telemetry is unavailable", false)
@@ -6490,6 +6627,29 @@ function governor.evaluate(memory, turbine, control, context)
                 action = "OBSERVE 900 BAND"
                 reason = "Watching the fallback RPM trend"
             end
+        elseif tostring(context.dispatchMode or "GENERATING") ~= "GENERATING" then
+            local assisted = tostring(context.dispatchMode) == "ASSISTED IDLE"
+            local idleFloor = target * (tonumber(control.assistedIdleRpmRatio) or 0.75)
+            recommendedInductor = false
+            recommendedFlow = 0
+            if assisted and rpm < idleFloor then
+                recommendedFlow = math.min(flowMaximum,
+                    tonumber(control.assistedIdleFlow) or 250)
+                state, action = "IDLE BOOST", "PULSE STEAM"
+                reason = ("Assisted idle restoring rotor above %.0f RPM"):format(idleFloor)
+            elseif assisted then
+                state, action = "ASSISTED IDLE", "COAST"
+                reason = ("Warm reserve coasting above %.0f RPM"):format(idleFloor)
+            else
+                state, action = "COASTING", "COAST"
+                reason = "Generation not requested; inductor disengaged and steam closed"
+            end
+        elseif rpm < target - deadband and turbine.inductorEngaged == false then
+            recommendedInductor = false
+            recommendedFlow = math.min(flowMaximum,
+                tonumber(profile.flowLimit) or flowMaximum)
+            state, action = "SPOOLING", "RELEASE LOAD"
+            reason = "Generation requested; spool unloaded to the learned target"
         else
             recommendedInductor = true
             if turbine.inductorEngaged == false then
@@ -6549,6 +6709,8 @@ function governor.evaluate(memory, turbine, control, context)
             calibrationSpoolRpm = previous.phase == "SPOOL_LOW" and lowBand or highBand,
             calibrationSettleCount = previous.settleCount or 0,
             calibrationSettleSamples = settleSamples,
+            dispatchMode = tostring(context.dispatchMode or "GENERATING"),
+            assistedIdle = profile and profile.assistedIdle == true or false,
         }
         if action ~= "HOLD" and action ~= "WAIT FOR SPEED" and
            action ~= "WAIT FOR STEAM SOURCE" and
@@ -6696,7 +6858,10 @@ function governor.evaluateAll(memory, turbines, control, context)
     local present = {}
     for _, turbine in ipairs(turbines or {}) do
         present[tostring(turbine.name)] = true
-        turbine.governor = governor.evaluate(memory, turbine, control, context)
+        local turbineContext = {}
+        for key, value in pairs(context or {}) do turbineContext[key] = value end
+        turbineContext.dispatchMode = turbine.dispatchMode or "GENERATING"
+        turbine.governor = governor.evaluate(memory, turbine, control, turbineContext)
     end
     for name in pairs(memory.turbines or {}) do
         if not present[name] then memory.turbines[name] = nil end

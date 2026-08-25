@@ -46,11 +46,14 @@ local function saveProfile(memory, control, name, learnedRpm, learnedFlow)
     local target = math.abs(learnedRpm - lowBand) <= math.abs(learnedRpm - highBand)
         and lowBand or highBand
     control.turbineProfiles = control.turbineProfiles or {}
+    local existing = control.turbineProfiles[name] or {}
     control.turbineProfiles[name] = {
         targetRpm = target,
         learnedRpm = learnedRpm,
         flowLimit = learnedFlow and round(learnedFlow) or nil,
         calibrated = true,
+        assistedIdle = existing.assistedIdle == true,
+        maximumPower = tonumber(existing.maximumPower),
     }
     memory.profileDirty = true
     return control.turbineProfiles[name]
@@ -156,7 +159,10 @@ function governor.evaluate(memory, turbine, control, context)
     elseif turbine.error then
         result = hold("NO TRUSTED DATA", tostring(turbine.error), false)
     elseif turbine.active == false then
-        if previous.startRequested == true then
+        local dispatchMode = tostring(context.dispatchMode or "COASTING")
+        local shouldStart = profile == nil or dispatchMode == "GENERATING" or
+            dispatchMode == "ASSISTED IDLE"
+        if shouldStart then
             result = {
                 mode = "automatic",
                 state = "STARTING",
@@ -169,7 +175,8 @@ function governor.evaluate(memory, turbine, control, context)
                 actionSamples = 1,
             }
         else
-            result = hold("OFFLINE", "Turbine is not active")
+            result = hold("OFFLINE", shouldStart and "Turbine is not active" or
+                "No plant generation or assisted-idle request")
         end
     elseif turbine.active ~= true then
         result = hold("NO STATE DATA", "Turbine active-state telemetry is unavailable", false)
@@ -692,6 +699,29 @@ function governor.evaluate(memory, turbine, control, context)
                 action = "OBSERVE 900 BAND"
                 reason = "Watching the fallback RPM trend"
             end
+        elseif tostring(context.dispatchMode or "GENERATING") ~= "GENERATING" then
+            local assisted = tostring(context.dispatchMode) == "ASSISTED IDLE"
+            local idleFloor = target * (tonumber(control.assistedIdleRpmRatio) or 0.75)
+            recommendedInductor = false
+            recommendedFlow = 0
+            if assisted and rpm < idleFloor then
+                recommendedFlow = math.min(flowMaximum,
+                    tonumber(control.assistedIdleFlow) or 250)
+                state, action = "IDLE BOOST", "PULSE STEAM"
+                reason = ("Assisted idle restoring rotor above %.0f RPM"):format(idleFloor)
+            elseif assisted then
+                state, action = "ASSISTED IDLE", "COAST"
+                reason = ("Warm reserve coasting above %.0f RPM"):format(idleFloor)
+            else
+                state, action = "COASTING", "COAST"
+                reason = "Generation not requested; inductor disengaged and steam closed"
+            end
+        elseif rpm < target - deadband and turbine.inductorEngaged == false then
+            recommendedInductor = false
+            recommendedFlow = math.min(flowMaximum,
+                tonumber(profile.flowLimit) or flowMaximum)
+            state, action = "SPOOLING", "RELEASE LOAD"
+            reason = "Generation requested; spool unloaded to the learned target"
         else
             recommendedInductor = true
             if turbine.inductorEngaged == false then
@@ -751,6 +781,8 @@ function governor.evaluate(memory, turbine, control, context)
             calibrationSpoolRpm = previous.phase == "SPOOL_LOW" and lowBand or highBand,
             calibrationSettleCount = previous.settleCount or 0,
             calibrationSettleSamples = settleSamples,
+            dispatchMode = tostring(context.dispatchMode or "GENERATING"),
+            assistedIdle = profile and profile.assistedIdle == true or false,
         }
         if action ~= "HOLD" and action ~= "WAIT FOR SPEED" and
            action ~= "WAIT FOR STEAM SOURCE" and
@@ -898,7 +930,10 @@ function governor.evaluateAll(memory, turbines, control, context)
     local present = {}
     for _, turbine in ipairs(turbines or {}) do
         present[tostring(turbine.name)] = true
-        turbine.governor = governor.evaluate(memory, turbine, control, context)
+        local turbineContext = {}
+        for key, value in pairs(context or {}) do turbineContext[key] = value end
+        turbineContext.dispatchMode = turbine.dispatchMode or "GENERATING"
+        turbine.governor = governor.evaluate(memory, turbine, control, turbineContext)
     end
     for name in pairs(memory.turbines or {}) do
         if not present[name] then memory.turbines[name] = nil end

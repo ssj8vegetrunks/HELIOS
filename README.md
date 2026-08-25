@@ -27,8 +27,8 @@ terminals install Core only. The tested reactor, turbine, and storage adapter
 logic is unchanged in this first modular release.
 
 This milestone adds guarded reactor steam regulation to the automatic turbine
-governor. HELIOS now matches one steam reactor to the trusted intake
-requested by its active turbines, reducing fuel waste without starving them.
+governor. HELIOS now matches steam-reactor output to the trusted intake
+requested by its dispatched turbines, reducing fuel waste without starving them.
 The existing touch interface and network-ID protection remain online:
 
 - the active HELIOS page is mirrored to every attached CC:Tweaked monitor;
@@ -83,7 +83,7 @@ The existing touch interface and network-ID protection remain online:
 - confirmed turbine overspeed becomes a system-wide critical alarm;
 - rejected or unverifiable actuator commands become system-wide control-fault warnings;
 - the dashboard reports live automatic, calibration, maintenance, and fault state instead of the obsolete observe-only banner;
-- calibrated steam reactors share the summed configured intake of all active turbines;
+- calibrated steam reactors share the summed configured intake of dispatched turbines;
 - managed turbine calibration waits for its steam reactor to start and supply
   the full intake instead of failing while reactor output is still rising;
 - an offline steam reactor is started through verified activation control when
@@ -241,7 +241,7 @@ threshold is 20% and the critical threshold is 5%. Clicking
 `[ SILENCE ALARM ]` silences only the current condition. A different or more
 severe alarm can still sound, and silence resets after the condition clears.
 
-HELIOS totals the configured intake requested by all active turbines and
+HELIOS totals the configured intake requested by dispatched turbines and
 distributes it across calibrated steam reactors, regulating exposed rod-equivalents until steam
 production matches that demand plus a 15% reserve. Total exposure is spread
 across every fuel column as evenly as integer insertion levels allow. For
