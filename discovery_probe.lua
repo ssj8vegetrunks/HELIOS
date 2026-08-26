@@ -62,7 +62,6 @@ local names = peripheral.getNames()
 table.sort(names)
 local report, counts = {}, { reactor = 0, turbine = 0, storage = 0, unknown = 0 }
 local function emit(line)
-    print(line)
     report[#report + 1] = line
 end
 
@@ -97,5 +96,9 @@ local handle = fs.open(fileName, "w")
 if handle then
     handle.write(table.concat(report, "\n") .. "\n")
     handle.close()
-    print("Saved report to " .. fileName)
 end
+
+-- CC:Tweaked terminals do not retain a normal scrollback buffer.  Present the
+-- report through its built-in pager, so every line remains readable in-game.
+textutils.pagedPrint(table.concat(report, "\n"), 1)
+if handle then print("Saved report to " .. fileName) end

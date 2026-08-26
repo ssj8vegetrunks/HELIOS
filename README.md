@@ -230,7 +230,8 @@ the saved default is then restored. The default timeout is 30 minutes.
 `discovery_probe.lua` is a read-only compatibility tool that can be run before
 installing HELIOS. It inventories every attached peripheral, identifies reactors,
 turbines, and energy storage, and saves a full report as
-`helios-discovery-report.txt`. It changes no device settings.
+`helios-discovery-report.txt`. Results are paged in the terminal so no output
+is lost on smaller screens. It changes no device settings.
 
 ```lua
 wget run https://raw.githubusercontent.com/ssj8vegetrunks/HELIOS/agent/ui-module-contract-alpha4/discovery_probe.lua
