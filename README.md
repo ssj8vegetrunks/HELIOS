@@ -225,6 +225,17 @@ manual operation mark the registry as outdated without scanning. Ending
 maintenance, reaching its timeout, or restarting HELIOS performs a clean scan;
 the saved default is then restored. The default timeout is 30 minutes.
 
+### Standalone Discovery Probe
+
+`discovery_probe.lua` is a read-only compatibility tool that can be run before
+installing HELIOS. It inventories every attached peripheral, identifies reactors,
+turbines, and energy storage, and saves a full report as
+`helios-discovery-report.txt`. It changes no device settings.
+
+```lua
+wget run https://raw.githubusercontent.com/ssj8vegetrunks/HELIOS/agent/ui-module-contract-alpha4/discovery_probe.lua
+```
+
 Use the left and right arrow keys to change the maintenance timeout. The old
 `T` shortcut was removed because it conflicts with ATM10's inventory trash
 overlay. While maintenance is active, the on-screen countdown refreshes once
