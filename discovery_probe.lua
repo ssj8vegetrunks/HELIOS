@@ -101,7 +101,49 @@ if handle then
     handle.close()
 end
 
--- CC:Tweaked terminals do not retain a normal scrollback buffer.  Present the
--- report through its built-in pager, so every line remains readable in-game.
-textutils.pagedPrint(table.concat(report, "\n"), 1)
-if handle then print("Saved report to " .. fileName) end
+-- CC:Tweaked terminals do not retain a normal scrollback buffer.  Use a small
+-- pager with an explicit skip action: S keeps the saved report but jumps
+-- straight to its final summary.
+local width, height = term.getSize()
+local lines = {}
+for _, line in ipairs(report) do
+    line = tostring(line)
+    if #line == 0 then
+        lines[#lines + 1] = ""
+    else
+        for start = 1, #line, width do
+            lines[#lines + 1] = string.sub(line, start, start + width - 1)
+        end
+    end
+end
+
+local pageSize = math.max(1, height - 2)
+local function drawPage(start)
+    term.clear()
+    term.setCursorPos(1, 1)
+    for index = start, math.min(#lines, start + pageSize - 1) do print(lines[index]) end
+end
+
+local start = 1
+while start <= #lines do
+    drawPage(start)
+    local lastPage = start + pageSize > #lines
+    if lastPage then
+        print("[Any key] finish   [S] saved report only")
+    else
+        print("[Any key] next page   [S] skip to saved report")
+    end
+    local _, key = os.pullEvent("key")
+    if key == keys.s then
+        term.clear()
+        term.setCursorPos(1, 1)
+        print("Discovery display skipped.")
+        print("Full report saved to " .. fileName)
+        print(report[#report - 1] or "")
+        print(report[#report] or "")
+        break
+    elseif lastPage then
+        break
+    end
+    start = start + pageSize
+end
