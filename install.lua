@@ -1858,14 +1858,14 @@ local function methodSet(methods)
 end
 
 local function classify(name, types, methods)
-    if contains(name, "turbine") then return "turbine" end
-    if contains(name, "reactor") then return "reactor" end
     for _, peripheralType in ipairs(types) do
         if contains(peripheralType, "turbine") then return "turbine" end
     end
+    if contains(name, "turbine") then return "turbine" end
     for _, peripheralType in ipairs(types) do
         if contains(peripheralType, "reactor") then return "reactor" end
     end
+    if contains(name, "reactor") then return "reactor" end
     for _, peripheralType in ipairs(types) do
         if peripheralType == "monitor" then return "monitor" end
         if peripheralType == "modem" then return "modem" end
@@ -1885,6 +1885,7 @@ local function classify(name, types, methods)
 
     local energyReader =
         (available.getEnergyStored and available.getMaxEnergyStored) or
+        (available.getEnergy and available.getMaxEnergy) or
         (available.getEnergy and available.getEnergyCapacity) or
         (available.getStoredEnergy and available.getEnergyCapacity) or
         (available.getStored and available.getCapacity)

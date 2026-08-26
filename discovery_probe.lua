@@ -32,20 +32,23 @@ local function classify(name, types, methods)
         induction = induction or contains(peripheralType, "inductionport") or
             contains(peripheralType, "induction_port")
     end
-    if reactor then
-        local controllable = hasAny(available, { "setActive", "setControlRodLevel", "setAllControlRodLevels" })
-        local readable = hasAny(available, { "getActive", "active", "getEnergyProducedLastTick", "getFuelFilledPercentage" })
-        return "REACTOR", controllable and readable and "MANAGEABLE" or "TELEMETRY / API CHECK"
-    end
+    -- "BigReactors-Turbine" includes the word "reactor", so turbines must
+    -- win whenever both identity checks match.
     if turbine then
         local controllable = hasAny(available, { "setActive", "setFluidFlowRateMax", "setInductorEngaged" })
         local readable = hasAny(available, { "getRotorSpeed", "getEnergyProducedLastTick", "getFluidFlowRate" })
         return "TURBINE", controllable and readable and "MANAGEABLE" or "TELEMETRY / API CHECK"
     end
+    if reactor then
+        local controllable = hasAny(available, { "setActive", "setControlRodLevel", "setAllControlRodLevels" })
+        local readable = hasAny(available, { "getActive", "active", "getEnergyProducedLastTick", "getFuelFilledPercentage" })
+        return "REACTOR", controllable and readable and "MANAGEABLE" or "TELEMETRY / API CHECK"
+    end
     if induction and available.getEnergy and available.getMaxEnergy then
         return "INDUCTION STORAGE", "MANAGEABLE"
     end
     if (available.getEnergyStored and available.getMaxEnergyStored) or
+       (available.getEnergy and available.getMaxEnergy) or
        (available.getEnergy and available.getEnergyCapacity) or
        (available.getStoredEnergy and available.getEnergyCapacity) or
        (available.getStored and available.getCapacity) then
