@@ -191,7 +191,18 @@ local function draw(target, binding, data, page, message, controls, safety, over
     end
     local controlRow = height - 7
     line(target, controlRow, "OUTPUT REQUEST: " .. tostring(controls.requested) ..
-        "  |  PERMITTED: SAFETY CONTROLLER ONLY", colors.yellow)
+        "  |  SAFE CEILING: " .. tostring(controls.ratedOutput or "UNCOMMISSIONED"), colors.yellow)
+    if controls.calibration and controls.calibration.active then
+        line(target, controlRow + 2, "COMMISSIONING CURRENT OUTPUT: " ..
+            tostring(controls.calibration.samples or 0) .. "/20 stable samples", colors.orange)
+        line(target, controlRow + 4, "Do not alter the reactor or gate until commissioning completes.", colors.lightGray)
+        return
+    end
+    if not controls.ratedOutput then
+        buttons[#buttons + 1] = button(target, 1, controlRow + 2, "COMMISSION CURRENT OUTPUT", colors.orange)
+        line(target, controlRow + 4, "Validates the present stable export before manual control is allowed.", colors.lightGray)
+        return
+    end
     if not controls.manualEnabled then
         buttons[#buttons + 1] = button(target, 1, controlRow + 2, "ENABLE MANUAL OUTPUT", colors.orange)
         line(target, controlRow + 4, "Manual requests are recorded only until commissioning is complete.", colors.lightGray)
@@ -225,7 +236,8 @@ local saveControls
 local function loadControls()
     if not fs.exists(SETTINGS_FILE) then
         return { manualEnabled = false, requested = "AUTO", overdriveEnabled = false,
-            lastAction = "Automatic safe supervision selected", ratedOutput = nil }
+            lastAction = "Automatic safe supervision selected", ratedOutput = nil,
+            calibration = { active = false, samples = 0 } }
     end
     local ok, saved = pcall(dofile, SETTINGS_FILE)
     if not ok or type(saved) ~= "table" then return loadControls() end
@@ -236,6 +248,7 @@ local function loadControls()
         overdriveEnabled = saved.overdriveEnabled == true,
         lastAction = tostring(saved.lastAction or "Restored Guardian control preference"),
         ratedOutput = tonumber(saved.ratedOutput),
+        calibration = { active = false, samples = 0 },
     }
 end
 
@@ -247,13 +260,6 @@ local function control(binding, data, controls, safety)
     local temperature = tonumber(reactor.temperature) or math.huge
     local status = string.lower(tostring(reactor.status or "unknown"))
     local outputCeiling = tonumber(controls.ratedOutput)
-    if not outputCeiling or outputCeiling <= 0 then
-        outputCeiling = math.max(tonumber(data.outputSetting) or 0, tonumber(reactor.generationRate) or 0)
-        if outputCeiling > 0 then
-            controls.ratedOutput = outputCeiling
-            saveControls(controls)
-        end
-    end
 
     -- Safeguards always take priority, including when manual output is off.
     if fuelPercent and fuelPercent <= MINIMUM_FUEL then
@@ -280,6 +286,33 @@ local function control(binding, data, controls, safety)
         return safety
     end
 
+    if controls.calibration and controls.calibration.active then
+        local stable = status == "online" and (fieldPercent or 0) >= 45 and
+            temperature <= 6500 and (fuelPercent or 0) > MINIMUM_FUEL and
+            tonumber(data.outputSetting) and tonumber(data.outputSetting) > 0
+        if not stable then
+            controls.calibration.active = false
+            controls.calibration.reason = "Conditions changed before the output was proven stable"
+            controls.lastAction = "Commissioning stopped: " .. controls.calibration.reason
+            saveControls(controls)
+            safety.last = controls.lastAction
+            return safety
+        end
+        controls.calibration.samples = (tonumber(controls.calibration.samples) or 0) + 1
+        controls.calibration.candidate = tonumber(data.outputSetting)
+        if controls.calibration.samples >= 20 then
+            controls.ratedOutput = controls.calibration.candidate
+            controls.calibration.active = false
+            controls.calibration.reason = nil
+            controls.lastAction = "Commissioned safe output ceiling: " .. tostring(controls.ratedOutput) .. " RF/t"
+            saveControls(controls)
+            safety.last = controls.lastAction
+        else
+            safety.last = "Commissioning stable output " .. controls.calibration.samples .. "/20"
+        end
+        return safety
+    end
+
     if controls.manualEnabled and controls.requested == "OFF" then
         setGate(binding.outputGate, 0)
         callReactor(binding.reactor, "stopReactor")
@@ -302,6 +335,10 @@ local function control(binding, data, controls, safety)
     end
 
     if controls.manualEnabled and controls.requested ~= "OFF" then
+        if not outputCeiling or outputCeiling <= 0 then
+            safety.last = "Manual request held: commission a safe output ceiling first"
+            return safety
+        end
         if status == "offline" or status == "stopping" then
             callReactor(binding.reactor, "chargeReactor")
             setGate(binding.inputGate, 900000)
@@ -360,7 +397,10 @@ local buttons = {}
 local safety = { last = "Awaiting telemetry" }
 
 local function selectOutput(choice)
-    if choice == "ENABLE MANUAL OUTPUT" then
+    if choice == "COMMISSION CURRENT OUTPUT" then
+        controls.calibration = { active = true, samples = 0, candidate = nil }
+        controls.lastAction = "Commissioning current stable output"
+    elseif choice == "ENABLE MANUAL OUTPUT" then
         controls.manualEnabled = true
         controls.requested = "OFF"
         controls.lastAction = "Manual output enabled; request set to OFF"
@@ -405,6 +445,7 @@ while true do
             if a == keys.one then page = "overview" break end
             if a == keys.two then page = "raw" break end
             if a == keys.three then page = "setup" break end
+            if a == keys.c then selectOutput("COMMISSION CURRENT OUTPUT"); break end
             if a == keys.m then selectOutput("ENABLE MANUAL OUTPUT"); break end
             if controls.manualEnabled then
                 local choices = {

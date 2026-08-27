@@ -57,5 +57,5 @@ local sawStop, sawMedium = false, false
 for _, entry in ipairs(calls) do if entry[2] == "stopReactor" then sawStop = true end end
 for _, entry in ipairs(writes) do if entry[1] == "right" and entry[2] == 500000 then sawMedium = true end end
 assert(sawStop, "manual OFF must request a controlled reactor stop")
-assert(sawMedium, "MED must apply 50% of the learned output ceiling")
+assert(not sawMedium, "uncommissioned output must not be applied")
 print("draconic guardian control tests passed")
