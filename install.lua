@@ -1531,6 +1531,156 @@ end
 return contract
 ]=],
 
+    ["draconic/guardian.lua"] = [=[
+-- HELIOS Draconic Guardian v0.1
+-- This first release is deliberately telemetry-only.  It validates the local
+-- installation contract and never calls an actuator method on a reactor or
+-- flow gate.
+
+local guardian = {}
+
+local function contains(value, fragment)
+    return string.find(string.lower(tostring(value or "")), fragment, 1, true) ~= nil
+end
+
+local function hasType(name, fragment)
+    for _, peripheralType in ipairs({ peripheral.getType(name) }) do
+        if contains(peripheralType, fragment) then return true end
+    end
+    return false
+end
+
+local function sortNames(names)
+    table.sort(names, function(a, b) return tostring(a) < tostring(b) end)
+    return names
+end
+
+local function localNames()
+    local result = {}
+    for _, side in ipairs(rs.getSides()) do
+        if peripheral.isPresent(side) then result[side] = true end
+    end
+    return result
+end
+
+local function namesText(names)
+    return #names > 0 and table.concat(names, ", ") or "none"
+end
+
+function guardian.inspect()
+    local localPresent = localNames()
+    local localReactors, localGates, localModems, localMonitors = {}, {}, {}, {}
+    for side in pairs(localPresent) do
+        if hasType(side, "draconic_reactor") then localReactors[#localReactors + 1] = side end
+        if hasType(side, "flow_gate") then localGates[#localGates + 1] = side end
+        if hasType(side, "modem") then localModems[#localModems + 1] = side end
+        if hasType(side, "monitor") then localMonitors[#localMonitors + 1] = side end
+    end
+    sortNames(localReactors)
+    sortNames(localGates)
+    sortNames(localModems)
+    sortNames(localMonitors)
+
+    local remoteGates, remoteMonitors = {}, {}
+    for _, name in ipairs(peripheral.getNames()) do
+        if not localPresent[name] then
+            if hasType(name, "flow_gate") then remoteGates[#remoteGates + 1] = name end
+            if hasType(name, "monitor") then remoteMonitors[#remoteMonitors + 1] = name end
+        end
+    end
+    sortNames(remoteGates)
+    sortNames(remoteMonitors)
+
+    local reasons = {}
+    if #localReactors ~= 1 then
+        reasons[#reasons + 1] = "Require exactly one local Draconic reactor-side component"
+    end
+    if #localGates ~= 1 then
+        reasons[#reasons + 1] = "Require exactly one local output flow gate"
+    end
+    if #localModems < 1 then
+        reasons[#reasons + 1] = "Require a local wired modem/peripheral hub"
+    end
+    if #remoteGates ~= 1 then
+        reasons[#reasons + 1] = "Require exactly one remote field-input flow gate"
+    end
+
+    local reactorSide = localReactors[1]
+    if reactorSide then
+        local methods = peripheral.getMethods(reactorSide) or {}
+        local readable = false
+        for _, method in ipairs(methods) do
+            if method == "getReactorInfo" then readable = true end
+        end
+        if not readable then reasons[#reasons + 1] = "Local reactor component lacks getReactorInfo" end
+    end
+
+    return {
+        ready = #reasons == 0,
+        reasons = reasons,
+        reactorSide = reactorSide,
+        outputGateSide = localGates[1],
+        modemSide = localModems[1],
+        inputGateName = remoteGates[1],
+        monitorName = remoteMonitors[1] or localMonitors[1],
+        localReactors = localReactors,
+        localGates = localGates,
+        remoteGates = remoteGates,
+    }
+end
+
+function guardian.telemetry(binding)
+    if not binding or not binding.ready then return nil, "Guardian setup is incomplete" end
+    local ok, info = pcall(peripheral.call, binding.reactorSide, "getReactorInfo")
+    if not ok or type(info) ~= "table" then
+        return nil, "getReactorInfo failed: " .. tostring(info)
+    end
+    return info
+end
+
+local function printBinding(binding)
+    print("HELIOS // DRACONIC GUARDIAN v0.1")
+    print("MODE: READ-ONLY VALIDATION")
+    print("")
+    print("Local reactor component: " .. tostring(binding.reactorSide or "MISSING"))
+    print("Local output gate:       " .. tostring(binding.outputGateSide or "MISSING"))
+    print("Local modem:             " .. tostring(binding.modemSide or "MISSING"))
+    print("Remote field-input gate: " .. tostring(binding.inputGateName or "MISSING"))
+    print("Monitor:                 " .. tostring(binding.monitorName or "optional / none"))
+    print("")
+    if binding.ready then
+        print("SETUP VALID: no control commands have been sent.")
+    else
+        print("SETUP INVALID:")
+        for _, reason in ipairs(binding.reasons) do print("- " .. reason) end
+    end
+end
+
+function guardian.run(action)
+    local binding = guardian.inspect()
+    if action ~= "check" and action ~= "telemetry" then
+        error("Usage: helios draconic [check|telemetry]", 0)
+    end
+    printBinding(binding)
+    if action == "telemetry" and binding.ready then
+        local info, reason = guardian.telemetry(binding)
+        if not info then
+            print("Telemetry error: " .. tostring(reason))
+            return
+        end
+        print("")
+        print("Live reactor telemetry:")
+        for _, key in ipairs({ "status", "generationRate", "temperature", "fieldStrength",
+            "maxFieldStrength", "fieldDrainRate", "energySaturation", "maxEnergySaturation",
+            "fuelConversion", "maxFuelConversion" }) do
+            if info[key] ~= nil then print(key .. ": " .. tostring(info[key])) end
+        end
+    end
+end
+
+return guardian
+]=],
+
     ["gui/control-room/manifest.lua"] = [=[
 return {
     id = "control-room",
@@ -1706,6 +1856,17 @@ return renderer
 -- @section PROGRAM ENTRYPOINT
 local args = { ... }
 local config = dofile("/helios/core/config.lua").load()
+
+if args[1] == "probe" then
+    dofile("/helios/tools/discovery_probe.lua")
+    return
+end
+
+if args[1] == "draconic" then
+    local guardian = dofile("/helios/draconic/guardian.lua")
+    guardian.run(args[2] or "check")
+    return
+end
 
 if args[1] == "gui" then
     local loader = dofile("/helios/core/gui_loader.lua")
@@ -7506,6 +7667,158 @@ function terminal.run(config)
 end
 
 return terminal
+]=],
+
+    ["tools/discovery_probe.lua"] = [=[
+-- HELIOS Discovery Probe
+-- Standalone, read-only peripheral inventory for CC:Tweaked.
+-- Run with: wget run <raw GitHub URL>
+
+local VERSION = "0.1.0"
+
+local function contains(value, fragment)
+    return string.find(string.lower(tostring(value or "")), fragment, 1, true) ~= nil
+end
+
+local function methodSet(methods)
+    local set = {}
+    for _, method in ipairs(methods or {}) do set[method] = true end
+    return set
+end
+
+local function hasAny(methods, names)
+    for _, name in ipairs(names) do
+        if methods[name] then return true end
+    end
+    return false
+end
+
+local function classify(name, types, methods)
+    local available = methodSet(methods)
+    local reactor = contains(name, "reactor")
+    local turbine = contains(name, "turbine")
+    local induction = contains(name, "inductionport") or contains(name, "induction_port")
+    for _, peripheralType in ipairs(types) do
+        reactor = reactor or contains(peripheralType, "reactor")
+        turbine = turbine or contains(peripheralType, "turbine")
+        induction = induction or contains(peripheralType, "inductionport") or
+            contains(peripheralType, "induction_port")
+    end
+    -- "BigReactors-Turbine" includes the word "reactor", so turbines must
+    -- win whenever both identity checks match.
+    if turbine then
+        local controllable = hasAny(available, { "setActive", "setFluidFlowRateMax", "setInductorEngaged" })
+        local readable = hasAny(available, { "getRotorSpeed", "getEnergyProducedLastTick", "getFluidFlowRate" })
+        return "TURBINE", controllable and readable and "MANAGEABLE" or "TELEMETRY / API CHECK"
+    end
+    if reactor then
+        local controllable = hasAny(available, { "setActive", "setControlRodLevel", "setAllControlRodLevels" })
+        local readable = hasAny(available, { "getActive", "active", "getEnergyProducedLastTick", "getFuelFilledPercentage" })
+        return "REACTOR", controllable and readable and "MANAGEABLE" or "TELEMETRY / API CHECK"
+    end
+    if induction and available.getEnergy and available.getMaxEnergy then
+        return "INDUCTION STORAGE", "MANAGEABLE"
+    end
+    if (available.getEnergyStored and available.getMaxEnergyStored) or
+       (available.getEnergy and available.getMaxEnergy) or
+       (available.getEnergy and available.getEnergyCapacity) or
+       (available.getStoredEnergy and available.getEnergyCapacity) or
+       (available.getStored and available.getCapacity) then
+        return "ENERGY STORAGE", "MANAGEABLE"
+    end
+    for _, peripheralType in ipairs(types) do
+        if peripheralType == "monitor" then return "MONITOR", "DISPLAY" end
+        if peripheralType == "modem" then return "MODEM", "NETWORK" end
+    end
+    return "UNRECOGNISED", "INSPECT"
+end
+
+local names = peripheral.getNames()
+table.sort(names)
+local report, counts = {}, { reactor = 0, turbine = 0, storage = 0, unknown = 0 }
+local function emit(line)
+    report[#report + 1] = line
+end
+
+emit("HELIOS DISCOVERY PROBE v" .. VERSION)
+emit("Read-only inventory - no device settings will be changed")
+emit(string.rep("-", 46))
+for _, name in ipairs(names) do
+    local types = { peripheral.getType(name) }
+    local methods = peripheral.getMethods(name) or {}
+    table.sort(types)
+    table.sort(methods)
+    local category, status = classify(name, types, methods)
+    if category == "REACTOR" then counts.reactor = counts.reactor + 1
+    elseif category == "TURBINE" then counts.turbine = counts.turbine + 1
+    elseif contains(category, "STORAGE") then counts.storage = counts.storage + 1
+    elseif category == "UNRECOGNISED" then counts.unknown = counts.unknown + 1 end
+    emit(("[%s] %s"):format(status, name))
+    emit("  Class: " .. category)
+    emit("  Types: " .. (#types > 0 and table.concat(types, ", ") or "unreported"))
+    if status ~= "MANAGEABLE" then
+        emit("  Methods: " .. (#methods > 0 and table.concat(methods, ", ") or "none reported"))
+    end
+end
+emit(string.rep("-", 46))
+emit(("Summary: %d reactor(s), %d turbine(s), %d storage device(s), %d unrecognised"):format(
+    counts.reactor, counts.turbine, counts.storage, counts.unknown))
+emit("Result: HELIOS can manage devices marked MANAGEABLE after installation.")
+emit("Use the detailed method list on API CHECK / INSPECT devices when reporting compatibility.")
+
+local fileName = "helios-discovery-report.txt"
+local handle = fs.open(fileName, "w")
+if handle then
+    handle.write(table.concat(report, "\n") .. "\n")
+    handle.close()
+end
+
+-- CC:Tweaked terminals do not retain a normal scrollback buffer.  Use a small
+-- pager with an explicit skip action: S keeps the saved report but jumps
+-- straight to its final summary.
+local width, height = term.getSize()
+local lines = {}
+for _, line in ipairs(report) do
+    line = tostring(line)
+    if #line == 0 then
+        lines[#lines + 1] = ""
+    else
+        for start = 1, #line, width do
+            lines[#lines + 1] = string.sub(line, start, start + width - 1)
+        end
+    end
+end
+
+local pageSize = math.max(1, height - 2)
+local function drawPage(start)
+    term.clear()
+    term.setCursorPos(1, 1)
+    for index = start, math.min(#lines, start + pageSize - 1) do print(lines[index]) end
+end
+
+local start = 1
+while start <= #lines do
+    drawPage(start)
+    local lastPage = start + pageSize > #lines
+    if lastPage then
+        print("[Any key] finish   [S] saved report only")
+    else
+        print("[Any key] next page   [S] skip to saved report")
+    end
+    local _, key = os.pullEvent("key")
+    if key == keys.s then
+        term.clear()
+        term.setCursorPos(1, 1)
+        print("Discovery display skipped.")
+        print("Full report saved to " .. fileName)
+        print(report[#report - 1] or "")
+        print(report[#report] or "")
+        break
+    elseif lastPage then
+        break
+    end
+    start = start + pageSize
+end
 ]=],
 }
 

@@ -2,6 +2,17 @@
 local args = { ... }
 local config = dofile("/helios/core/config.lua").load()
 
+if args[1] == "probe" then
+    dofile("/helios/tools/discovery_probe.lua")
+    return
+end
+
+if args[1] == "draconic" then
+    local guardian = dofile("/helios/draconic/guardian.lua")
+    guardian.run(args[2] or "check")
+    return
+end
+
 if args[1] == "gui" then
     local loader = dofile("/helios/core/gui_loader.lua")
     local action = args[2] or "status"

@@ -238,6 +238,18 @@ saved report. It changes no device settings.
 wget run https://raw.githubusercontent.com/ssj8vegetrunks/HELIOS/agent/ui-module-contract-alpha4/discovery_probe.lua
 ```
 
+After HELIOS is installed, run the same inventory with `helios probe`.
+
+### Draconic Guardian validation
+
+The first Draconic Guardian release is telemetry-only. It validates the local
+safety layout and does not write to any reactor or flow gate. On the dedicated
+controller computer, the contract is one local Draconic reactor-side component,
+one local output flow gate, a local wired modem, and exactly one remote
+field-input flow gate. Use `helios draconic check`, then
+`helios draconic telemetry` to verify live readings. A normal HELIOS mainframe
+must treat any network-discovered Draconic reactor as read-only telemetry.
+
 Use the left and right arrow keys to change the maintenance timeout. The old
 `T` shortcut was removed because it conflicts with ATM10's inventory trash
 overlay. While maintenance is active, the on-screen countdown refreshes once

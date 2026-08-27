@@ -50,6 +50,10 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 
 - No HELIOS module dependencies detected.
 
+### `draconic/guardian.lua`
+
+- No HELIOS module dependencies detected.
+
 ### `gui/control-room/manifest.lua`
 
 - No HELIOS module dependencies detected.
@@ -65,12 +69,14 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 - depends on → `core/module_loader.lua`
 - depends on → `core/module_manager.lua`
 - depends on → `core/power_format.lua`
+- depends on → `draconic/guardian.lua`
 - depends on → `mainframe/device_registry.lua`
 - depends on → `mainframe/main.lua`
 - depends on → `modules/extreme_reactors/reactor_adapter.lua`
 - depends on → `modules/extreme_reactors/turbine_adapter.lua`
 - depends on → `modules/universal_energy/storage_adapter.lua`
 - depends on → `terminal/main.lua`
+- depends on → `tools/discovery_probe.lua`
 
 ### `mainframe/device_registry.lua`
 
@@ -117,6 +123,10 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 - depends on → `core/network.lua`
 - depends on → `core/power_format.lua`
 - depends on → `core/ui.lua`
+
+### `tools/discovery_probe.lua`
+
+- No HELIOS module dependencies detected.
 
 ### `modules/extreme_reactors/reactor_adapter.lua`
 
@@ -187,6 +197,10 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 
 - used by ← `mainframe/main.lua`
 
+### `draconic/guardian.lua`
+
+- used by ← `helios.lua`
+
 ### `gui/control-room/manifest.lua`
 
 - No HELIOS modules directly depend on this module.
@@ -221,6 +235,10 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 - used by ← `mainframe/main.lua`
 
 ### `terminal/main.lua`
+
+- used by ← `helios.lua`
+
+### `tools/discovery_probe.lua`
 
 - used by ← `helios.lua`
 
