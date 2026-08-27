@@ -105,7 +105,10 @@ local function bar(target, y, label, current, maximum, colour)
     line(target, y + 2, tostring(current or "N/A") .. " / " .. tostring(maximum or "N/A"), colors.white)
 end
 
-local function draw(target, binding, data, page, message)
+local button
+local hit
+
+local function draw(target, binding, data, page, message, controls, overdriveConfirm, buttons)
     local width, height = target.getSize()
     target.setBackgroundColor(colors.black)
     target.setTextColor(colors.white)
@@ -155,6 +158,32 @@ local function draw(target, binding, data, page, message)
     end
     line(target, height - 2, "FIELD INPUT: " .. tostring(data.inputFlow) .. "  OUTPUT: " .. tostring(data.outputFlow), colors.yellow)
     line(target, height - 1, "Override input/output: " .. tostring(data.inputOverride) .. " / " .. tostring(data.outputOverride), colors.lightGray)
+
+    if height < 29 then
+        line(target, height - 4, "Manual output controls require a larger monitor.", colors.orange)
+        return
+    end
+    local controlRow = height - 7
+    line(target, controlRow, "OUTPUT REQUEST: " .. tostring(controls.requested) ..
+        "  |  PERMITTED: SAFETY CONTROLLER ONLY", colors.yellow)
+    if not controls.manualEnabled then
+        buttons[#buttons + 1] = button(target, 1, controlRow + 2, "ENABLE MANUAL OUTPUT", colors.orange)
+        line(target, controlRow + 4, "Manual requests are recorded only until commissioning is complete.", colors.lightGray)
+    elseif overdriveConfirm then
+        line(target, controlRow + 2, "OVERDRIVE stays within hard containment limits.", colors.red)
+        buttons[#buttons + 1] = button(target, 1, controlRow + 4, "ENABLE OVERDRIVE", colors.red)
+        buttons[#buttons + 1] = button(target, 20, controlRow + 4, "CANCEL", colors.lightGray)
+    else
+        local x = 1
+        for _, choice in ipairs({ "OFF", "MIN", "MED", "MAX", "OVERDRIVE" }) do
+            local colour = choice == "OVERDRIVE" and colors.red or colors.cyan
+            local item = button(target, x, controlRow + 2, choice, colour)
+            buttons[#buttons + 1] = item
+            x = item.x2 + 2
+        end
+        buttons[#buttons + 1] = button(target, 1, controlRow + 4, "DISABLE MANUAL", colors.lightGray)
+        line(target, controlRow + 5, "Last action: " .. tostring(controls.lastAction), colors.lightGray)
+    end
 end
 
 local function chooseTarget(binding)
@@ -164,13 +193,88 @@ local function chooseTarget(binding)
     return term.current()
 end
 
+local SETTINGS_FILE = ".helios-draconic-guardian.lua"
+
+local function loadControls()
+    if not fs.exists(SETTINGS_FILE) then
+        return { manualEnabled = false, requested = "AUTO", overdriveEnabled = false,
+            lastAction = "Automatic safe supervision selected" }
+    end
+    local ok, saved = pcall(dofile, SETTINGS_FILE)
+    if not ok or type(saved) ~= "table" then return loadControls() end
+    return {
+        manualEnabled = saved.manualEnabled == true,
+        requested = ({ OFF = true, MIN = true, MED = true, MAX = true, OVERDRIVE = true })[saved.requested]
+            and saved.requested or "AUTO",
+        overdriveEnabled = saved.overdriveEnabled == true,
+        lastAction = tostring(saved.lastAction or "Restored Guardian control preference"),
+    }
+end
+
+local function saveControls(controls)
+    local handle = fs.open(SETTINGS_FILE, "w")
+    if not handle then return end
+    handle.write("return " .. textutils.serialize(controls))
+    handle.close()
+end
+
+button = function(target, x, y, label, colour)
+    target.setCursorPos(x, y)
+    target.setTextColor(colour or colors.cyan)
+    local text = "[" .. label .. "]"
+    target.write(text)
+    return { x1 = x, x2 = x + #text - 1, y = y, label = label }
+end
+
+hit = function(buttons, x, y)
+    for _, item in ipairs(buttons or {}) do
+        if y == item.y and x >= item.x1 and x <= item.x2 then return item.label end
+    end
+end
+
 local binding = inspect()
 local target = chooseTarget(binding)
 local page = "overview"
+local controls = loadControls()
+local overdriveConfirm = false
+local buttons = {}
+
+local function selectOutput(choice)
+    if choice == "ENABLE MANUAL OUTPUT" then
+        controls.manualEnabled = true
+        controls.requested = "OFF"
+        controls.lastAction = "Manual output enabled; request set to OFF"
+    elseif choice == "DISABLE MANUAL" then
+        controls.manualEnabled = false
+        controls.requested = "AUTO"
+        controls.lastAction = "Manual output disabled; automatic request restored"
+        overdriveConfirm = false
+    elseif choice == "OVERDRIVE" then
+        overdriveConfirm = true
+        controls.lastAction = "Overdrive confirmation requested"
+    elseif choice == "ENABLE OVERDRIVE" then
+        controls.overdriveEnabled = true
+        controls.requested = "OVERDRIVE"
+        controls.lastAction = "Overdrive requested; hard safety limits remain active"
+        overdriveConfirm = false
+    elseif choice == "CANCEL" then
+        overdriveConfirm = false
+        controls.lastAction = "Overdrive confirmation cancelled"
+    elseif choice == "OFF" or choice == "MIN" or choice == "MED" or choice == "MAX" then
+        controls.requested = choice
+        controls.lastAction = "Manual " .. choice .. " output requested"
+    else
+        return false
+    end
+    saveControls(controls)
+    return true
+end
+
 while true do
     local data, reason
     if binding.ready then data, reason = read(binding) end
-    draw(target, binding, data, page, reason)
+    buttons = {}
+    draw(target, binding, data, page, reason, controls, overdriveConfirm, buttons)
     local timer = os.startTimer(1)
     while true do
         local event, a, b, c = os.pullEvent()
@@ -180,12 +284,22 @@ while true do
             if a == keys.one then page = "overview" break end
             if a == keys.two then page = "raw" break end
             if a == keys.three then page = "setup" break end
+            if a == keys.m then selectOutput("ENABLE MANUAL OUTPUT"); break end
+            if controls.manualEnabled then
+                local choices = {
+                    [keys.o] = "OFF", [keys.n] = "MIN", [keys.d] = "MED",
+                    [keys.x] = "MAX", [keys.v] = "OVERDRIVE",
+                }
+                if choices[a] and selectOutput(choices[a]) then break end
+            end
         elseif event == "monitor_touch" and target ~= term.current() then
             local x, y = b, c
             if y == 3 then
                 if x <= 10 then page = "overview" elseif x <= 21 then page = "raw" else page = "setup" end
                 break
             end
+            local choice = hit(buttons, x, y)
+            if choice and selectOutput(choice) then break end
         elseif event == "peripheral" or event == "peripheral_detach" then
             binding = inspect()
             target = chooseTarget(binding)
