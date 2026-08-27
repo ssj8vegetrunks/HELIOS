@@ -13,6 +13,14 @@ local function methodSet(methods)
 end
 
 local function classify(name, types, methods)
+    -- A Draconic Evolution reactor must never enter the ordinary reactor
+    -- adapter path.  Its controller and injector can both expose the same
+    -- peripheral type through a modem, so the mainframe cannot safely infer
+    -- which side is safe to operate.  Only the directly-wired Guardian may
+    -- validate it; the mainframe receives telemetry from that Guardian later.
+    for _, peripheralType in ipairs(types) do
+        if contains(peripheralType, "draconic_reactor") then return "draconic" end
+    end
     for _, peripheralType in ipairs(types) do
         if contains(peripheralType, "turbine") then return "turbine" end
     end
@@ -82,7 +90,8 @@ function registry.save(devices)
 end
 
 function registry.countByCategory(devices)
-    local counts = { reactor = 0, turbine = 0, battery = 0, monitor = 0, modem = 0, unknown = 0 }
+    local counts = { reactor = 0, turbine = 0, battery = 0, draconic = 0,
+        monitor = 0, modem = 0, unknown = 0 }
     for _, device in ipairs(devices) do
         counts[device.category] = (counts[device.category] or 0) + 1
     end
