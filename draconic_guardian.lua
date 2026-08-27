@@ -66,13 +66,39 @@ local function read(binding)
     if type(reactor) ~= "table" then return nil, errorText or "Reactor telemetry unavailable" end
     local inputFlow = call(binding.inputGate, "getFlow")
     local outputFlow = call(binding.outputGate, "getFlow")
+    local inputSetting = call(binding.inputGate, "getSignalLowFlow")
+    local outputSetting = call(binding.outputGate, "getSignalLowFlow")
     local inputOverride = call(binding.inputGate, "getOverrideEnabled")
     local outputOverride = call(binding.outputGate, "getOverrideEnabled")
     return {
         reactor = reactor,
         inputFlow = inputFlow, outputFlow = outputFlow,
+        inputSetting = inputSetting, outputSetting = outputSetting,
         inputOverride = inputOverride, outputOverride = outputOverride,
     }
+end
+
+-- These are intentionally hard limits.  The selector may request more or
+-- less power, but it may never weaken these containment protections.
+local FIELD_TARGET = 50
+local FIELD_EMERGENCY = 15
+local MAX_TEMPERATURE = 8000
+local SAFE_RESTART_TEMPERATURE = 3000
+local MINIMUM_FUEL = 10
+local REQUEST_FRACTIONS = { OFF = 0, MIN = 0.25, MED = 0.50, MAX = 0.75, OVERDRIVE = 1.00 }
+
+local function percent(current, maximum)
+    if not tonumber(current) or not tonumber(maximum) or tonumber(maximum) <= 0 then return nil end
+    return tonumber(current) / tonumber(maximum) * 100
+end
+
+local function setGate(name, flow)
+    flow = math.max(0, math.floor(tonumber(flow) or 0))
+    return pcall(peripheral.call, name, "setSignalLowFlow", flow)
+end
+
+local function callReactor(name, method)
+    return pcall(peripheral.call, name, method)
 end
 
 local function value(data, key)
@@ -108,13 +134,13 @@ end
 local button
 local hit
 
-local function draw(target, binding, data, page, message, controls, overdriveConfirm, buttons)
+local function draw(target, binding, data, page, message, controls, safety, overdriveConfirm, buttons)
     local width, height = target.getSize()
     target.setBackgroundColor(colors.black)
     target.setTextColor(colors.white)
     target.clear()
     line(target, 1, "HELIOS // DRACONIC GUARDIAN", colors.yellow)
-    line(target, 2, "READ-ONLY COMMISSIONING  |  NO ACTUATOR COMMANDS ENABLED", colors.orange)
+    line(target, 2, "GUARDED CONTROL  |  HARD CONTAINMENT LIMITS ACTIVE", colors.orange)
     line(target, 3, "[OVERVIEW] [RAW DATA] [SETUP]", colors.cyan)
     if not binding.ready then
         line(target, 5, "SETUP INVALID", colors.red)
@@ -182,7 +208,7 @@ local function draw(target, binding, data, page, message, controls, overdriveCon
             x = item.x2 + 2
         end
         buttons[#buttons + 1] = button(target, 1, controlRow + 4, "DISABLE MANUAL", colors.lightGray)
-        line(target, controlRow + 5, "Last action: " .. tostring(controls.lastAction), colors.lightGray)
+        line(target, controlRow + 5, "Guardian: " .. tostring(safety.last or controls.lastAction), colors.lightGray)
     end
 end
 
@@ -194,11 +220,12 @@ local function chooseTarget(binding)
 end
 
 local SETTINGS_FILE = ".helios-draconic-guardian.lua"
+local saveControls
 
 local function loadControls()
     if not fs.exists(SETTINGS_FILE) then
         return { manualEnabled = false, requested = "AUTO", overdriveEnabled = false,
-            lastAction = "Automatic safe supervision selected" }
+            lastAction = "Automatic safe supervision selected", ratedOutput = nil }
     end
     local ok, saved = pcall(dofile, SETTINGS_FILE)
     if not ok or type(saved) ~= "table" then return loadControls() end
@@ -208,10 +235,102 @@ local function loadControls()
             and saved.requested or "AUTO",
         overdriveEnabled = saved.overdriveEnabled == true,
         lastAction = tostring(saved.lastAction or "Restored Guardian control preference"),
+        ratedOutput = tonumber(saved.ratedOutput),
     }
 end
 
-local function saveControls(controls)
+local function control(binding, data, controls, safety)
+    local reactor = data.reactor
+    local fieldPercent = percent(reactor.fieldStrength, reactor.maxFieldStrength)
+    local fuelPercent = percent((tonumber(reactor.maxFuelConversion) or 0) -
+        (tonumber(reactor.fuelConversion) or 0), reactor.maxFuelConversion)
+    local temperature = tonumber(reactor.temperature) or math.huge
+    local status = string.lower(tostring(reactor.status or "unknown"))
+    local outputCeiling = tonumber(controls.ratedOutput)
+    if not outputCeiling or outputCeiling <= 0 then
+        outputCeiling = math.max(tonumber(data.outputSetting) or 0, tonumber(reactor.generationRate) or 0)
+        if outputCeiling > 0 then
+            controls.ratedOutput = outputCeiling
+            saveControls(controls)
+        end
+    end
+
+    -- Safeguards always take priority, including when manual output is off.
+    if fuelPercent and fuelPercent <= MINIMUM_FUEL then
+        setGate(binding.outputGate, 0)
+        callReactor(binding.reactor, "stopReactor")
+        safety.last = "EMERGENCY: fuel reserve below " .. MINIMUM_FUEL .. "%"
+        safety.stopForFuel = true
+        return safety
+    end
+    if fieldPercent and fieldPercent <= FIELD_EMERGENCY and status == "online" then
+        setGate(binding.outputGate, 0)
+        callReactor(binding.reactor, "stopReactor")
+        callReactor(binding.reactor, "chargeReactor")
+        setGate(binding.inputGate, 900000)
+        safety.chargeField = true
+        safety.last = "EMERGENCY: containment field below " .. FIELD_EMERGENCY .. "%"
+        return safety
+    end
+    if temperature > MAX_TEMPERATURE then
+        setGate(binding.outputGate, 0)
+        callReactor(binding.reactor, "stopReactor")
+        safety.cooling = true
+        safety.last = "EMERGENCY: temperature above " .. MAX_TEMPERATURE .. " C"
+        return safety
+    end
+
+    if controls.manualEnabled and controls.requested == "OFF" then
+        setGate(binding.outputGate, 0)
+        callReactor(binding.reactor, "stopReactor")
+        safety.last = "Manual OFF applied: export closed and reactor stopping"
+        return safety
+    end
+
+    if status == "charging" then
+        setGate(binding.inputGate, 900000)
+        safety.last = "Charging containment energy"
+        return safety
+    end
+
+    if safety.cooling and temperature < SAFE_RESTART_TEMPERATURE then
+        safety.cooling = false
+        if controls.manualEnabled and controls.requested ~= "OFF" then
+            callReactor(binding.reactor, "activateReactor")
+            safety.last = "Temperature recovered; restarting requested output"
+        end
+    end
+
+    if controls.manualEnabled and controls.requested ~= "OFF" then
+        if status == "offline" or status == "stopping" then
+            callReactor(binding.reactor, "chargeReactor")
+            setGate(binding.inputGate, 900000)
+            safety.last = "Charging reactor for requested output"
+            return safety
+        elseif status == "charged" then
+            callReactor(binding.reactor, "activateReactor")
+            safety.last = "Starting reactor for requested output"
+            return safety
+        end
+    end
+
+    if status == "online" then
+        local drain = tonumber(reactor.fieldDrainRate) or 0
+        -- Holds the field around FIELD_TARGET percent (same control equation
+        -- used by the established Draconic monitor controller).
+        setGate(binding.inputGate, math.max(1, drain / (1 - FIELD_TARGET / 100)))
+        if controls.manualEnabled then
+            local fraction = REQUEST_FRACTIONS[controls.requested] or 0
+            setGate(binding.outputGate, (outputCeiling or 0) * fraction)
+            safety.last = "Manual " .. controls.requested .. " output applied"
+        else
+            safety.last = "Automatic safe supervision; output unchanged"
+        end
+    end
+    return safety
+end
+
+saveControls = function(controls)
     local handle = fs.open(SETTINGS_FILE, "w")
     if not handle then return end
     handle.write("return " .. textutils.serialize(controls))
@@ -238,6 +357,7 @@ local page = "overview"
 local controls = loadControls()
 local overdriveConfirm = false
 local buttons = {}
+local safety = { last = "Awaiting telemetry" }
 
 local function selectOutput(choice)
     if choice == "ENABLE MANUAL OUTPUT" then
@@ -273,8 +393,9 @@ end
 while true do
     local data, reason
     if binding.ready then data, reason = read(binding) end
+    if data then safety = control(binding, data, controls, safety) end
     buttons = {}
-    draw(target, binding, data, page, reason, controls, overdriveConfirm, buttons)
+    draw(target, binding, data, page, reason, controls, safety, overdriveConfirm, buttons)
     local timer = os.startTimer(1)
     while true do
         local event, a, b, c = os.pullEvent()
