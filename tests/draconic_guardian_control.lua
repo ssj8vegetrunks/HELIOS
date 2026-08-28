@@ -39,7 +39,7 @@ peripheral = {
             fuelConversion = 10, maxFuelConversion = 1000,
             energySaturation = 1, maxEnergySaturation = 100,
         } end
-        if method == "getFlow" then return name == "right" and 50000 or 0 end
+        if method == "getFlow" then return name == "right" and overrideFlows.right or 0 end
         if method == "getSignalLowFlow" then return name == "right" and 1000000 or 900000 end
         if method == "getOverrideEnabled" then return overrides[name] end
         if method == "getFlowOverride" then return overrideFlows[name] end
@@ -51,7 +51,8 @@ peripheral = {
 }
 
 local events = { { "monitor_touch", "top", 1, 33 } } -- start automatic commissioning
-for _ = 1, 20 do events[#events + 1] = { "timer", 1 } end
+-- Eight 20-sample stages: 50k, 100k, 200k, 400k, 800k, 1.6M, 3.2M, 4M.
+for _ = 1, 200 do events[#events + 1] = { "timer", 1 } end
 events[#events + 1] = { "monitor_touch", "top", 1, 33 } -- enable assisted manual
 events[#events + 1] = { "monitor_touch", "top", 1, 33 } -- select OFF
 events[#events + 1] = { "key", keys.q }
@@ -65,11 +66,13 @@ os = {
 
 dofile("draconic_guardian.lua")
 
-local sawStop, sawCommissionFlow = false, false
+local sawStop, sawCommissionFlow, sawCalibratedCap = false, false, false
 for _, entry in ipairs(calls) do if entry[2] == "stopReactor" then sawStop = true end end
 for _, entry in ipairs(writes) do if entry[1] == "right" and entry[2] == 50000 then sawCommissionFlow = true end end
+for _, entry in ipairs(writes) do if entry[1] == "right" and entry[2] == 4000000 then sawCalibratedCap = true end end
 assert(sawStop, "manual OFF must request a controlled reactor stop")
 assert(sawCommissionFlow, "automatic commissioning must apply its conservative export")
+assert(sawCalibratedCap, "automatic calibration must prove the staged 4M RF/t ceiling")
 assert(overrides.right and overrides.flow_gate_1, "Guardian must acquire direct override of both gates")
 print("draconic guardian control tests passed")
 

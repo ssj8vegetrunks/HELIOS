@@ -4,7 +4,10 @@
 
 local FIELD_TARGET, FIELD_EMERGENCY = 50, 15
 local MAX_TEMPERATURE, MINIMUM_FUEL = 8000, 10
-local COMMISSION_FLOW, COMMISSION_SAMPLES = 50000, 20
+-- Draconic's peripheral telemetry reports live generation but not a safe
+-- maximum output. Establish one by proving progressively larger exports.
+local COMMISSION_START_FLOW, COMMISSION_CAP_FLOW = 50000, 4000000
+local COMMISSION_SAMPLES, COMMISSION_FIELD_FLOOR, COMMISSION_TEMP_LIMIT = 20, 35, 5000
 local FRACTION = { OFF = 0, MIN = .25, MED = .50, MAX = 1, OVERDRIVE = 1.25 }
 local SETTINGS = ".helios-draconic-guardian.lua"
 
@@ -90,7 +93,7 @@ local function vertical(t,x,y,h,label,now,maximum,c)
   t.setBackgroundColor(colors.black);text(t,x,y+h+1,string.format("%3.0f%%",f*100),c)
 end
 local function load()
-  local d={mode="AUTO",request="OFF",rated=nil,commissioned=false,commissioning=false,commissionSamples=0,arm=0,initialRequested=false,startActivated=false,message="Automatic safe supervision"}
+  local d={mode="AUTO",request="OFF",rated=nil,commissioned=false,commissioning=false,commissionFlow=nil,commissionSamples=0,arm=0,initialRequested=false,startActivated=false,message="Automatic safe supervision"}
   if not fs.exists(SETTINGS) then return d end;local ok,s=pcall(dofile,SETTINGS);if not ok or type(s)~="table" then return d end
   d.mode=(s.mode=="ASSISTED" or s.mode=="UNRESTRICTED") and s.mode or "AUTO";d.request=FRACTION[s.request] and s.request or "OFF";d.rated=tonumber(s.rated);d.commissioned=s.commissioned==true;d.message=tostring(s.message or d.message);return d
 end
@@ -132,15 +135,30 @@ local function supervise(b,d,c)
       c.message="Automatic commissioning: waiting for reactor to reach ONLINE"
       return
     end
+    local trial=math.max(COMMISSION_START_FLOW,tonumber(c.commissionFlow) or COMMISSION_START_FLOW)
     gate(b.input,math.max(1,(tonumber(r.fieldDrainRate) or 0)/(1-FIELD_TARGET/100)))
-    gate(b.output,COMMISSION_FLOW)
-    local stable=field>=45 and temp<=6500 and fuel>MINIMUM_FUEL and (tonumber(d.outputFlow) or 0)>0
+    gate(b.output,trial)
+    -- Abort the calibration well before the hard safety interlocks. The last
+    -- proven ceiling remains available after an aborted higher test.
+    if field<COMMISSION_FIELD_FLOOR or temp>COMMISSION_TEMP_LIMIT or fuel<=MINIMUM_FUEL then
+      gate(b.output,0);c.commissioning=false;c.initialRequested=false;c.commissionSamples=0
+      c.message="Calibration halted before safety limit; verified ceiling remains "..fmt(c.rated or 0).." RF/t"
+      return
+    end
+    local output=tonumber(d.outputFlow) or 0
+    local stable=field>=45 and temp<=COMMISSION_TEMP_LIMIT and fuel>MINIMUM_FUEL and output>=trial*.9
     c.commissionSamples=stable and (tonumber(c.commissionSamples) or 0)+1 or 0
     if c.commissionSamples>=COMMISSION_SAMPLES then
-      c.rated=COMMISSION_FLOW;c.commissioned=true;c.commissioning=false;c.initialRequested=false
-      c.message="Automatic commissioning complete: verified "..fmt(c.rated).." RF/t initial safe ceiling"
+      c.rated=trial;c.commissionSamples=0
+      if trial>=COMMISSION_CAP_FLOW then
+        c.commissioned=true;c.commissioning=false;c.initialRequested=false
+        c.message="Automatic calibration complete: verified "..fmt(c.rated).." RF/t safe ceiling"
+      else
+        c.commissionFlow=math.min(COMMISSION_CAP_FLOW,trial*2)
+        c.message="Calibration proved "..fmt(trial).." RF/t; advancing to "..fmt(c.commissionFlow).." RF/t"
+      end
     else
-      c.message="Automatic commissioning: stable sample "..c.commissionSamples.."/"..COMMISSION_SAMPLES
+      c.message="Calibrating "..fmt(trial).." RF/t: stable sample "..c.commissionSamples.."/"..COMMISSION_SAMPLES
     end
     return
   end
@@ -169,19 +187,23 @@ local function draw(t,b,d,page,c,bs)
     bs[#bs+1]=button(t,1,y+3,"SAFE SHUTDOWN",colors.red)
   elseif not c.commissioned then
     text(t,1,y-2,"OUTPUT SELECTOR  [OFF] [MIN] [MED] [MAX] [OVERDRIVE]",colors.gray)
-    text(t,1,y-1,"LOCKED: run automatic commissioning to establish a verified safe ceiling.",colors.orange)
+    text(t,1,y-1,"LOCKED: calibrate a verified output ceiling in safe 50k-to-4M RF/t stages.",colors.orange)
     bs[#bs+1]=button(t,1,y,"AUTO COMMISSION",colors.orange)
-    text(t,1,y+1,"Starts safely, tests a conservative 50k RF/t export, and verifies containment.",colors.lightGray)
+    text(t,1,y+1,"Starts at 50k RF/t and ramps only after each stable containment sample.",colors.lightGray)
     bs[#bs+1]=button(t,1,y+3,"INITIALIZE & ACTIVATE",colors.lime)
     bs[#bs+1]=button(t,27,y+3,"SAFE SHUTDOWN",colors.red)
-  elseif c.mode=="AUTO" then bs[#bs+1]=button(t,1,y,"ENABLE ASSISTED MANUAL",colors.orange);bs[#bs+1]=button(t,27,y,"ARM UNRESTRICTED",colors.red);bs[#bs+1]=button(t,1,y+2,"INITIALIZE & ACTIVATE",colors.lime);bs[#bs+1]=button(t,27,y+2,"SAFE SHUTDOWN",colors.red)
-  elseif c.mode=="ASSISTED" then local px=1;for _,v in ipairs({"OFF","MIN","MED","MAX"}) do local q=button(t,px,y,v,colors.cyan);bs[#bs+1]=q;px=q.x2+2 end;bs[#bs+1]=button(t,px,y,"ARM UNRESTRICTED",colors.red);bs[#bs+1]=button(t,1,y+2,"RESTORE AUTOMATIC",colors.lime)
+  elseif c.mode=="AUTO" then bs[#bs+1]=button(t,1,y,"ENABLE ASSISTED MANUAL",colors.orange);bs[#bs+1]=button(t,27,y,"RECALIBRATE CEILING",colors.orange);bs[#bs+1]=button(t,1,y+2,"INITIALIZE & ACTIVATE",colors.lime);bs[#bs+1]=button(t,27,y+2,"SAFE SHUTDOWN",colors.red)
+  elseif c.mode=="ASSISTED" then local px=1;for _,v in ipairs({"OFF","MIN","MED","MAX"}) do local q=button(t,px,y,v,colors.cyan);bs[#bs+1]=q;px=q.x2+2 end;bs[#bs+1]=button(t,px,y,"ARM UNRESTRICTED",colors.red);bs[#bs+1]=button(t,1,y+2,"RESTORE AUTOMATIC",colors.lime);bs[#bs+1]=button(t,27,y+2,"RECALIBRATE CEILING",colors.orange)
   else local px=1;for _,v in ipairs({"OFF","MIN","MED","MAX","OVERDRIVE"}) do local q=button(t,px,y,v,colors.red);bs[#bs+1]=q;px=q.x2+2 end;bs[#bs+1]=button(t,1,y+2,"RESTORE AUTOMATIC",colors.lime) end
   if c.arm and c.arm>0 then local labels={"LIFT SAFETY INTERLOCK","DISABLE AUTOMATIC CONTROL","TURN AUTHORIZATION KEY","ARM UNRESTRICTED CONTROL"};text(t,1,h-3,"UNRESTRICTED ARMING "..c.arm.."/4: "..labels[c.arm],colors.red);bs[#bs+1]=button(t,1,h-2,labels[c.arm],colors.red);bs[#bs+1]=button(t,35,h-2,"CANCEL",colors.lightGray) end
 end
 local binding,page,controls,buttons=inspect(),"overview",load(),{};local target=binding.monitor and peripheral.wrap(binding.monitor) or term.current();compactMonitor(target,binding.monitor~=nil)
+local function beginCalibration()
+  controls.commissioning=true;controls.commissionFlow=COMMISSION_START_FLOW;controls.commissionSamples=0
+  controls.initialRequested=true;controls.startActivated=false;controls.message="Automatic calibration requested by operator"
+end
 local function act(choice,d)
-  if choice=="AUTO COMMISSION" and controls.gatesOwned then controls.commissioning=true;controls.commissionSamples=0;controls.initialRequested=true;controls.startActivated=false;controls.message="Automatic commissioning requested by operator"
+  if (choice=="AUTO COMMISSION" or choice=="RECALIBRATE CEILING") and controls.gatesOwned then beginCalibration()
   elseif choice=="INITIALIZE & ACTIVATE" and controls.gatesOwned then controls.initialRequested=true;controls.startActivated=false;controls.message="Initial start requested by operator"
   elseif choice=="SAFE SHUTDOWN" then controls.initialRequested=false;controls.startActivated=false;gate(binding.output,0);reactor(binding.reactor,"stopReactor");controls.message="Operator safe shutdown: output closed and stop sent"
   elseif choice=="ENABLE ASSISTED MANUAL" then controls.mode="ASSISTED";controls.request="OFF";controls.message="Assisted manual enabled at OFF"
