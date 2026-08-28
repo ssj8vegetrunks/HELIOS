@@ -160,14 +160,18 @@ local function supervise(b,d,c)
       c.message="Calibration reached the 17% field edge; output closed. Last verified ceiling "..fmt(c.rated or 0).." RF/t"
       return
     end
-    local output=tonumber(d.outputFlow) or 0
-    local stable=field>=45 and temp<=COMMISSION_TEMP_LIMIT and fuel>MINIMUM_FUEL and output>=trial*.9
-    if not stable and output<trial*.9 then
+    -- A Flux Gate's reported flow is not a trustworthy measure of reactor
+    -- generation on every DE/ATM configuration.  The reactor component is
+    -- authoritative: only count a trial as proven when its generation rate
+    -- actually follows the requested export.
+    local generation=tonumber(r.generationRate) or 0
+    local stable=field>=45 and temp<=COMMISSION_TEMP_LIMIT and fuel>MINIMUM_FUEL and generation>=trial*.9
+    if not stable and generation<trial*.9 then
       c.commissionSamples=0;c.commissionShortfallSamples=(tonumber(c.commissionShortfallSamples) or 0)+1
       if c.commissionShortfallSamples>=COMMISSION_SHORTFALL_SAMPLES then
         gate(b.output,0);c.commissioning=false;c.initialRequested=false;c.request="OFF";c.commissioned=(tonumber(c.commissionLastSafe) or 0)>0;c.rated=c.commissionLastSafe
         c.message="Calibration complete: output path stopped accepting higher export; verified ceiling "..fmt(c.rated or 0).." RF/t"
-      else c.message="Testing "..fmt(trial).." RF/t: output acceptance "..c.commissionShortfallSamples.."/"..COMMISSION_SHORTFALL_SAMPLES end
+      else c.message="Testing "..fmt(trial).." RF/t: reactor generation "..fmt(generation).." RF/t ("..c.commissionShortfallSamples.."/"..COMMISSION_SHORTFALL_SAMPLES..")" end
       return
     end
     c.commissionShortfallSamples=0;c.commissionSamples=stable and (tonumber(c.commissionSamples) or 0)+1 or 0
@@ -196,8 +200,8 @@ local function draw(t,b,d,page,c,bs)
   if page=="setup" then text(t,1,5,"LOCAL SAFETY BOUNDARY VALID",colors.lime);text(t,1,7,"Reactor component: "..b.reactor);text(t,1,8,"Output gate:       "..b.output);text(t,1,9,"Field-input gate:  "..b.input);text(t,1,10,"Wired modem:       "..b.modem);text(t,1,12,"No normal HELIOS mainframe may control these peripherals.",colors.orange);return end
   if page=="raw" then text(t,1,5,"RAW DRACONIC TELEMETRY",colors.cyan);local ks={};for k in pairs(d.reactor) do ks[#ks+1]=tostring(k) end;sort(ks);for i,k in ipairs(ks) do if i+6<h then text(t,1,i+6,k..": "..tostring(d.reactor[k])) end end;return end
   local r=d.reactor;if w<54 or h<25 then text(t,1,5,"Large monitor required for the Guardian console.",colors.orange);text(t,1,7,"State: "..tostring(r.status).."  Temp: "..fmt(r.temperature).." C");text(t,1,8,"Generation: "..fmt(r.generationRate).." RF/t");return end
-  vertical(t,2,5,12,"SAT",r.energySaturation,tonumber(r.maxEnergySaturation),colors.blue);vertical(t,8,5,12,"FIELD",r.fieldStrength,tonumber(r.maxFieldStrength),colors.red);vertical(t,16,5,12,"FUEL",(tonumber(r.maxFuelConversion) or 0)-(tonumber(r.fuelConversion) or 0),tonumber(r.maxFuelConversion),colors.lime);vertical(t,23,5,12,"OUT",d.outputFlow,math.max(1,tonumber(c.rated) or tonumber(d.outputSet) or 1),colors.orange)
-  local x=31;text(t,x,5,"REACTOR TELEMETRY",colors.cyan);text(t,x,7,"State:       "..tostring(r.status),colors.lime);text(t,x,8,"Generation:  "..fmt(r.generationRate).." RF/t",colors.cyan);text(t,x,9,"Temperature: "..fmt(r.temperature).." C",colors.orange);text(t,x,10,"Field drain: "..fmt(r.fieldDrainRate).." RF/t");text(t,x,11,"Fuel burned: "..fmt(r.fuelConversion).." / "..fmt(r.maxFuelConversion));text(t,x,12,"Saturation:  "..fmt(r.energySaturation).." / "..fmt(r.maxEnergySaturation));text(t,x,14,"GATE CONTROL (live diagnostics)",colors.cyan);text(t,x,15,"Field:  "..fmt(d.inputFlow).." / "..fmt(d.inputSet).." RF/t  override "..tostring(d.inputOverride),d.inputOverride and colors.lime or colors.red);text(t,x,16,"Output: "..fmt(d.outputFlow).." / "..fmt(d.outputSet).." RF/t  override "..tostring(d.outputOverride),d.outputOverride and colors.lime or colors.red);text(t,x,18,"GUARDIAN: "..c.message,c.mode=="UNRESTRICTED" and colors.red or colors.lightGray)
+  vertical(t,2,5,12,"SAT",r.energySaturation,tonumber(r.maxEnergySaturation),colors.blue);vertical(t,8,5,12,"FIELD",r.fieldStrength,tonumber(r.maxFieldStrength),colors.red);vertical(t,16,5,12,"FUEL",(tonumber(r.maxFuelConversion) or 0)-(tonumber(r.fuelConversion) or 0),tonumber(r.maxFuelConversion),colors.lime);vertical(t,23,5,12,"OUT",r.generationRate,math.max(1,tonumber(c.rated) or tonumber(c.commissionFlow) or 1),colors.orange)
+  local x=31;text(t,x,5,"REACTOR TELEMETRY",colors.cyan);text(t,x,7,"State:       "..tostring(r.status),colors.lime);text(t,x,8,"Generation:  "..fmt(r.generationRate).." RF/t",colors.cyan);text(t,x,9,"Temperature: "..fmt(r.temperature).." C",colors.orange);text(t,x,10,"Field drain: "..fmt(r.fieldDrainRate).." RF/t");text(t,x,11,"Fuel burned: "..fmt(r.fuelConversion).." / "..fmt(r.maxFuelConversion));text(t,x,12,"Saturation:  "..fmt(r.energySaturation).." / "..fmt(r.maxEnergySaturation));text(t,x,14,"GATE CONTROL (live diagnostics)",colors.cyan);text(t,x,15,"Field:  "..fmt(d.inputFlow).." / "..fmt(d.inputSet).." RF/t  override "..tostring(d.inputOverride),d.inputOverride and colors.lime or colors.red);text(t,x,16,"Gate flow: "..fmt(d.outputFlow).." / "..fmt(d.outputSet).." RF/t  override "..tostring(d.outputOverride),d.outputOverride and colors.lime or colors.red);text(t,x,18,"GUARDIAN: "..c.message,c.mode=="UNRESTRICTED" and colors.red or colors.lightGray)
   local y=h-7;if not c.gatesOwned then
     text(t,1,y-2,"GATE CONTROL NOT ACQUIRED - REACTOR START DISABLED",colors.red)
     text(t,1,y-1,"Guardian must show field override true and output override true.",colors.orange)
