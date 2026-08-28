@@ -127,7 +127,11 @@ local function supervise(b,d,c)
       return
     end
     if not c.startActivated and (status=="charged" or status=="warming_up" or status=="warning_up") then
-      reactor(b.reactor,"activateReactor");gate(b.input,math.max(1,(tonumber(r.fieldDrainRate) or 0)/(1-FIELD_TARGET/100)))
+      -- A warming-up reactor commonly reports zero field drain.  Never use
+      -- that transient value to reduce its stabilizer supply: doing so leaves
+      -- the reactor at 1 RF/t and prevents it from ever reaching ONLINE.
+      -- Keep containment fully supplied until live telemetry is available.
+      reactor(b.reactor,"activateReactor");gate(b.input,900000)
       c.startActivated=true;c.message="Initial start: activation sent; waiting for ONLINE"
       return
     end
