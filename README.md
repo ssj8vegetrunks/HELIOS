@@ -252,14 +252,18 @@ The Guardian presents four familiar Draconic-style instruments (saturation,
 field strength, fuel reserve, and output) plus live raw telemetry. It starts in
 `AUTO`, which maintains the field target but leaves output dispatch to a future
 HELIOS request link. `ASSISTED MANUAL` offers OFF/MIN/MED/MAX output selections
-after recording an already stable, live output as its commissioning ceiling.
+after automatic commissioning. The Guardian performs this entirely locally: it
+starts the reactor if required, sets a conservative 50k RF/t export, holds the
+field target, and requires twenty stable samples before unlocking output
+selection. This creates an initial safe ceiling rather than attempting to
+discover the reactor's maximum output.
 Hard fuel, field, and temperature interlocks remain active in assisted mode.
 
 `UNRESTRICTED CONTROL` is intentionally harder to enter: the operator must
 complete all four on-screen interlocks. It adds an OVERDRIVE selection and stops
 automatic intervention, while retaining prominent live warnings. Restoring
 automatic control is always a single button. Commissioning never ramps an
-unknown reactor; it records the existing stable output only.
+unknown reactor; it proves one conservative, contained operating point first.
 
 Use the left and right arrow keys to change the maintenance timeout. The old
 `T` shortcut was removed because it conflicts with ATM10's inventory trash

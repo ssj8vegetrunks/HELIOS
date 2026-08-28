@@ -1,4 +1,3 @@
-
 local writes, calls = {}, {}
 local target = {}
 for _, method in ipairs({ "setBackgroundColor", "setTextColor", "clear", "setCursorPos", "write" }) do
@@ -38,7 +37,7 @@ peripheral = {
             fuelConversion = 10, maxFuelConversion = 1000,
             energySaturation = 1, maxEnergySaturation = 100,
         } end
-        if method == "getFlow" then return 0 end
+        if method == "getFlow" then return name == "right" and 50000 or 0 end
         if method == "getSignalLowFlow" then return name == "right" and 1000000 or 900000 end
         if method == "getOverrideEnabled" then return false end
         if method == "setSignalLowFlow" then writes[#writes + 1] = { name, argument }; return end
@@ -46,12 +45,11 @@ peripheral = {
     end,
 }
 
-local events = {
-    { "monitor_touch", "top", 1, 33 }, -- commission existing output
-    { "monitor_touch", "top", 1, 33 }, -- enable assisted manual
-    { "monitor_touch", "top", 1, 33 }, -- choose OFF
-    { "key", keys.q },
-}
+local events = { { "monitor_touch", "top", 1, 33 } } -- start automatic commissioning
+for _ = 1, 20 do events[#events + 1] = { "timer", 1 } end
+events[#events + 1] = { "monitor_touch", "top", 1, 33 } -- enable assisted manual
+events[#events + 1] = { "monitor_touch", "top", 1, 33 } -- select OFF
+events[#events + 1] = { "key", keys.q }
 os = {
     startTimer = function() return 1 end,
     pullEvent = function()
@@ -62,9 +60,9 @@ os = {
 
 dofile("draconic_guardian.lua")
 
-local sawStop, sawMedium = false, false
+local sawStop, sawCommissionFlow = false, false
 for _, entry in ipairs(calls) do if entry[2] == "stopReactor" then sawStop = true end end
-for _, entry in ipairs(writes) do if entry[1] == "right" and entry[2] == 500000 then sawMedium = true end end
+for _, entry in ipairs(writes) do if entry[1] == "right" and entry[2] == 50000 then sawCommissionFlow = true end end
 assert(sawStop, "manual OFF must request a controlled reactor stop")
-assert(not sawMedium, "uncommissioned output must not be applied")
+assert(sawCommissionFlow, "automatic commissioning must apply its conservative export")
 print("draconic guardian control tests passed")
