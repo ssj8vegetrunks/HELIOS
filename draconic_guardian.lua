@@ -1,13 +1,3 @@
-'git <command> [<revision>...] -- [<file>...]'
-3547fa8a6a84964635afb046750c96515080ae54
--encodedCommand
-dAByAGUAZQA=
-fatal: ambiguous argument 'dAByAGUAZQA=': unknown revision or path not in the working tree.
-Use '--' to separate paths from revisions, like this:
-'git <command> [<revision>...] -- [<file>...]'
-a41187c57fc4635cdf9e8d624c90bfbee52dc065
--encodedCommand
-dAByAGUAZQA=
 -- HELIOS Draconic Guardian v1.0
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
@@ -194,3 +184,4 @@ while true do
   local data=binding.ready and read(binding) or nil;if data then supervise(binding,data,controls);data=read(binding) or data;save(controls) end;buttons={};draw(target,binding,data,page,controls,buttons);local timer=os.startTimer(.1)
   while true do local e,a,b,c=os.pullEvent();if e=="timer" and a==timer then break end;if e=="key" then if a==keys.q then return end;if a==keys.one then page="overview";break elseif a==keys.two then page="raw";break elseif a==keys.three then page="setup";break end elseif e=="monitor_touch" and target~=term.current() then if c==3 then page=b<=10 and "overview" or b<=21 and "raw" or "setup";break end;local choice=hit(buttons,b,c);if choice then act(choice,data);break end elseif e=="peripheral" or e=="peripheral_detach" then binding=inspect();target=binding.monitor and peripheral.wrap(binding.monitor) or term.current();compactMonitor(target,binding.monitor~=nil);break end end
 end
+
