@@ -1,3 +1,13 @@
+'git <command> [<revision>...] -- [<file>...]'
+3547fa8a6a84964635afb046750c96515080ae54
+-encodedCommand
+dAByAGUAZQA=
+fatal: ambiguous argument 'dAByAGUAZQA=': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]'
+a41187c57fc4635cdf9e8d624c90bfbee52dc065
+-encodedCommand
+dAByAGUAZQA=
 -- HELIOS Draconic Guardian v1.0
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
@@ -38,9 +48,30 @@ local function call(n,m,...)
 end
 local function read(b)
   local r,e=call(b.reactor,"getReactorInfo"); if type(r)~="table" then return nil,e or "getReactorInfo failed" end
-  return {reactor=r,inputFlow=call(b.input,"getFlow"),outputFlow=call(b.output,"getFlow"),inputSet=call(b.input,"getSignalLowFlow"),outputSet=call(b.output,"getSignalLowFlow"),inputOverride=call(b.input,"getOverrideEnabled"),outputOverride=call(b.output,"getOverrideEnabled")}
+  local inputSet=call(b.input,"getFlowOverride");if inputSet==nil then inputSet=call(b.input,"getSignalLowFlow") end
+  local outputSet=call(b.output,"getFlowOverride");if outputSet==nil then outputSet=call(b.output,"getSignalLowFlow") end
+  return {reactor=r,inputFlow=call(b.input,"getFlow"),outputFlow=call(b.output,"getFlow"),inputSet=inputSet,outputSet=outputSet,inputOverride=call(b.input,"getOverrideEnabled"),outputOverride=call(b.output,"getOverrideEnabled")}
 end
-local function gate(n,v) return pcall(peripheral.call,n,"setSignalLowFlow",math.max(0,math.floor(tonumber(v) or 0))) end
+local function gate(n,v)
+  local flow=math.max(0,math.floor(tonumber(v) or 0))
+  local enabled,enableError=call(n,"setOverrideEnabled",true);if enabled==nil and enableError then return false,enableError end
+  local _,flowError=call(n,"setFlowOverride",flow);if flowError then return false,flowError end
+  return true
+end
+local function acquireGates(b,d,c)
+  if d.inputOverride==true and d.outputOverride==true then c.gatesOwned=true;c.gateError=nil;return true end
+  -- Containment first, then export. Never close field support while taking control.
+  local inputOk,inputError=gate(b.input,900000)
+  local outputOk,outputError=gate(b.output,0)
+  local inputOwned=call(b.input,"getOverrideEnabled")==true
+  local outputOwned=call(b.output,"getOverrideEnabled")==true
+  c.gatesOwned=inputOk and outputOk and inputOwned and outputOwned
+  if not c.gatesOwned then
+    c.message="CONTROL LOCKED: gate override not acquired (field "..tostring(inputOwned)..", output "..tostring(outputOwned)..")"
+    c.gateError=inputError or outputError
+  else c.gateError=nil end
+  return c.gatesOwned
+end
 local function reactor(n,m) return pcall(peripheral.call,n,m) end
 local function pct(a,b) if tonumber(a) and tonumber(b) and tonumber(b)>0 then return tonumber(a)/tonumber(b)*100 end end
 local function clamp(x) return math.max(0,math.min(1,tonumber(x) or 0)) end
@@ -71,6 +102,11 @@ local function supervise(b,d,c)
   local r=d.reactor;local status=string.lower(tostring(r.status or "unknown"));local field=pct(r.fieldStrength,r.maxFieldStrength) or 0
   local fuel=pct((tonumber(r.maxFuelConversion) or 0)-(tonumber(r.fuelConversion) or 0),r.maxFuelConversion) or 0;local temp=tonumber(r.temperature) or math.huge;local free=c.mode=="UNRESTRICTED"
   local function stop(reason,charge) gate(b.output,0);reactor(b.reactor,"stopReactor");if charge then reactor(b.reactor,"chargeReactor");gate(b.input,900000) end;c.message="SAFETY INTERLOCK: "..reason;return true end
+  if not acquireGates(b,d,c) then
+    c.initialRequested=false;c.startActivated=false;c.commissioning=false
+    reactor(b.reactor,"stopReactor")
+    return
+  end
   if not free then
     if fuel<=MINIMUM_FUEL then return stop("fuel reserve below "..MINIMUM_FUEL.."%") end
     if status=="online" and field<=FIELD_EMERGENCY then return stop("field below "..FIELD_EMERGENCY.."%",true) end
@@ -125,7 +161,12 @@ local function draw(t,b,d,page,c,bs)
   local r=d.reactor;if w<54 or h<25 then text(t,1,5,"Large monitor required for the Guardian console.",colors.orange);text(t,1,7,"State: "..tostring(r.status).."  Temp: "..fmt(r.temperature).." C");text(t,1,8,"Generation: "..fmt(r.generationRate).." RF/t");return end
   vertical(t,2,5,12,"SAT",r.energySaturation,tonumber(r.maxEnergySaturation),colors.blue);vertical(t,8,5,12,"FIELD",r.fieldStrength,tonumber(r.maxFieldStrength),colors.red);vertical(t,16,5,12,"FUEL",(tonumber(r.maxFuelConversion) or 0)-(tonumber(r.fuelConversion) or 0),tonumber(r.maxFuelConversion),colors.lime);vertical(t,23,5,12,"OUT",d.outputFlow,math.max(1,tonumber(c.rated) or tonumber(d.outputSet) or 1),colors.orange)
   local x=31;text(t,x,5,"REACTOR TELEMETRY",colors.cyan);text(t,x,7,"State:       "..tostring(r.status),colors.lime);text(t,x,8,"Generation:  "..fmt(r.generationRate).." RF/t",colors.cyan);text(t,x,9,"Temperature: "..fmt(r.temperature).." C",colors.orange);text(t,x,10,"Field drain: "..fmt(r.fieldDrainRate).." RF/t");text(t,x,11,"Fuel burned: "..fmt(r.fuelConversion).." / "..fmt(r.maxFuelConversion));text(t,x,12,"Saturation:  "..fmt(r.energySaturation).." / "..fmt(r.maxEnergySaturation));text(t,x,14,"GATE CONTROL (live diagnostics)",colors.cyan);text(t,x,15,"Field:  "..fmt(d.inputFlow).." / "..fmt(d.inputSet).." RF/t  override "..tostring(d.inputOverride),d.inputOverride and colors.lime or colors.red);text(t,x,16,"Output: "..fmt(d.outputFlow).." / "..fmt(d.outputSet).." RF/t  override "..tostring(d.outputOverride),d.outputOverride and colors.lime or colors.red);text(t,x,18,"GUARDIAN: "..c.message,c.mode=="UNRESTRICTED" and colors.red or colors.lightGray)
-  local y=h-7;if not c.commissioned then
+  local y=h-7;if not c.gatesOwned then
+    text(t,1,y-2,"GATE CONTROL NOT ACQUIRED - REACTOR START DISABLED",colors.red)
+    text(t,1,y-1,"Guardian must show field override true and output override true.",colors.orange)
+    if c.gateError then text(t,1,y,"API error: "..tostring(c.gateError),colors.red) end
+    bs[#bs+1]=button(t,1,y+3,"SAFE SHUTDOWN",colors.red)
+  elseif not c.commissioned then
     text(t,1,y-2,"OUTPUT SELECTOR  [OFF] [MIN] [MED] [MAX] [OVERDRIVE]",colors.gray)
     text(t,1,y-1,"LOCKED: run automatic commissioning to establish a verified safe ceiling.",colors.orange)
     bs[#bs+1]=button(t,1,y,"AUTO COMMISSION",colors.orange)
@@ -139,8 +180,8 @@ local function draw(t,b,d,page,c,bs)
 end
 local binding,page,controls,buttons=inspect(),"overview",load(),{};local target=binding.monitor and peripheral.wrap(binding.monitor) or term.current();compactMonitor(target,binding.monitor~=nil)
 local function act(choice,d)
-  if choice=="AUTO COMMISSION" then controls.commissioning=true;controls.commissionSamples=0;controls.initialRequested=true;controls.startActivated=false;controls.message="Automatic commissioning requested by operator"
-  elseif choice=="INITIALIZE & ACTIVATE" then controls.initialRequested=true;controls.startActivated=false;controls.message="Initial start requested by operator"
+  if choice=="AUTO COMMISSION" and controls.gatesOwned then controls.commissioning=true;controls.commissionSamples=0;controls.initialRequested=true;controls.startActivated=false;controls.message="Automatic commissioning requested by operator"
+  elseif choice=="INITIALIZE & ACTIVATE" and controls.gatesOwned then controls.initialRequested=true;controls.startActivated=false;controls.message="Initial start requested by operator"
   elseif choice=="SAFE SHUTDOWN" then controls.initialRequested=false;controls.startActivated=false;gate(binding.output,0);reactor(binding.reactor,"stopReactor");controls.message="Operator safe shutdown: output closed and stop sent"
   elseif choice=="ENABLE ASSISTED MANUAL" then controls.mode="ASSISTED";controls.request="OFF";controls.message="Assisted manual enabled at OFF"
   elseif choice=="ARM UNRESTRICTED" then controls.arm=1;controls.message="Unrestricted arming started"
@@ -150,6 +191,6 @@ local function act(choice,d)
   elseif FRACTION[choice] then controls.request=choice;controls.message="Output request: "..choice end;save(controls)
 end
 while true do
-  local data=binding.ready and read(binding) or nil;if data then supervise(binding,data,controls);save(controls) end;buttons={};draw(target,binding,data,page,controls,buttons);local timer=os.startTimer(1)
+  local data=binding.ready and read(binding) or nil;if data then supervise(binding,data,controls);data=read(binding) or data;save(controls) end;buttons={};draw(target,binding,data,page,controls,buttons);local timer=os.startTimer(.1)
   while true do local e,a,b,c=os.pullEvent();if e=="timer" and a==timer then break end;if e=="key" then if a==keys.q then return end;if a==keys.one then page="overview";break elseif a==keys.two then page="raw";break elseif a==keys.three then page="setup";break end elseif e=="monitor_touch" and target~=term.current() then if c==3 then page=b<=10 and "overview" or b<=21 and "raw" or "setup";break end;local choice=hit(buttons,b,c);if choice then act(choice,data);break end elseif e=="peripheral" or e=="peripheral_detach" then binding=inspect();target=binding.monitor and peripheral.wrap(binding.monitor) or term.current();compactMonitor(target,binding.monitor~=nil);break end end
 end

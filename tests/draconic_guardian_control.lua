@@ -1,4 +1,6 @@
 local writes, calls = {}, {}
+local overrides = { right = false, flow_gate_1 = false }
+local overrideFlows = { right = 0, flow_gate_1 = 0 }
 local target = {}
 for _, method in ipairs({ "setBackgroundColor", "setTextColor", "clear", "setCursorPos", "write" }) do
     target[method] = function() end
@@ -39,7 +41,10 @@ peripheral = {
         } end
         if method == "getFlow" then return name == "right" and 50000 or 0 end
         if method == "getSignalLowFlow" then return name == "right" and 1000000 or 900000 end
-        if method == "getOverrideEnabled" then return false end
+        if method == "getOverrideEnabled" then return overrides[name] end
+        if method == "getFlowOverride" then return overrideFlows[name] end
+        if method == "setOverrideEnabled" then overrides[name] = argument; writes[#writes + 1] = { name, method, argument }; return true end
+        if method == "setFlowOverride" then overrideFlows[name] = argument; writes[#writes + 1] = { name, argument }; return true end
         if method == "setSignalLowFlow" then writes[#writes + 1] = { name, argument }; return end
         calls[#calls + 1] = { name, method }
     end,
@@ -65,4 +70,6 @@ for _, entry in ipairs(calls) do if entry[2] == "stopReactor" then sawStop = tru
 for _, entry in ipairs(writes) do if entry[1] == "right" and entry[2] == 50000 then sawCommissionFlow = true end end
 assert(sawStop, "manual OFF must request a controlled reactor stop")
 assert(sawCommissionFlow, "automatic commissioning must apply its conservative export")
+assert(overrides.right and overrides.flow_gate_1, "Guardian must acquire direct override of both gates")
 print("draconic guardian control tests passed")
+
