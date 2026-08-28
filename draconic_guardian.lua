@@ -1,4 +1,3 @@
-
 -- HELIOS Draconic Guardian v1.0
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
@@ -94,7 +93,11 @@ local function draw(t,b,d,page,c,bs)
   local r=d.reactor;if w<54 or h<25 then text(t,1,5,"Large monitor required for the Guardian console.",colors.orange);text(t,1,7,"State: "..tostring(r.status).."  Temp: "..fmt(r.temperature).." C");text(t,1,8,"Generation: "..fmt(r.generationRate).." RF/t");return end
   vertical(t,2,5,12,"SAT",r.energySaturation,tonumber(r.maxEnergySaturation),colors.blue);vertical(t,8,5,12,"FIELD",r.fieldStrength,tonumber(r.maxFieldStrength),colors.red);vertical(t,16,5,12,"FUEL",(tonumber(r.maxFuelConversion) or 0)-(tonumber(r.fuelConversion) or 0),tonumber(r.maxFuelConversion),colors.lime);vertical(t,23,5,12,"OUT",d.outputFlow,math.max(1,tonumber(c.rated) or tonumber(d.outputSet) or 1),colors.orange)
   local x=31;text(t,x,5,"REACTOR TELEMETRY",colors.cyan);text(t,x,7,"State:       "..tostring(r.status),colors.lime);text(t,x,8,"Generation:  "..fmt(r.generationRate).." RF/t",colors.cyan);text(t,x,9,"Temperature: "..fmt(r.temperature).." C",colors.orange);text(t,x,10,"Field drain: "..fmt(r.fieldDrainRate).." RF/t");text(t,x,11,"Field input: "..fmt(d.inputFlow).." RF/t");text(t,x,12,"Output flow: "..fmt(d.outputFlow).." RF/t");text(t,x,13,"Output gate: "..fmt(d.outputSet).." RF/t");text(t,x,14,"Fuel burned: "..fmt(r.fuelConversion).." / "..fmt(r.maxFuelConversion));text(t,x,15,"Saturation:  "..fmt(r.energySaturation).." / "..fmt(r.maxEnergySaturation));text(t,x,17,"GUARDIAN: "..c.message,c.mode=="UNRESTRICTED" and colors.red or colors.lightGray)
-  local y=h-7;if not c.commissioned then bs[#bs+1]=button(t,1,y,"COMMISSION CURRENT OUTPUT",colors.orange);text(t,1,y+1,"Records a stable existing export; never ramps an unknown reactor.",colors.lightGray)
+  local y=h-7;if not c.commissioned then
+    text(t,1,y-2,"OUTPUT SELECTOR  [OFF] [MIN] [MED] [MAX] [OVERDRIVE]",colors.gray)
+    text(t,1,y-1,"LOCKED: commission a stable live export to establish its safe ceiling.",colors.orange)
+    bs[#bs+1]=button(t,1,y,"COMMISSION CURRENT OUTPUT",colors.orange)
+    text(t,1,y+1,"Records a stable existing export; never ramps an unknown reactor.",colors.lightGray)
   elseif c.mode=="AUTO" then bs[#bs+1]=button(t,1,y,"ENABLE ASSISTED MANUAL",colors.orange);bs[#bs+1]=button(t,27,y,"ARM UNRESTRICTED",colors.red)
   elseif c.mode=="ASSISTED" then local px=1;for _,v in ipairs({"OFF","MIN","MED","MAX"}) do local q=button(t,px,y,v,colors.cyan);bs[#bs+1]=q;px=q.x2+2 end;bs[#bs+1]=button(t,px,y,"ARM UNRESTRICTED",colors.red);bs[#bs+1]=button(t,1,y+2,"RESTORE AUTOMATIC",colors.lime)
   else local px=1;for _,v in ipairs({"OFF","MIN","MED","MAX","OVERDRIVE"}) do local q=button(t,px,y,v,colors.red);bs[#bs+1]=q;px=q.x2+2 end;bs[#bs+1]=button(t,1,y+2,"RESTORE AUTOMATIC",colors.lime) end
