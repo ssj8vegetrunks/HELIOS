@@ -6,8 +6,12 @@ local FIELD_TARGET, FIELD_EMERGENCY = 50, 15
 local MAX_TEMPERATURE, MINIMUM_FUEL = 8000, 10
 -- Draconic's peripheral telemetry reports live generation but not a safe
 -- maximum output. Establish one by proving progressively larger exports.
-local COMMISSION_START_FLOW, COMMISSION_CAP_FLOW = 50000, 4000000
-local COMMISSION_SAMPLES, COMMISSION_FIELD_FLOOR, COMMISSION_TEMP_LIMIT = 20, 35, 5000
+-- The calibration may approach the real limit, but never crosses the 15%
+-- hard shutdown interlock: 17% is the operating-edge cutoff.
+local COMMISSION_START_FLOW, COMMISSION_SAMPLES = 50000, 20
+local COMMISSION_FIELD_FLOOR, COMMISSION_TEMP_LIMIT = 17, 5000
+local COMMISSION_STEP_RATIO, COMMISSION_MIN_STEP = 1.25, 50000
+local COMMISSION_SHORTFALL_SAMPLES = 20
 local FRACTION = { OFF = 0, MIN = .25, MED = .50, MAX = 1, OVERDRIVE = 1.25 }
 local SETTINGS = ".helios-draconic-guardian.lua"
 
@@ -93,7 +97,7 @@ local function vertical(t,x,y,h,label,now,maximum,c)
   t.setBackgroundColor(colors.black);text(t,x,y+h+1,string.format("%3.0f%%",f*100),c)
 end
 local function load()
-  local d={mode="AUTO",request="OFF",rated=nil,commissioned=false,commissioning=false,commissionFlow=nil,commissionSamples=0,arm=0,initialRequested=false,startActivated=false,message="Automatic safe supervision"}
+  local d={mode="AUTO",request="OFF",rated=nil,commissioned=false,commissioning=false,commissionFlow=nil,commissionSamples=0,commissionShortfallSamples=0,commissionLastSafe=nil,recovery=false,arm=0,initialRequested=false,startActivated=false,message="Automatic safe supervision"}
   if not fs.exists(SETTINGS) then return d end;local ok,s=pcall(dofile,SETTINGS);if not ok or type(s)~="table" then return d end
   d.mode=(s.mode=="ASSISTED" or s.mode=="UNRESTRICTED") and s.mode or "AUTO";d.request=FRACTION[s.request] and s.request or "OFF";d.rated=tonumber(s.rated);d.commissioned=s.commissioned==true;d.message=tostring(s.message or d.message);return d
 end
@@ -129,6 +133,16 @@ local function supervise(b,d,c)
     end
     if live then c.initialRequested=false;c.startActivated=false;c.message="Initial start complete; reactor is live" end
   end
+  if c.recovery then
+    -- A calibration that reaches its edge pauses with export closed until the
+    -- field has rebuilt. This prevents an old manual request from resuming.
+    gate(b.output,0);gate(b.input,900000)
+    if field>=45 and temp<=COMMISSION_TEMP_LIMIT then
+      c.recovery=false
+      c.message="Calibration recovery complete; export remains OFF"
+    else c.message="Calibration recovery: output closed while containment rebuilds" end
+    return
+  end
   if c.commissioning then
     if not live then
       c.initialRequested=true
@@ -138,25 +152,29 @@ local function supervise(b,d,c)
     local trial=math.max(COMMISSION_START_FLOW,tonumber(c.commissionFlow) or COMMISSION_START_FLOW)
     gate(b.input,math.max(1,(tonumber(r.fieldDrainRate) or 0)/(1-FIELD_TARGET/100)))
     gate(b.output,trial)
-    -- Abort the calibration well before the hard safety interlocks. The last
-    -- proven ceiling remains available after an aborted higher test.
+    -- Stop just above the hard 15% interlock. A 17% calibration cutoff leaves
+    -- the guardian room to close export and rebuild the field safely.
     if field<COMMISSION_FIELD_FLOOR or temp>COMMISSION_TEMP_LIMIT or fuel<=MINIMUM_FUEL then
-      gate(b.output,0);c.commissioning=false;c.initialRequested=false;c.commissionSamples=0
-      c.message="Calibration halted before safety limit; verified ceiling remains "..fmt(c.rated or 0).." RF/t"
+      gate(b.output,0);gate(b.input,900000);c.commissioning=false;c.initialRequested=false;c.commissionSamples=0;c.commissionShortfallSamples=0;c.request="OFF";c.recovery=true
+      c.commissioned=tonumber(c.commissionLastSafe) and c.commissionLastSafe>0 or false;c.rated=c.commissionLastSafe
+      c.message="Calibration reached the 17% field edge; output closed. Last verified ceiling "..fmt(c.rated or 0).." RF/t"
       return
     end
     local output=tonumber(d.outputFlow) or 0
     local stable=field>=45 and temp<=COMMISSION_TEMP_LIMIT and fuel>MINIMUM_FUEL and output>=trial*.9
-    c.commissionSamples=stable and (tonumber(c.commissionSamples) or 0)+1 or 0
+    if not stable and output<trial*.9 then
+      c.commissionSamples=0;c.commissionShortfallSamples=(tonumber(c.commissionShortfallSamples) or 0)+1
+      if c.commissionShortfallSamples>=COMMISSION_SHORTFALL_SAMPLES then
+        gate(b.output,0);c.commissioning=false;c.initialRequested=false;c.request="OFF";c.commissioned=(tonumber(c.commissionLastSafe) or 0)>0;c.rated=c.commissionLastSafe
+        c.message="Calibration complete: output path stopped accepting higher export; verified ceiling "..fmt(c.rated or 0).." RF/t"
+      else c.message="Testing "..fmt(trial).." RF/t: output acceptance "..c.commissionShortfallSamples.."/"..COMMISSION_SHORTFALL_SAMPLES end
+      return
+    end
+    c.commissionShortfallSamples=0;c.commissionSamples=stable and (tonumber(c.commissionSamples) or 0)+1 or 0
     if c.commissionSamples>=COMMISSION_SAMPLES then
-      c.rated=trial;c.commissionSamples=0
-      if trial>=COMMISSION_CAP_FLOW then
-        c.commissioned=true;c.commissioning=false;c.initialRequested=false
-        c.message="Automatic calibration complete: verified "..fmt(c.rated).." RF/t safe ceiling"
-      else
-        c.commissionFlow=math.min(COMMISSION_CAP_FLOW,trial*2)
-        c.message="Calibration proved "..fmt(trial).." RF/t; advancing to "..fmt(c.commissionFlow).." RF/t"
-      end
+      c.rated=trial;c.commissionLastSafe=trial;c.commissionSamples=0
+      c.commissionFlow=math.max(trial+COMMISSION_MIN_STEP,math.floor(trial*COMMISSION_STEP_RATIO))
+      c.message="Calibration proved "..fmt(trial).." RF/t; advancing to "..fmt(c.commissionFlow).." RF/t"
     else
       c.message="Calibrating "..fmt(trial).." RF/t: stable sample "..c.commissionSamples.."/"..COMMISSION_SAMPLES
     end
@@ -187,9 +205,9 @@ local function draw(t,b,d,page,c,bs)
     bs[#bs+1]=button(t,1,y+3,"SAFE SHUTDOWN",colors.red)
   elseif not c.commissioned then
     text(t,1,y-2,"OUTPUT SELECTOR  [OFF] [MIN] [MED] [MAX] [OVERDRIVE]",colors.gray)
-    text(t,1,y-1,"LOCKED: calibrate a verified output ceiling in safe 50k-to-4M RF/t stages.",colors.orange)
+    text(t,1,y-1,"LOCKED: calibrate a verified output ceiling against live containment.",colors.orange)
     bs[#bs+1]=button(t,1,y,"AUTO COMMISSION",colors.orange)
-    text(t,1,y+1,"Starts at 50k RF/t and ramps only after each stable containment sample.",colors.lightGray)
+    text(t,1,y+1,"Starts at 50k RF/t; rises while the field stays at or above 17%.",colors.lightGray)
     bs[#bs+1]=button(t,1,y+3,"INITIALIZE & ACTIVATE",colors.lime)
     bs[#bs+1]=button(t,27,y+3,"SAFE SHUTDOWN",colors.red)
   elseif c.mode=="AUTO" then bs[#bs+1]=button(t,1,y,"ENABLE ASSISTED MANUAL",colors.orange);bs[#bs+1]=button(t,27,y,"RECALIBRATE CEILING",colors.orange);bs[#bs+1]=button(t,1,y+2,"INITIALIZE & ACTIVATE",colors.lime);bs[#bs+1]=button(t,27,y+2,"SAFE SHUTDOWN",colors.red)
@@ -199,7 +217,7 @@ local function draw(t,b,d,page,c,bs)
 end
 local binding,page,controls,buttons=inspect(),"overview",load(),{};local target=binding.monitor and peripheral.wrap(binding.monitor) or term.current();compactMonitor(target,binding.monitor~=nil)
 local function beginCalibration()
-  controls.commissioning=true;controls.commissionFlow=COMMISSION_START_FLOW;controls.commissionSamples=0
+  controls.commissioning=true;controls.commissionFlow=COMMISSION_START_FLOW;controls.commissionSamples=0;controls.commissionShortfallSamples=0;controls.commissionLastSafe=nil;controls.recovery=false;controls.commissioned=false;controls.rated=nil;controls.request="OFF"
   controls.initialRequested=true;controls.startActivated=false;controls.message="Automatic calibration requested by operator"
 end
 local function act(choice,d)

@@ -39,7 +39,7 @@ peripheral = {
             fuelConversion = 10, maxFuelConversion = 1000,
             energySaturation = 1, maxEnergySaturation = 100,
         } end
-        if method == "getFlow" then return name == "right" and overrideFlows.right or 0 end
+        if method == "getFlow" then return name == "right" and math.min(overrideFlows.right, 5000000) or 0 end
         if method == "getSignalLowFlow" then return name == "right" and 1000000 or 900000 end
         if method == "getOverrideEnabled" then return overrides[name] end
         if method == "getFlowOverride" then return overrideFlows[name] end
@@ -51,8 +51,9 @@ peripheral = {
 }
 
 local events = { { "monitor_touch", "top", 1, 33 } } -- start automatic commissioning
--- Eight 20-sample stages: 50k, 100k, 200k, 400k, 800k, 1.6M, 3.2M, 4M.
-for _ = 1, 200 do events[#events + 1] = { "timer", 1 } end
+-- The simulated output path accepts up to 5M RF/t. Calibration must test
+-- beyond its former fixed 4M ceiling, then retain the last proven step.
+for _ = 1, 600 do events[#events + 1] = { "timer", 1 } end
 events[#events + 1] = { "monitor_touch", "top", 1, 33 } -- enable assisted manual
 events[#events + 1] = { "monitor_touch", "top", 1, 33 } -- select OFF
 events[#events + 1] = { "key", keys.q }
@@ -66,13 +67,13 @@ os = {
 
 dofile("draconic_guardian.lua")
 
-local sawStop, sawCommissionFlow, sawCalibratedCap = false, false, false
+local sawStop, sawCommissionFlow, sawBeyondFormerCap = false, false, false
 for _, entry in ipairs(calls) do if entry[2] == "stopReactor" then sawStop = true end end
 for _, entry in ipairs(writes) do if entry[1] == "right" and entry[2] == 50000 then sawCommissionFlow = true end end
-for _, entry in ipairs(writes) do if entry[1] == "right" and entry[2] == 4000000 then sawCalibratedCap = true end end
+for _, entry in ipairs(writes) do if entry[1] == "right" and type(entry[2]) == "number" and entry[2] > 4000000 then sawBeyondFormerCap = true end end
 assert(sawStop, "manual OFF must request a controlled reactor stop")
 assert(sawCommissionFlow, "automatic commissioning must apply its conservative export")
-assert(sawCalibratedCap, "automatic calibration must prove the staged 4M RF/t ceiling")
+assert(sawBeyondFormerCap, "automatic calibration must not impose the former fixed 4M RF/t ceiling")
 assert(overrides.right and overrides.flow_gate_1, "Guardian must acquire direct override of both gates")
 print("draconic guardian control tests passed")
 
