@@ -34,7 +34,7 @@ peripheral = {
     wrap = function() return monitorTarget end,
     call = function(name, method, argument)
         if method == "getReactorInfo" then return {
-            status = "online", generationRate = 1000000, temperature = 2000,
+            status = "running", generationRate = 1000000, temperature = 2000,
             fieldStrength = 60, maxFieldStrength = 100, fieldDrainRate = 100,
             fuelConversion = 10, maxFuelConversion = 1000,
             energySaturation = 1, maxEnergySaturation = 100,
