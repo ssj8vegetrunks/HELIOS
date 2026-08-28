@@ -72,8 +72,18 @@ local function fmt(n)
 end
 local function text(t,x,y,s,c) local w=select(1,t.getSize());if y>=1 then t.setCursorPos(x,y);t.setTextColor(c or colors.white);t.write(string.sub(tostring(s),1,math.max(0,w-x+1))) end end
 local function compactMonitor(t,isMonitor) if isMonitor and t and type(t.setTextScale)=="function" then pcall(t.setTextScale,.5) end end
-local function button(t,x,y,label,c) local v="["..label.."]";text(t,x,y,v,c or colors.cyan);return {x1=x,x2=x+#v-1,y=y,label=label} end
-local function hit(bs,x,y) for _,b in ipairs(bs) do if b.y==y and x>=b.x1 and x<=b.x2 then return b.label end end end
+-- A monitor touch may land one character-row below its glyph on scaled displays.
+-- Give each visible control a small, non-overlapping touch target instead of
+-- requiring the operator to hit its single text baseline exactly.
+local function button(t,x,y,label,c)
+  local v="["..label.."]";text(t,x,y,v,c or colors.cyan)
+  return {x1=x,x2=x+#v-1,y1=y,y2=y+1,label=label}
+end
+local function hit(bs,x,y)
+  for _,b in ipairs(bs) do
+    if y>=b.y1 and y<=b.y2 and x>=b.x1 and x<=b.x2 then return b.label end
+  end
+end
 local function vertical(t,x,y,h,label,now,maximum,c)
   local f=maximum and clamp((tonumber(now) or 0)/maximum) or 0;text(t,x,y,label,colors.lightGray)
   for row=1,h do t.setCursorPos(x,y+row);t.setBackgroundColor(row>h-math.max(1,math.floor(h*f)) and c or colors.gray);t.write("    ") end
@@ -183,6 +193,6 @@ local function act(choice,d)
 end
 while true do
   local data=binding.ready and read(binding) or nil;if data then supervise(binding,data,controls);data=read(binding) or data;save(controls) end;buttons={};draw(target,binding,data,page,controls,buttons);local timer=os.startTimer(.1)
-  while true do local e,a,b,c=os.pullEvent();if e=="timer" and a==timer then break end;if e=="key" then if a==keys.q then return end;if a==keys.one then page="overview";break elseif a==keys.two then page="raw";break elseif a==keys.three then page="setup";break end elseif e=="monitor_touch" and target~=term.current() then if c==3 then page=b<=10 and "overview" or b<=21 and "raw" or "setup";break end;local choice=hit(buttons,b,c);if choice then act(choice,data);break end elseif e=="peripheral" or e=="peripheral_detach" then binding=inspect();target=binding.monitor and peripheral.wrap(binding.monitor) or term.current();compactMonitor(target,binding.monitor~=nil);break end end
+  while true do local e,a,b,c=os.pullEvent();if e=="timer" and a==timer then break end;if e=="key" then if a==keys.q then return end;if a==keys.one then page="overview";break elseif a==keys.two then page="raw";break elseif a==keys.three then page="setup";break end elseif e=="monitor_touch" and target~=term.current() then if c>=3 and c<=4 then page=b<=10 and "overview" or b<=21 and "raw" or "setup";break end;local choice=hit(buttons,b,c);if choice then act(choice,data);break end elseif e=="peripheral" or e=="peripheral_detach" then binding=inspect();target=binding.monitor and peripheral.wrap(binding.monitor) or term.current();compactMonitor(target,binding.monitor~=nil);break end end
 end
 
