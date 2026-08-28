@@ -50,6 +50,7 @@ local function fmt(n)
   return string.format(math.abs(n)>=100 and "%.0f%s" or "%.2f%s",n,u[i])
 end
 local function text(t,x,y,s,c) local w=select(1,t.getSize());if y>=1 then t.setCursorPos(x,y);t.setTextColor(c or colors.white);t.write(string.sub(tostring(s),1,math.max(0,w-x+1))) end end
+local function compactMonitor(t,isMonitor) if isMonitor and t and type(t.setTextScale)=="function" then pcall(t.setTextScale,.5) end end
 local function button(t,x,y,label,c) local v="["..label.."]";text(t,x,y,v,c or colors.cyan);return {x1=x,x2=x+#v-1,y=y,label=label} end
 local function hit(bs,x,y) for _,b in ipairs(bs) do if b.y==y and x>=b.x1 and x<=b.x2 then return b.label end end end
 local function vertical(t,x,y,h,label,now,maximum,c)
@@ -136,7 +137,7 @@ local function draw(t,b,d,page,c,bs)
   else local px=1;for _,v in ipairs({"OFF","MIN","MED","MAX","OVERDRIVE"}) do local q=button(t,px,y,v,colors.red);bs[#bs+1]=q;px=q.x2+2 end;bs[#bs+1]=button(t,1,y+2,"RESTORE AUTOMATIC",colors.lime) end
   if c.arm and c.arm>0 then local labels={"LIFT SAFETY INTERLOCK","DISABLE AUTOMATIC CONTROL","TURN AUTHORIZATION KEY","ARM UNRESTRICTED CONTROL"};text(t,1,h-3,"UNRESTRICTED ARMING "..c.arm.."/4: "..labels[c.arm],colors.red);bs[#bs+1]=button(t,1,h-2,labels[c.arm],colors.red);bs[#bs+1]=button(t,35,h-2,"CANCEL",colors.lightGray) end
 end
-local binding,page,controls,buttons=inspect(),"overview",load(),{};local target=binding.monitor and peripheral.wrap(binding.monitor) or term.current()
+local binding,page,controls,buttons=inspect(),"overview",load(),{};local target=binding.monitor and peripheral.wrap(binding.monitor) or term.current();compactMonitor(target,binding.monitor~=nil)
 local function act(choice,d)
   if choice=="AUTO COMMISSION" then controls.commissioning=true;controls.commissionSamples=0;controls.initialRequested=true;controls.startActivated=false;controls.message="Automatic commissioning requested by operator"
   elseif choice=="INITIALIZE & ACTIVATE" then controls.initialRequested=true;controls.startActivated=false;controls.message="Initial start requested by operator"
@@ -150,5 +151,5 @@ local function act(choice,d)
 end
 while true do
   local data=binding.ready and read(binding) or nil;if data then supervise(binding,data,controls);save(controls) end;buttons={};draw(target,binding,data,page,controls,buttons);local timer=os.startTimer(1)
-  while true do local e,a,b,c=os.pullEvent();if e=="timer" and a==timer then break end;if e=="key" then if a==keys.q then return end;if a==keys.one then page="overview";break elseif a==keys.two then page="raw";break elseif a==keys.three then page="setup";break end elseif e=="monitor_touch" and target~=term.current() then if c==3 then page=b<=10 and "overview" or b<=21 and "raw" or "setup";break end;local choice=hit(buttons,b,c);if choice then act(choice,data);break end elseif e=="peripheral" or e=="peripheral_detach" then binding=inspect();target=binding.monitor and peripheral.wrap(binding.monitor) or term.current();break end end
+  while true do local e,a,b,c=os.pullEvent();if e=="timer" and a==timer then break end;if e=="key" then if a==keys.q then return end;if a==keys.one then page="overview";break elseif a==keys.two then page="raw";break elseif a==keys.three then page="setup";break end elseif e=="monitor_touch" and target~=term.current() then if c==3 then page=b<=10 and "overview" or b<=21 and "raw" or "setup";break end;local choice=hit(buttons,b,c);if choice then act(choice,data);break end elseif e=="peripheral" or e=="peripheral_detach" then binding=inspect();target=binding.monitor and peripheral.wrap(binding.monitor) or term.current();compactMonitor(target,binding.monitor~=nil);break end end
 end
