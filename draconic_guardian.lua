@@ -1,471 +1,116 @@
--- HELIOS Draconic Guardian v0.1
--- Standalone, read-only commissioning console.  It intentionally performs no
--- reactor or flow-gate write operation.  Install this only on the computer
--- physically attached to the Draconic reactor-side component and output gate.
 
-local function contains(value, fragment)
-    return string.find(string.lower(tostring(value or "")), fragment, 1, true) ~= nil
-end
+-- HELIOS Draconic Guardian v1.0
+-- Dedicated local Draconic controller. Never install this on the normal
+-- HELIOS modem bus: it owns exactly one reactor component and its two gates.
+
+local FIELD_TARGET, FIELD_EMERGENCY = 50, 15
+local MAX_TEMPERATURE, MINIMUM_FUEL = 8000, 10
+local FRACTION = { OFF = 0, MIN = .25, MED = .50, MAX = 1, OVERDRIVE = 1.25 }
+local SETTINGS = ".helios-draconic-guardian.lua"
 
 local function hasType(name, fragment)
-    for _, peripheralType in ipairs({ peripheral.getType(name) }) do
-        if contains(peripheralType, fragment) then return true end
-    end
-    return false
+  for _, t in ipairs({ peripheral.getType(name) }) do
+    if string.find(string.lower(tostring(t or "")), fragment, 1, true) then return true end
+  end
+  return false
 end
-
-local function sorted(values)
-    table.sort(values, function(a, b) return tostring(a) < tostring(b) end)
-    return values
-end
-
-local function localSides()
-    local result = {}
-    for _, side in ipairs(rs.getSides()) do
-        if peripheral.isPresent(side) then result[side] = true end
-    end
-    return result
-end
-
+local function sort(t) table.sort(t, function(a,b) return tostring(a) < tostring(b) end); return t end
+local function localSides() local r = {}; for _, s in ipairs(rs.getSides()) do if peripheral.isPresent(s) then r[s] = true end end; return r end
 local function inspect()
-    local localPresent = localSides()
-    local reactors, outputGates, modems, monitors = {}, {}, {}, {}
-    for side in pairs(localPresent) do
-        if hasType(side, "draconic_reactor") then reactors[#reactors + 1] = side end
-        if hasType(side, "flow_gate") then outputGates[#outputGates + 1] = side end
-        if hasType(side, "modem") then modems[#modems + 1] = side end
-        if hasType(side, "monitor") then monitors[#monitors + 1] = side end
-    end
-    local inputGates = {}
-    for _, name in ipairs(peripheral.getNames()) do
-        if not localPresent[name] and hasType(name, "flow_gate") then
-            inputGates[#inputGates + 1] = name
-        end
-    end
-    sorted(reactors); sorted(outputGates); sorted(modems); sorted(monitors); sorted(inputGates)
-    local reasons = {}
-    if #reactors ~= 1 then reasons[#reasons + 1] = "Exactly one local Draconic reactor component is required" end
-    if #outputGates ~= 1 then reasons[#reasons + 1] = "Exactly one local output flow gate is required" end
-    if #modems < 1 then reasons[#reasons + 1] = "A local wired modem/peripheral hub is required" end
-    if #inputGates ~= 1 then reasons[#reasons + 1] = "Exactly one remote field-input gate is required" end
-    return {
-        ready = #reasons == 0, reasons = reasons, reactor = reactors[1], outputGate = outputGates[1],
-        modem = modems[1], monitor = monitors[1], inputGate = inputGates[1],
-    }
+  local p, reactors, outputs, modems, monitors = localSides(), {}, {}, {}, {}
+  for side in pairs(p) do
+    if hasType(side, "draconic_reactor") then reactors[#reactors+1] = side end
+    if hasType(side, "flow_gate") then outputs[#outputs+1] = side end
+    if hasType(side, "modem") then modems[#modems+1] = side end
+    if hasType(side, "monitor") then monitors[#monitors+1] = side end
+  end
+  local inputs = {}; for _, n in ipairs(peripheral.getNames()) do if not p[n] and hasType(n,"flow_gate") then inputs[#inputs+1]=n end end
+  sort(reactors);sort(outputs);sort(modems);sort(monitors);sort(inputs)
+  local why={}; if #reactors~=1 then why[#why+1]="Require exactly one local Draconic reactor component" end
+  if #outputs~=1 then why[#why+1]="Require exactly one local output flow gate" end
+  if #modems<1 then why[#why+1]="Require one local wired modem/peripheral hub" end
+  if #inputs~=1 then why[#why+1]="Require exactly one remote field-input flow gate" end
+  return {ready=#why==0,reasons=why,reactor=reactors[1],output=outputs[1],modem=modems[1],monitor=monitors[1],input=inputs[1]}
 end
-
-local function call(name, method)
-    if not name then return nil, "missing" end
-    local ok, value = pcall(peripheral.call, name, method)
-    if not ok then return nil, tostring(value) end
-    return value
+local function call(n,m,...)
+  if not n then return nil,"missing" end
+  local ok,v=pcall(peripheral.call,n,m,...); if not ok then return nil,tostring(v) end; return v
 end
-
-local function read(binding)
-    local reactor, errorText = call(binding.reactor, "getReactorInfo")
-    if type(reactor) ~= "table" then return nil, errorText or "Reactor telemetry unavailable" end
-    local inputFlow = call(binding.inputGate, "getFlow")
-    local outputFlow = call(binding.outputGate, "getFlow")
-    local inputSetting = call(binding.inputGate, "getSignalLowFlow")
-    local outputSetting = call(binding.outputGate, "getSignalLowFlow")
-    local inputOverride = call(binding.inputGate, "getOverrideEnabled")
-    local outputOverride = call(binding.outputGate, "getOverrideEnabled")
-    return {
-        reactor = reactor,
-        inputFlow = inputFlow, outputFlow = outputFlow,
-        inputSetting = inputSetting, outputSetting = outputSetting,
-        inputOverride = inputOverride, outputOverride = outputOverride,
-    }
+local function read(b)
+  local r,e=call(b.reactor,"getReactorInfo"); if type(r)~="table" then return nil,e or "getReactorInfo failed" end
+  return {reactor=r,inputFlow=call(b.input,"getFlow"),outputFlow=call(b.output,"getFlow"),inputSet=call(b.input,"getSignalLowFlow"),outputSet=call(b.output,"getSignalLowFlow"),inputOverride=call(b.input,"getOverrideEnabled"),outputOverride=call(b.output,"getOverrideEnabled")}
 end
-
--- These are intentionally hard limits.  The selector may request more or
--- less power, but it may never weaken these containment protections.
-local FIELD_TARGET = 50
-local FIELD_EMERGENCY = 15
-local MAX_TEMPERATURE = 8000
-local SAFE_RESTART_TEMPERATURE = 3000
-local MINIMUM_FUEL = 10
-local REQUEST_FRACTIONS = { OFF = 0, MIN = 0.25, MED = 0.50, MAX = 0.75, OVERDRIVE = 1.00 }
-
-local function percent(current, maximum)
-    if not tonumber(current) or not tonumber(maximum) or tonumber(maximum) <= 0 then return nil end
-    return tonumber(current) / tonumber(maximum) * 100
+local function gate(n,v) return pcall(peripheral.call,n,"setSignalLowFlow",math.max(0,math.floor(tonumber(v) or 0))) end
+local function reactor(n,m) return pcall(peripheral.call,n,m) end
+local function pct(a,b) if tonumber(a) and tonumber(b) and tonumber(b)>0 then return tonumber(a)/tonumber(b)*100 end end
+local function clamp(x) return math.max(0,math.min(1,tonumber(x) or 0)) end
+local function fmt(n)
+  n=tonumber(n);if not n then return "N/A" end;local u={"","k","M","B","T","Qa"};local i=1
+  while math.abs(n)>=1000 and i<#u do n=n/1000;i=i+1 end
+  return string.format(math.abs(n)>=100 and "%.0f%s" or "%.2f%s",n,u[i])
 end
-
-local function setGate(name, flow)
-    flow = math.max(0, math.floor(tonumber(flow) or 0))
-    return pcall(peripheral.call, name, "setSignalLowFlow", flow)
+local function text(t,x,y,s,c) local w=select(1,t.getSize());if y>=1 then t.setCursorPos(x,y);t.setTextColor(c or colors.white);t.write(string.sub(tostring(s),1,math.max(0,w-x+1))) end end
+local function button(t,x,y,label,c) local v="["..label.."]";text(t,x,y,v,c or colors.cyan);return {x1=x,x2=x+#v-1,y=y,label=label} end
+local function hit(bs,x,y) for _,b in ipairs(bs) do if b.y==y and x>=b.x1 and x<=b.x2 then return b.label end end end
+local function vertical(t,x,y,h,label,now,maximum,c)
+  local f=maximum and clamp((tonumber(now) or 0)/maximum) or 0;text(t,x,y,label,colors.lightGray)
+  for row=1,h do t.setCursorPos(x,y+row);t.setBackgroundColor(row>h-math.max(1,math.floor(h*f)) and c or colors.gray);t.write("    ") end
+  t.setBackgroundColor(colors.black);text(t,x,y+h+1,string.format("%3.0f%%",f*100),c)
 end
-
-local function callReactor(name, method)
-    return pcall(peripheral.call, name, method)
+local function load()
+  local d={mode="AUTO",request="OFF",rated=nil,commissioned=false,arm=0,message="Automatic safe supervision"}
+  if not fs.exists(SETTINGS) then return d end;local ok,s=pcall(dofile,SETTINGS);if not ok or type(s)~="table" then return d end
+  d.mode=(s.mode=="ASSISTED" or s.mode=="UNRESTRICTED") and s.mode or "AUTO";d.request=FRACTION[s.request] and s.request or "OFF";d.rated=tonumber(s.rated);d.commissioned=s.commissioned==true;d.message=tostring(s.message or d.message);return d
 end
+local function save(c) local h=fs.open(SETTINGS,"w");if h then h.write("return "..textutils.serialize(c));h.close() end end
 
-local function value(data, key)
-    local item = data.reactor[key]
-    return item == nil and "N/A" or tostring(item)
+-- AUTO and ASSISTED retain containment. UNRESTRICTED is visibly armed and lets
+-- the operator's command stand, while warnings remain live.
+local function supervise(b,d,c)
+  local r=d.reactor;local status=string.lower(tostring(r.status or "unknown"));local field=pct(r.fieldStrength,r.maxFieldStrength) or 0
+  local fuel=pct((tonumber(r.maxFuelConversion) or 0)-(tonumber(r.fuelConversion) or 0),r.maxFuelConversion) or 0;local temp=tonumber(r.temperature) or math.huge;local free=c.mode=="UNRESTRICTED"
+  local function stop(reason,charge) gate(b.output,0);reactor(b.reactor,"stopReactor");if charge then reactor(b.reactor,"chargeReactor");gate(b.input,900000) end;c.message="SAFETY INTERLOCK: "..reason;return true end
+  if not free then
+    if fuel<=MINIMUM_FUEL then return stop("fuel reserve below "..MINIMUM_FUEL.."%") end
+    if status=="online" and field<=FIELD_EMERGENCY then return stop("field below "..FIELD_EMERGENCY.."%",true) end
+    if temp>MAX_TEMPERATURE then return stop("temperature above "..MAX_TEMPERATURE.." C") end
+  elseif fuel<=MINIMUM_FUEL or field<=FIELD_EMERGENCY or temp>MAX_TEMPERATURE then c.message="UNRESTRICTED WARNING: a containment/fuel/temperature limit is exceeded" end
+  if status=="charging" then gate(b.input,900000);c.message="Charging containment";return end
+  if c.mode=="AUTO" then if status=="online" then gate(b.input,math.max(1,(tonumber(r.fieldDrainRate) or 0)/(1-FIELD_TARGET/100))) end;c.message="Automatic: field held near "..FIELD_TARGET.."%; output awaits HELIOS request";return end
+  if not c.commissioned or not c.rated then c.message="Control locked: commission a stable output first";return end
+  if c.request=="OFF" then gate(b.output,0);reactor(b.reactor,"stopReactor");c.message="Manual OFF: export closed";return end
+  if status=="offline" or status=="stopping" then reactor(b.reactor,"chargeReactor");gate(b.input,900000);c.message="Charging for requested output";return end
+  if status=="charged" then reactor(b.reactor,"activateReactor");c.message="Starting for requested output";return end
+  if status=="online" then gate(b.input,math.max(1,(tonumber(r.fieldDrainRate) or 0)/(1-FIELD_TARGET/100)));gate(b.output,c.rated*(FRACTION[c.request] or 0));c.message=(free and "UNRESTRICTED" or "ASSISTED").." "..c.request.." output applied" end
 end
-
-local function line(target, y, text, colour)
-    local width = select(1, target.getSize())
-    target.setCursorPos(1, y)
-    target.setTextColor(colour or colors.white)
-    target.write(string.sub(tostring(text), 1, width))
+local function draw(t,b,d,page,c,bs)
+  local w,h=t.getSize();t.setBackgroundColor(colors.black);t.setTextColor(colors.white);t.clear();text(t,1,1,"HELIOS // DRACONIC GUARDIAN",colors.yellow)
+  local banner=c.mode=="UNRESTRICTED" and "UNRESTRICTED CONTROL - AUTOMATIC INTERVENTION DISABLED" or c.mode=="ASSISTED" and "ASSISTED MANUAL - HARD SAFETY INTERLOCKS ACTIVE" or "AUTOMATIC SAFE SUPERVISION"
+  text(t,1,2,banner,c.mode=="UNRESTRICTED" and colors.red or colors.lime);text(t,1,3,"[OVERVIEW] [RAW DATA] [SETUP]",colors.cyan)
+  if not b.ready then text(t,1,5,"SETUP INVALID",colors.red);for i,v in ipairs(b.reasons) do text(t,1,5+i,"- "..v) end;return end
+  if not d then text(t,1,5,"TELEMETRY LOST",colors.red);return end
+  if page=="setup" then text(t,1,5,"LOCAL SAFETY BOUNDARY VALID",colors.lime);text(t,1,7,"Reactor component: "..b.reactor);text(t,1,8,"Output gate:       "..b.output);text(t,1,9,"Field-input gate:  "..b.input);text(t,1,10,"Wired modem:       "..b.modem);text(t,1,12,"No normal HELIOS mainframe may control these peripherals.",colors.orange);return end
+  if page=="raw" then text(t,1,5,"RAW DRACONIC TELEMETRY",colors.cyan);local ks={};for k in pairs(d.reactor) do ks[#ks+1]=tostring(k) end;sort(ks);for i,k in ipairs(ks) do if i+6<h then text(t,1,i+6,k..": "..tostring(d.reactor[k])) end end;return end
+  local r=d.reactor;if w<54 or h<25 then text(t,1,5,"Large monitor required for the Guardian console.",colors.orange);text(t,1,7,"State: "..tostring(r.status).."  Temp: "..fmt(r.temperature).." C");text(t,1,8,"Generation: "..fmt(r.generationRate).." RF/t");return end
+  vertical(t,2,5,12,"SAT",r.energySaturation,tonumber(r.maxEnergySaturation),colors.blue);vertical(t,8,5,12,"FIELD",r.fieldStrength,tonumber(r.maxFieldStrength),colors.red);vertical(t,16,5,12,"FUEL",(tonumber(r.maxFuelConversion) or 0)-(tonumber(r.fuelConversion) or 0),tonumber(r.maxFuelConversion),colors.lime);vertical(t,23,5,12,"OUT",d.outputFlow,math.max(1,tonumber(c.rated) or tonumber(d.outputSet) or 1),colors.orange)
+  local x=31;text(t,x,5,"REACTOR TELEMETRY",colors.cyan);text(t,x,7,"State:       "..tostring(r.status),colors.lime);text(t,x,8,"Generation:  "..fmt(r.generationRate).." RF/t",colors.cyan);text(t,x,9,"Temperature: "..fmt(r.temperature).." C",colors.orange);text(t,x,10,"Field drain: "..fmt(r.fieldDrainRate).." RF/t");text(t,x,11,"Field input: "..fmt(d.inputFlow).." RF/t");text(t,x,12,"Output flow: "..fmt(d.outputFlow).." RF/t");text(t,x,13,"Output gate: "..fmt(d.outputSet).." RF/t");text(t,x,14,"Fuel burned: "..fmt(r.fuelConversion).." / "..fmt(r.maxFuelConversion));text(t,x,15,"Saturation:  "..fmt(r.energySaturation).." / "..fmt(r.maxEnergySaturation));text(t,x,17,"GUARDIAN: "..c.message,c.mode=="UNRESTRICTED" and colors.red or colors.lightGray)
+  local y=h-7;if not c.commissioned then bs[#bs+1]=button(t,1,y,"COMMISSION CURRENT OUTPUT",colors.orange);text(t,1,y+1,"Records a stable existing export; never ramps an unknown reactor.",colors.lightGray)
+  elseif c.mode=="AUTO" then bs[#bs+1]=button(t,1,y,"ENABLE ASSISTED MANUAL",colors.orange);bs[#bs+1]=button(t,27,y,"ARM UNRESTRICTED",colors.red)
+  elseif c.mode=="ASSISTED" then local px=1;for _,v in ipairs({"OFF","MIN","MED","MAX"}) do local q=button(t,px,y,v,colors.cyan);bs[#bs+1]=q;px=q.x2+2 end;bs[#bs+1]=button(t,px,y,"ARM UNRESTRICTED",colors.red);bs[#bs+1]=button(t,1,y+2,"RESTORE AUTOMATIC",colors.lime)
+  else local px=1;for _,v in ipairs({"OFF","MIN","MED","MAX","OVERDRIVE"}) do local q=button(t,px,y,v,colors.red);bs[#bs+1]=q;px=q.x2+2 end;bs[#bs+1]=button(t,1,y+2,"RESTORE AUTOMATIC",colors.lime) end
+  if c.arm and c.arm>0 then local labels={"LIFT SAFETY INTERLOCK","DISABLE AUTOMATIC CONTROL","TURN AUTHORIZATION KEY","ARM UNRESTRICTED CONTROL"};text(t,1,h-3,"UNRESTRICTED ARMING "..c.arm.."/4: "..labels[c.arm],colors.red);bs[#bs+1]=button(t,1,h-2,labels[c.arm],colors.red);bs[#bs+1]=button(t,35,h-2,"CANCEL",colors.lightGray) end
 end
-
-local function bar(target, y, label, current, maximum, colour)
-    local width = select(1, target.getSize())
-    local usable = math.max(8, width - 2)
-    local fraction = 0
-    if tonumber(maximum) and tonumber(maximum) > 0 and tonumber(current) then
-        fraction = math.max(0, math.min(1, tonumber(current) / tonumber(maximum)))
-    end
-    line(target, y, label, colors.lightGray)
-    target.setCursorPos(1, y + 1)
-    target.setBackgroundColor(colors.gray)
-    target.write(string.rep(" ", usable))
-    target.setCursorPos(1, y + 1)
-    target.setBackgroundColor(colour)
-    target.write(string.rep(" ", math.max(1, math.floor(usable * fraction))))
-    target.setBackgroundColor(colors.black)
-    line(target, y + 2, tostring(current or "N/A") .. " / " .. tostring(maximum or "N/A"), colors.white)
+local binding,page,controls,buttons=inspect(),"overview",load(),{};local target=binding.monitor and peripheral.wrap(binding.monitor) or term.current()
+local function act(choice,d)
+  if choice=="COMMISSION CURRENT OUTPUT" then local r=d and d.reactor;local yes=r and string.lower(tostring(r.status))=="online" and (pct(r.fieldStrength,r.maxFieldStrength) or 0)>=45 and tonumber(d.outputSet) and tonumber(d.outputSet)>0;if yes then controls.rated=tonumber(d.outputSet);controls.commissioned=true;controls.message="Commissioned existing stable output: "..fmt(controls.rated).." RF/t" else controls.message="Commissioning refused: online, field >=45%, and existing export required" end
+  elseif choice=="ENABLE ASSISTED MANUAL" then controls.mode="ASSISTED";controls.request="OFF";controls.message="Assisted manual enabled at OFF"
+  elseif choice=="ARM UNRESTRICTED" then controls.arm=1;controls.message="Unrestricted arming started"
+  elseif choice=="CANCEL" then controls.arm=0;controls.message="Unrestricted arming cancelled"
+  elseif controls.arm and controls.arm>0 and choice then controls.arm=controls.arm+1;if controls.arm>4 then controls.arm=0;controls.mode="UNRESTRICTED";controls.request="OFF";controls.message="UNRESTRICTED CONTROL ARMED: operator commands are not overridden" end
+  elseif choice=="RESTORE AUTOMATIC" then controls.mode="AUTO";controls.request="OFF";controls.arm=0;controls.message="Automatic safety restored"
+  elseif FRACTION[choice] then controls.request=choice;controls.message="Output request: "..choice end;save(controls)
 end
-
-local button
-local hit
-
-local function draw(target, binding, data, page, message, controls, safety, overdriveConfirm, buttons)
-    local width, height = target.getSize()
-    target.setBackgroundColor(colors.black)
-    target.setTextColor(colors.white)
-    target.clear()
-    line(target, 1, "HELIOS // DRACONIC GUARDIAN", colors.yellow)
-    line(target, 2, "GUARDED CONTROL  |  HARD CONTAINMENT LIMITS ACTIVE", colors.orange)
-    line(target, 3, "[OVERVIEW] [RAW DATA] [SETUP]", colors.cyan)
-    if not binding.ready then
-        line(target, 5, "SETUP INVALID", colors.red)
-        for index, reason in ipairs(binding.reasons) do line(target, 5 + index, "- " .. reason, colors.white) end
-        return
-    end
-    if not data then
-        line(target, 5, "TELEMETRY LOST: " .. tostring(message), colors.red)
-        return
-    end
-    if page == "setup" then
-        line(target, 5, "SETUP VALID", colors.lime)
-        line(target, 7, "Local reactor component: " .. binding.reactor, colors.white)
-        line(target, 8, "Local output gate:       " .. binding.outputGate, colors.white)
-        line(target, 9, "Local wired modem:       " .. binding.modem, colors.white)
-        line(target, 10, "Remote field-input gate: " .. binding.inputGate, colors.white)
-        line(target, 12, "This computer is the only hardware-control boundary.", colors.orange)
-        return
-    end
-    if page == "raw" then
-        line(target, 5, "RAW REACTOR API VALUES", colors.cyan)
-        local keys = {}
-        for key in pairs(data.reactor) do keys[#keys + 1] = tostring(key) end
-        sorted(keys)
-        local row = 7
-        for _, key in ipairs(keys) do
-            if row > height - 2 then break end
-            line(target, row, key .. ": " .. tostring(data.reactor[key]), colors.white)
-            row = row + 1
-        end
-        line(target, height - 1, "Input gate flow: " .. tostring(data.inputFlow) .. "  Output gate flow: " .. tostring(data.outputFlow), colors.lightGray)
-        return
-    end
-    line(target, 5, "STATE: " .. value(data, "status"), colors.lime)
-    line(target, 6, "Generation: " .. value(data, "generationRate") .. " RF/t", colors.cyan)
-    line(target, 7, "Temperature: " .. value(data, "temperature") .. " C", colors.orange)
-    bar(target, 9, "ENERGY SATURATION", data.reactor.energySaturation, data.reactor.maxEnergySaturation, colors.blue)
-    bar(target, 13, "FIELD STRENGTH", data.reactor.fieldStrength, data.reactor.maxFieldStrength, colors.red)
-    if height >= 21 then
-        bar(target, 17, "FUEL CONVERSION", data.reactor.fuelConversion, data.reactor.maxFuelConversion, colors.lime)
-    end
-    line(target, height - 2, "FIELD INPUT: " .. tostring(data.inputFlow) .. "  OUTPUT: " .. tostring(data.outputFlow), colors.yellow)
-    line(target, height - 1, "Override input/output: " .. tostring(data.inputOverride) .. " / " .. tostring(data.outputOverride), colors.lightGray)
-
-    if height < 29 then
-        line(target, height - 4, "Manual output controls require a larger monitor.", colors.orange)
-        return
-    end
-    local controlRow = height - 7
-    line(target, controlRow, "OUTPUT REQUEST: " .. tostring(controls.requested) ..
-        "  |  SAFE CEILING: " .. tostring(controls.ratedOutput or "UNCOMMISSIONED"), colors.yellow)
-    if controls.calibration and controls.calibration.active then
-        line(target, controlRow + 2, "COMMISSIONING CURRENT OUTPUT: " ..
-            tostring(controls.calibration.samples or 0) .. "/20 stable samples", colors.orange)
-        line(target, controlRow + 4, "Do not alter the reactor or gate until commissioning completes.", colors.lightGray)
-        return
-    end
-    if not controls.ratedOutput then
-        buttons[#buttons + 1] = button(target, 1, controlRow + 2, "COMMISSION CURRENT OUTPUT", colors.orange)
-        line(target, controlRow + 4, "Validates the present stable export before manual control is allowed.", colors.lightGray)
-        return
-    end
-    if not controls.manualEnabled then
-        buttons[#buttons + 1] = button(target, 1, controlRow + 2, "ENABLE MANUAL OUTPUT", colors.orange)
-        line(target, controlRow + 4, "Manual requests are recorded only until commissioning is complete.", colors.lightGray)
-    elseif overdriveConfirm then
-        line(target, controlRow + 2, "OVERDRIVE stays within hard containment limits.", colors.red)
-        buttons[#buttons + 1] = button(target, 1, controlRow + 4, "ENABLE OVERDRIVE", colors.red)
-        buttons[#buttons + 1] = button(target, 20, controlRow + 4, "CANCEL", colors.lightGray)
-    else
-        local x = 1
-        for _, choice in ipairs({ "OFF", "MIN", "MED", "MAX", "OVERDRIVE" }) do
-            local colour = choice == "OVERDRIVE" and colors.red or colors.cyan
-            local item = button(target, x, controlRow + 2, choice, colour)
-            buttons[#buttons + 1] = item
-            x = item.x2 + 2
-        end
-        buttons[#buttons + 1] = button(target, 1, controlRow + 4, "DISABLE MANUAL", colors.lightGray)
-        line(target, controlRow + 5, "Guardian: " .. tostring(safety.last or controls.lastAction), colors.lightGray)
-    end
-end
-
-local function chooseTarget(binding)
-    -- A direct monitor is preferred.  A remote monitor is intentionally not
-    -- selected: mainframes on that same bus could repaint it.
-    if binding.monitor then return peripheral.wrap(binding.monitor) end
-    return term.current()
-end
-
-local SETTINGS_FILE = ".helios-draconic-guardian.lua"
-local saveControls
-
-local function loadControls()
-    if not fs.exists(SETTINGS_FILE) then
-        return { manualEnabled = false, requested = "AUTO", overdriveEnabled = false,
-            lastAction = "Automatic safe supervision selected", ratedOutput = nil,
-            calibration = { active = false, samples = 0 } }
-    end
-    local ok, saved = pcall(dofile, SETTINGS_FILE)
-    if not ok or type(saved) ~= "table" then return loadControls() end
-    return {
-        manualEnabled = saved.manualEnabled == true,
-        requested = ({ OFF = true, MIN = true, MED = true, MAX = true, OVERDRIVE = true })[saved.requested]
-            and saved.requested or "AUTO",
-        overdriveEnabled = saved.overdriveEnabled == true,
-        lastAction = tostring(saved.lastAction or "Restored Guardian control preference"),
-        ratedOutput = tonumber(saved.ratedOutput),
-        calibration = { active = false, samples = 0 },
-    }
-end
-
-local function control(binding, data, controls, safety)
-    local reactor = data.reactor
-    local fieldPercent = percent(reactor.fieldStrength, reactor.maxFieldStrength)
-    local fuelPercent = percent((tonumber(reactor.maxFuelConversion) or 0) -
-        (tonumber(reactor.fuelConversion) or 0), reactor.maxFuelConversion)
-    local temperature = tonumber(reactor.temperature) or math.huge
-    local status = string.lower(tostring(reactor.status or "unknown"))
-    local outputCeiling = tonumber(controls.ratedOutput)
-
-    -- Safeguards always take priority, including when manual output is off.
-    if fuelPercent and fuelPercent <= MINIMUM_FUEL then
-        setGate(binding.outputGate, 0)
-        callReactor(binding.reactor, "stopReactor")
-        safety.last = "EMERGENCY: fuel reserve below " .. MINIMUM_FUEL .. "%"
-        safety.stopForFuel = true
-        return safety
-    end
-    if fieldPercent and fieldPercent <= FIELD_EMERGENCY and status == "online" then
-        setGate(binding.outputGate, 0)
-        callReactor(binding.reactor, "stopReactor")
-        callReactor(binding.reactor, "chargeReactor")
-        setGate(binding.inputGate, 900000)
-        safety.chargeField = true
-        safety.last = "EMERGENCY: containment field below " .. FIELD_EMERGENCY .. "%"
-        return safety
-    end
-    if temperature > MAX_TEMPERATURE then
-        setGate(binding.outputGate, 0)
-        callReactor(binding.reactor, "stopReactor")
-        safety.cooling = true
-        safety.last = "EMERGENCY: temperature above " .. MAX_TEMPERATURE .. " C"
-        return safety
-    end
-
-    if controls.calibration and controls.calibration.active then
-        local stable = status == "online" and (fieldPercent or 0) >= 45 and
-            temperature <= 6500 and (fuelPercent or 0) > MINIMUM_FUEL and
-            tonumber(data.outputSetting) and tonumber(data.outputSetting) > 0
-        if not stable then
-            controls.calibration.active = false
-            controls.calibration.reason = "Conditions changed before the output was proven stable"
-            controls.lastAction = "Commissioning stopped: " .. controls.calibration.reason
-            saveControls(controls)
-            safety.last = controls.lastAction
-            return safety
-        end
-        controls.calibration.samples = (tonumber(controls.calibration.samples) or 0) + 1
-        controls.calibration.candidate = tonumber(data.outputSetting)
-        if controls.calibration.samples >= 20 then
-            controls.ratedOutput = controls.calibration.candidate
-            controls.calibration.active = false
-            controls.calibration.reason = nil
-            controls.lastAction = "Commissioned safe output ceiling: " .. tostring(controls.ratedOutput) .. " RF/t"
-            saveControls(controls)
-            safety.last = controls.lastAction
-        else
-            safety.last = "Commissioning stable output " .. controls.calibration.samples .. "/20"
-        end
-        return safety
-    end
-
-    if controls.manualEnabled and controls.requested == "OFF" then
-        setGate(binding.outputGate, 0)
-        callReactor(binding.reactor, "stopReactor")
-        safety.last = "Manual OFF applied: export closed and reactor stopping"
-        return safety
-    end
-
-    if status == "charging" then
-        setGate(binding.inputGate, 900000)
-        safety.last = "Charging containment energy"
-        return safety
-    end
-
-    if safety.cooling and temperature < SAFE_RESTART_TEMPERATURE then
-        safety.cooling = false
-        if controls.manualEnabled and controls.requested ~= "OFF" then
-            callReactor(binding.reactor, "activateReactor")
-            safety.last = "Temperature recovered; restarting requested output"
-        end
-    end
-
-    if controls.manualEnabled and controls.requested ~= "OFF" then
-        if not outputCeiling or outputCeiling <= 0 then
-            safety.last = "Manual request held: commission a safe output ceiling first"
-            return safety
-        end
-        if status == "offline" or status == "stopping" then
-            callReactor(binding.reactor, "chargeReactor")
-            setGate(binding.inputGate, 900000)
-            safety.last = "Charging reactor for requested output"
-            return safety
-        elseif status == "charged" then
-            callReactor(binding.reactor, "activateReactor")
-            safety.last = "Starting reactor for requested output"
-            return safety
-        end
-    end
-
-    if status == "online" then
-        local drain = tonumber(reactor.fieldDrainRate) or 0
-        -- Holds the field around FIELD_TARGET percent (same control equation
-        -- used by the established Draconic monitor controller).
-        setGate(binding.inputGate, math.max(1, drain / (1 - FIELD_TARGET / 100)))
-        if controls.manualEnabled then
-            local fraction = REQUEST_FRACTIONS[controls.requested] or 0
-            setGate(binding.outputGate, (outputCeiling or 0) * fraction)
-            safety.last = "Manual " .. controls.requested .. " output applied"
-        else
-            safety.last = "Automatic safe supervision; output unchanged"
-        end
-    end
-    return safety
-end
-
-saveControls = function(controls)
-    local handle = fs.open(SETTINGS_FILE, "w")
-    if not handle then return end
-    handle.write("return " .. textutils.serialize(controls))
-    handle.close()
-end
-
-button = function(target, x, y, label, colour)
-    target.setCursorPos(x, y)
-    target.setTextColor(colour or colors.cyan)
-    local text = "[" .. label .. "]"
-    target.write(text)
-    return { x1 = x, x2 = x + #text - 1, y = y, label = label }
-end
-
-hit = function(buttons, x, y)
-    for _, item in ipairs(buttons or {}) do
-        if y == item.y and x >= item.x1 and x <= item.x2 then return item.label end
-    end
-end
-
-local binding = inspect()
-local target = chooseTarget(binding)
-local page = "overview"
-local controls = loadControls()
-local overdriveConfirm = false
-local buttons = {}
-local safety = { last = "Awaiting telemetry" }
-
-local function selectOutput(choice)
-    if choice == "COMMISSION CURRENT OUTPUT" then
-        controls.calibration = { active = true, samples = 0, candidate = nil }
-        controls.lastAction = "Commissioning current stable output"
-    elseif choice == "ENABLE MANUAL OUTPUT" then
-        controls.manualEnabled = true
-        controls.requested = "OFF"
-        controls.lastAction = "Manual output enabled; request set to OFF"
-    elseif choice == "DISABLE MANUAL" then
-        controls.manualEnabled = false
-        controls.requested = "AUTO"
-        controls.lastAction = "Manual output disabled; automatic request restored"
-        overdriveConfirm = false
-    elseif choice == "OVERDRIVE" then
-        overdriveConfirm = true
-        controls.lastAction = "Overdrive confirmation requested"
-    elseif choice == "ENABLE OVERDRIVE" then
-        controls.overdriveEnabled = true
-        controls.requested = "OVERDRIVE"
-        controls.lastAction = "Overdrive requested; hard safety limits remain active"
-        overdriveConfirm = false
-    elseif choice == "CANCEL" then
-        overdriveConfirm = false
-        controls.lastAction = "Overdrive confirmation cancelled"
-    elseif choice == "OFF" or choice == "MIN" or choice == "MED" or choice == "MAX" then
-        controls.requested = choice
-        controls.lastAction = "Manual " .. choice .. " output requested"
-    else
-        return false
-    end
-    saveControls(controls)
-    return true
-end
-
 while true do
-    local data, reason
-    if binding.ready then data, reason = read(binding) end
-    if data then safety = control(binding, data, controls, safety) end
-    buttons = {}
-    draw(target, binding, data, page, reason, controls, safety, overdriveConfirm, buttons)
-    local timer = os.startTimer(1)
-    while true do
-        local event, a, b, c = os.pullEvent()
-        if event == "timer" and a == timer then break end
-        if event == "key" then
-            if a == keys.q then return end
-            if a == keys.one then page = "overview" break end
-            if a == keys.two then page = "raw" break end
-            if a == keys.three then page = "setup" break end
-            if a == keys.c then selectOutput("COMMISSION CURRENT OUTPUT"); break end
-            if a == keys.m then selectOutput("ENABLE MANUAL OUTPUT"); break end
-            if controls.manualEnabled then
-                local choices = {
-                    [keys.o] = "OFF", [keys.n] = "MIN", [keys.d] = "MED",
-                    [keys.x] = "MAX", [keys.v] = "OVERDRIVE",
-                }
-                if choices[a] and selectOutput(choices[a]) then break end
-            end
-        elseif event == "monitor_touch" and target ~= term.current() then
-            local x, y = b, c
-            if y == 3 then
-                if x <= 10 then page = "overview" elseif x <= 21 then page = "raw" else page = "setup" end
-                break
-            end
-            local choice = hit(buttons, x, y)
-            if choice and selectOutput(choice) then break end
-        elseif event == "peripheral" or event == "peripheral_detach" then
-            binding = inspect()
-            target = chooseTarget(binding)
-            break
-        end
-    end
+  local data=binding.ready and read(binding) or nil;if data then supervise(binding,data,controls);save(controls) end;buttons={};draw(target,binding,data,page,controls,buttons);local timer=os.startTimer(1)
+  while true do local e,a,b,c=os.pullEvent();if e=="timer" and a==timer then break end;if e=="key" then if a==keys.q then return end;if a==keys.one then page="overview";break elseif a==keys.two then page="raw";break elseif a==keys.three then page="setup";break end elseif e=="monitor_touch" and target~=term.current() then if c==3 then page=b<=10 and "overview" or b<=21 and "raw" or "setup";break end;local choice=hit(buttons,b,c);if choice then act(choice,data);break end elseif e=="peripheral" or e=="peripheral_detach" then binding=inspect();target=binding.monitor and peripheral.wrap(binding.monitor) or term.current();break end end
 end

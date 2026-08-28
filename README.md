@@ -240,15 +240,26 @@ wget run https://raw.githubusercontent.com/ssj8vegetrunks/HELIOS/agent/ui-module
 
 After HELIOS is installed, run the same inventory with `helios probe`.
 
-### Draconic Guardian validation
+### Draconic Guardian
 
-The first Draconic Guardian release is telemetry-only. It validates the local
-safety layout and does not write to any reactor or flow gate. On the dedicated
-controller computer, the contract is one local Draconic reactor-side component,
-one local output flow gate, a local wired modem, and exactly one remote
-field-input flow gate. Use `helios draconic check`, then
-`helios draconic telemetry` to verify live readings. A normal HELIOS mainframe
-must treat any network-discovered Draconic reactor as read-only telemetry.
+The Draconic Guardian is a separate, dedicated controller—not a normal HELIOS
+mainframe module. Its controller computer must have one local reactor-side
+component, one local output flow gate, a local wired modem/peripheral hub, and
+exactly one remote field-input flow gate. A normal HELIOS mainframe must never
+control these peripherals through its modem network.
+
+The Guardian presents four familiar Draconic-style instruments (saturation,
+field strength, fuel reserve, and output) plus live raw telemetry. It starts in
+`AUTO`, which maintains the field target but leaves output dispatch to a future
+HELIOS request link. `ASSISTED MANUAL` offers OFF/MIN/MED/MAX output selections
+after recording an already stable, live output as its commissioning ceiling.
+Hard fuel, field, and temperature interlocks remain active in assisted mode.
+
+`UNRESTRICTED CONTROL` is intentionally harder to enter: the operator must
+complete all four on-screen interlocks. It adds an OVERDRIVE selection and stops
+automatic intervention, while retaining prominent live warnings. Restoring
+automatic control is always a single button. Commissioning never ramps an
+unknown reactor; it records the existing stable output only.
 
 Use the left and right arrow keys to change the maintenance timeout. The old
 `T` shortcut was removed because it conflicts with ATM10's inventory trash
