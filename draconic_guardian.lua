@@ -57,7 +57,7 @@ local function vertical(t,x,y,h,label,now,maximum,c)
   t.setBackgroundColor(colors.black);text(t,x,y+h+1,string.format("%3.0f%%",f*100),c)
 end
 local function load()
-  local d={mode="AUTO",request="OFF",rated=nil,commissioned=false,arm=0,message="Automatic safe supervision"}
+  local d={mode="AUTO",request="OFF",rated=nil,commissioned=false,arm=0,initialRequested=false,startActivated=false,message="Automatic safe supervision"}
   if not fs.exists(SETTINGS) then return d end;local ok,s=pcall(dofile,SETTINGS);if not ok or type(s)~="table" then return d end
   d.mode=(s.mode=="ASSISTED" or s.mode=="UNRESTRICTED") and s.mode or "AUTO";d.request=FRACTION[s.request] and s.request or "OFF";d.rated=tonumber(s.rated);d.commissioned=s.commissioned==true;d.message=tostring(s.message or d.message);return d
 end
@@ -75,6 +75,18 @@ local function supervise(b,d,c)
     if temp>MAX_TEMPERATURE then return stop("temperature above "..MAX_TEMPERATURE.." C") end
   elseif fuel<=MINIMUM_FUEL or field<=FIELD_EMERGENCY or temp>MAX_TEMPERATURE then c.message="UNRESTRICTED WARNING: a containment/fuel/temperature limit is exceeded" end
   if status=="charging" then gate(b.input,900000);c.message="Charging containment";return end
+  if c.initialRequested then
+    if status=="offline" or status=="stopping" then
+      reactor(b.reactor,"chargeReactor");gate(b.input,900000);c.message="Initial start: charging containment"
+      return
+    end
+    if not c.startActivated and (status=="charged" or status=="warming_up" or status=="warning_up") then
+      reactor(b.reactor,"activateReactor");gate(b.input,math.max(1,(tonumber(r.fieldDrainRate) or 0)/(1-FIELD_TARGET/100)))
+      c.startActivated=true;c.message="Initial start: activation sent; waiting for ONLINE"
+      return
+    end
+    if status=="online" then c.initialRequested=false;c.startActivated=false;c.message="Initial start complete; reactor is ONLINE" end
+  end
   if c.mode=="AUTO" then if status=="online" then gate(b.input,math.max(1,(tonumber(r.fieldDrainRate) or 0)/(1-FIELD_TARGET/100))) end;c.message="Automatic: field held near "..FIELD_TARGET.."%; output awaits HELIOS request";return end
   if not c.commissioned or not c.rated then c.message="Control locked: commission a stable output first";return end
   if c.request=="OFF" then gate(b.output,0);reactor(b.reactor,"stopReactor");c.message="Manual OFF: export closed";return end
@@ -98,14 +110,18 @@ local function draw(t,b,d,page,c,bs)
     text(t,1,y-1,"LOCKED: commission a stable live export to establish its safe ceiling.",colors.orange)
     bs[#bs+1]=button(t,1,y,"COMMISSION CURRENT OUTPUT",colors.orange)
     text(t,1,y+1,"Records a stable existing export; never ramps an unknown reactor.",colors.lightGray)
-  elseif c.mode=="AUTO" then bs[#bs+1]=button(t,1,y,"ENABLE ASSISTED MANUAL",colors.orange);bs[#bs+1]=button(t,27,y,"ARM UNRESTRICTED",colors.red)
+    bs[#bs+1]=button(t,1,y+3,"INITIALIZE & ACTIVATE",colors.lime)
+    bs[#bs+1]=button(t,27,y+3,"SAFE SHUTDOWN",colors.red)
+  elseif c.mode=="AUTO" then bs[#bs+1]=button(t,1,y,"ENABLE ASSISTED MANUAL",colors.orange);bs[#bs+1]=button(t,27,y,"ARM UNRESTRICTED",colors.red);bs[#bs+1]=button(t,1,y+2,"INITIALIZE & ACTIVATE",colors.lime);bs[#bs+1]=button(t,27,y+2,"SAFE SHUTDOWN",colors.red)
   elseif c.mode=="ASSISTED" then local px=1;for _,v in ipairs({"OFF","MIN","MED","MAX"}) do local q=button(t,px,y,v,colors.cyan);bs[#bs+1]=q;px=q.x2+2 end;bs[#bs+1]=button(t,px,y,"ARM UNRESTRICTED",colors.red);bs[#bs+1]=button(t,1,y+2,"RESTORE AUTOMATIC",colors.lime)
   else local px=1;for _,v in ipairs({"OFF","MIN","MED","MAX","OVERDRIVE"}) do local q=button(t,px,y,v,colors.red);bs[#bs+1]=q;px=q.x2+2 end;bs[#bs+1]=button(t,1,y+2,"RESTORE AUTOMATIC",colors.lime) end
   if c.arm and c.arm>0 then local labels={"LIFT SAFETY INTERLOCK","DISABLE AUTOMATIC CONTROL","TURN AUTHORIZATION KEY","ARM UNRESTRICTED CONTROL"};text(t,1,h-3,"UNRESTRICTED ARMING "..c.arm.."/4: "..labels[c.arm],colors.red);bs[#bs+1]=button(t,1,h-2,labels[c.arm],colors.red);bs[#bs+1]=button(t,35,h-2,"CANCEL",colors.lightGray) end
 end
 local binding,page,controls,buttons=inspect(),"overview",load(),{};local target=binding.monitor and peripheral.wrap(binding.monitor) or term.current()
 local function act(choice,d)
-  if choice=="COMMISSION CURRENT OUTPUT" then local r=d and d.reactor;local yes=r and string.lower(tostring(r.status))=="online" and (pct(r.fieldStrength,r.maxFieldStrength) or 0)>=45 and tonumber(d.outputSet) and tonumber(d.outputSet)>0;if yes then controls.rated=tonumber(d.outputSet);controls.commissioned=true;controls.message="Commissioned existing stable output: "..fmt(controls.rated).." RF/t" else controls.message="Commissioning refused: online, field >=45%, and existing export required" end
+  if choice=="INITIALIZE & ACTIVATE" then controls.initialRequested=true;controls.startActivated=false;controls.message="Initial start requested by operator"
+  elseif choice=="SAFE SHUTDOWN" then controls.initialRequested=false;controls.startActivated=false;gate(binding.output,0);reactor(binding.reactor,"stopReactor");controls.message="Operator safe shutdown: output closed and stop sent"
+  elseif choice=="COMMISSION CURRENT OUTPUT" then local r=d and d.reactor;local yes=r and string.lower(tostring(r.status))=="online" and (pct(r.fieldStrength,r.maxFieldStrength) or 0)>=45 and tonumber(d.outputSet) and tonumber(d.outputSet)>0;if yes then controls.rated=tonumber(d.outputSet);controls.commissioned=true;controls.message="Commissioned existing stable output: "..fmt(controls.rated).." RF/t" else controls.message="Commissioning refused: online, field >=45%, and existing export required" end
   elseif choice=="ENABLE ASSISTED MANUAL" then controls.mode="ASSISTED";controls.request="OFF";controls.message="Assisted manual enabled at OFF"
   elseif choice=="ARM UNRESTRICTED" then controls.arm=1;controls.message="Unrestricted arming started"
   elseif choice=="CANCEL" then controls.arm=0;controls.message="Unrestricted arming cancelled"
