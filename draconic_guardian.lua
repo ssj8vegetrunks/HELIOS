@@ -117,7 +117,9 @@ local function supervise(b,d,c)
   end
   if not free then
     if fuel<=MINIMUM_FUEL then return stop("fuel reserve below "..MINIMUM_FUEL.."%") end
-    if live and field<=FIELD_EMERGENCY then return stop("field below "..FIELD_EMERGENCY.."%",true) end
+    -- A reactor can still be draining its field while reporting "cooling".
+    -- Containment must win in every state, not only when DE calls it running.
+    if field<=FIELD_EMERGENCY then return stop("field below "..FIELD_EMERGENCY.."%",true) end
     if temp>MAX_TEMPERATURE then return stop("temperature above "..MAX_TEMPERATURE.." C") end
   elseif fuel<=MINIMUM_FUEL or field<=FIELD_EMERGENCY or temp>MAX_TEMPERATURE then c.message="UNRESTRICTED WARNING: a containment/fuel/temperature limit is exceeded" end
   if status=="charging" then gate(b.input,900000);c.message="Charging containment";return end
@@ -191,7 +193,12 @@ local function supervise(b,d,c)
   if c.mode=="AUTO" then if live then gate(b.input,math.max(1,(tonumber(r.fieldDrainRate) or 0)/(1-FIELD_TARGET/100))) end;c.message="Automatic: field held near "..FIELD_TARGET.."%; output awaits HELIOS request";return end
   if not c.commissioned or not c.rated then c.message="Control locked: run automatic commissioning first";return end
   if c.request=="OFF" then gate(b.output,0);reactor(b.reactor,"stopReactor");c.message="Manual OFF: export closed";return end
-  if status=="offline" or status=="stopping" then reactor(b.reactor,"chargeReactor");gate(b.input,900000);c.message="Charging for requested output";return end
+  if status=="offline" or status=="stopping" or status=="cooling" then
+    -- Cooling is the post-stop state in DE. Treat it as a restart state so a
+    -- selected output cannot leave the Guardian waiting forever with export
+    -- closed and residual generation still visible in telemetry.
+    reactor(b.reactor,"chargeReactor");gate(b.input,900000);c.message="Charging containment for requested output";return
+  end
   if status=="charged" then reactor(b.reactor,"activateReactor");c.message="Starting for requested output";return end
   if live then gate(b.input,math.max(1,(tonumber(r.fieldDrainRate) or 0)/(1-FIELD_TARGET/100)));gate(b.output,c.rated*(FRACTION[c.request] or 0));c.message=(free and "UNRESTRICTED" or "ASSISTED").." "..c.request.." output applied" end
 end
