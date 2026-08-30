@@ -1,3 +1,41 @@
+# HELIOS - Public Alpha
+
+This branch is the stable public testing surface for HELIOS. It contains the
+validated HELIOS Alpha build, the standalone read-only Probe, the validated
+standalone Draconic Guardian, and a deliberately safe module starter for Lua
+developers.
+
+The Draconic Guardian control logic is frozen at the live-tested baseline. It
+is currently a standalone controller and does not yet communicate with the
+HELIOS mainframe.
+
+## Quick start
+
+Install HELIOS Core (choose Mainframe or Remote when prompted):
+
+```lua
+wget run https://raw.githubusercontent.com/ssj8vegetrunks/HELIOS/testing/public-alpha/install.lua
+```
+
+Run the standalone read-only hardware Probe:
+
+```lua
+wget run https://raw.githubusercontent.com/ssj8vegetrunks/HELIOS/testing/public-alpha/discovery_probe.lua
+```
+
+Install or update the standalone Draconic Guardian:
+
+```lua
+wget run https://raw.githubusercontent.com/ssj8vegetrunks/HELIOS/testing/public-alpha/draconic_guardian.lua
+```
+
+Start with the [tester guide](docs/TESTING.md), [site map](docs/SITE_MAP.md),
+[dependency map](docs/DEPENDENCY_MAP.md), or [module template](module-template/README.md).
+
+> Public Alpha means the interfaces are testable, not yet final. Please include
+> HELIOS/Core version, computer role, peripheral names, reproduction steps, and
+> the exact error when reporting a defect.
+
 # HELIOS - v1.6.0 Alpha 4 Graphical UI Contract
 
 Industrial power management for **CC:Tweaked** and **Extreme Reactors**.
