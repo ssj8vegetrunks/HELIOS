@@ -109,9 +109,10 @@ local function reactor(n,m) return pcall(peripheral.call,n,m) end
 -- A requested export is only meaningful once the core is actually online.
 -- Keep the entire charge -> activate sequence in one place so the manual
 -- selector, commissioning, and the explicit activation control behave alike.
-local function ensureStarted(b,c,status,reason)
+local function ensureStarted(b,c,status,reason,fieldTarget)
+  local fieldSupply=positive(fieldTarget) or positive(c.injectorBaseline) or 0
   gate(b.output,0)
-  gate(b.input,positive(c.injectorBaseline) or 0)
+  gate(b.input,fieldSupply)
   if status=="offline" or status=="stopping" or status=="cooling" then
     reactor(b.reactor,"chargeReactor")
     c.startActivated=false
@@ -280,8 +281,7 @@ local function supervise(b,d,c)
   if c.request=="MANUAL" or c.request=="OVERDRIVE" then
     local fieldTarget=positive(c.request=="OVERDRIVE" and c.overdriveField or c.manualField) or injectorCap
     local exportTarget=positive(c.request=="OVERDRIVE" and c.overdriveExport or c.manualExport) or 0
-    if status=="offline" or status=="stopping" or status=="cooling" then reactor(b.reactor,"chargeReactor");gate(b.input,fieldTarget);c.message="Charging containment for manual gate targets";return end
-    if status=="charged" then reactor(b.reactor,"activateReactor");gate(b.input,fieldTarget);c.message="Starting for manual gate targets";return end
+    if not live then ensureStarted(b,c,status,"Manual power demand",fieldTarget);return end
     if live then
       gate(b.input,fieldTarget)
       local applied=exportTarget
@@ -298,13 +298,7 @@ local function supervise(b,d,c)
     end
   end
   if c.request=="OFF" then gate(b.output,0);reactor(b.reactor,"stopReactor");c.message="Manual OFF: export closed";return end
-  if status=="offline" or status=="stopping" or status=="cooling" then
-    -- Cooling is the post-stop state in DE. Treat it as a restart state so a
-    -- selected output cannot leave the Guardian waiting forever with export
-    -- closed and residual generation still visible in telemetry.
-    reactor(b.reactor,"chargeReactor");gate(b.input,injectorCap);c.message="Charging containment for requested output";return
-  end
-  if status=="charged" then reactor(b.reactor,"activateReactor");c.message="Starting for requested output";return end
+  if not live then ensureStarted(b,c,status,"Requested "..tostring(c.request).." output",injectorCap);return end
   if live then gate(b.input,injectorCap);gate(b.output,c.rated*(FRACTION[c.request] or 0));c.message=(free and "UNRESTRICTED" or "ASSISTED").." "..c.request.." output applied" end
 end
 local function draw(t,b,d,page,c,bs)
@@ -402,7 +396,7 @@ end
 local function act(choice,d)
   if (choice=="AUTO COMMISSION" or choice=="RECALIBRATE CEILING") and controls.gatesOwned then beginCalibration()
   elseif choice=="INITIALIZE & ACTIVATE" and controls.gatesOwned then controls.initialRequested=true;controls.startActivated=false;controls.message="Initial start requested by operator"
-  elseif choice=="SAFE SHUTDOWN" then controls.initialRequested=false;controls.startActivated=false;gate(binding.output,0);reactor(binding.reactor,"stopReactor");controls.message="Operator safe shutdown: output closed and stop sent"
+  elseif choice=="SAFE SHUTDOWN" then controls.request="OFF";controls.initialRequested=false;controls.startActivated=false;gate(binding.output,0);reactor(binding.reactor,"stopReactor");controls.message="Operator safe shutdown: output closed and stop sent"
   elseif choice=="ENABLE ASSISTED MANUAL" then controls.mode="ASSISTED";controls.request="OFF";controls.message="Assisted manual enabled at OFF"
   elseif choice=="ARM UNRESTRICTED" then controls.arm=1;controls.message="Unrestricted arming started"
   elseif choice=="CANCEL" then controls.arm=0;controls.message="Unrestricted arming cancelled"
@@ -417,14 +411,14 @@ local function act(choice,d)
   elseif choice=="EXPORT +100k" then controls.manualExport=(tonumber(controls.manualExport) or positive(d.outputSet) or 0)+MANUAL_GATE_STEP
   elseif choice=="EXPORT -1M" then controls.manualExport=math.max(0,(tonumber(controls.manualExport) or positive(d.outputSet) or 0)-MANUAL_GATE_LARGE_STEP)
   elseif choice=="EXPORT +1M" then controls.manualExport=(tonumber(controls.manualExport) or positive(d.outputSet) or 0)+MANUAL_GATE_LARGE_STEP
-  elseif choice=="APPLY MANUAL" then controls.request="MANUAL";controls.overdriveApplied=0;controls.message="Manual gate pair requested"
+  elseif choice=="APPLY MANUAL" then controls.request="MANUAL";controls.overdriveApplied=0;controls.startActivated=false;controls.message="Manual gate pair requested"
   elseif choice=="SAVE AS OVERDRIVE PRESET" then
     local field=positive(controls.manualField) or positive(d.inputSet) or controls.injectorBaseline
     local export=positive(controls.manualExport) or positive(d.outputSet)
     if field and export then controls.overdriveField=field;controls.overdriveExport=export;controls.message="Overdrive preset saved: field "..fmt(field)..", export "..fmt(export).." RF/t" else controls.message="Preset not saved: set positive field and export limits first" end
   elseif choice=="OVERDRIVE" then
-    if positive(controls.overdriveField) and positive(controls.overdriveExport) then controls.request="OVERDRIVE";controls.overdriveApplied=0;controls.message="Saved Overdrive preset requested" else controls.message="No saved Overdrive preset: configure Manual Gates first" end
-  elseif FRACTION[choice] then controls.request=choice;controls.message="Output request: "..choice end
+    if positive(controls.overdriveField) and positive(controls.overdriveExport) then controls.request="OVERDRIVE";controls.overdriveApplied=0;controls.startActivated=false;controls.message="Saved Overdrive preset requested" else controls.message="No saved Overdrive preset: configure Manual Gates first" end
+  elseif FRACTION[choice] then controls.request=choice;controls.startActivated=false;controls.message="Output request: "..choice end
 end
 local function keyboard(ch,d)
   local commands={a="INITIALIZE & ACTIVATE",s="SAFE SHUTDOWN",c="RECALIBRATE CEILING",r="RESTORE AUTOMATIC",m="ENABLE ASSISTED MANUAL",["0"]="OFF",["1"]="MIN",["2"]="MED",["3"]="MAX",["4"]="OVERDRIVE",f="FIELD -100k",F="FIELD +100k",v="FIELD -1M",V="FIELD +1M",e="EXPORT -100k",E="EXPORT +100k",x="EXPORT -1M",X="EXPORT +1M",p="APPLY MANUAL",o="SAVE AS OVERDRIVE PRESET"}
