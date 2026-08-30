@@ -9095,6 +9095,13 @@ local function runInstaller()
     if fs.exists(existingData) and not fs.exists(stagedData) then
         fs.copy(existingData, stagedData)
     end
+    local legacyGuardianState = "/.helios-draconic-guardian.lua"
+    local stagedGuardianState = fs.combine(stagedData, "draconic_guardian.lua")
+    if role == "guardian" and fs.exists(legacyGuardianState) and
+       not fs.exists(stagedGuardianState) then
+        if not fs.exists(stagedData) then fs.makeDir(stagedData) end
+        fs.copy(legacyGuardianState, stagedGuardianState)
+    end
     local modulePackVersion
     if role == "mainframe" then
         title("Installing Module Pack")

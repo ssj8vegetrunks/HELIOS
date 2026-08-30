@@ -4,7 +4,7 @@
 
 Authoritative file: `install.lua`
 
-Total physical lines: **9165**
+Total physical lines: **9172**
 
 This map uses the actual line numbers in the bundled `install.lua`.
 
@@ -61,7 +61,7 @@ This map uses the actual line numbers in the bundled `install.lua`.
 - Lines 7430-7430: **Bundle table separator / installer code**
 - Lines 8028-8028: **Bundle table separator / installer code**
 - Lines 8180-8180: **Bundle table separator / installer code**
-- Lines 8829-9165: **Installer/configuration/execution code**
+- Lines 8829-9172: **Installer/configuration/execution code**
 
 ## Quick lookup
 
