@@ -148,11 +148,11 @@ local function fmt(n)
 end
 local function text(t,x,y,s,c) local w=select(1,t.getSize());if y>=1 then t.setCursorPos(x,y);t.setTextColor(c or colors.white);t.write(string.sub(tostring(s),1,math.max(0,w-x+1))) end end
 local function compactMonitor(t,isMonitor) if isMonitor and t and type(t.setTextScale)=="function" then pcall(t.setTextScale,.5) end end
--- Accept a one-row vertical miss on scaled monitors. Keep horizontal bounds
--- exact so adjacent controls never compete for the same press.
+-- Monitor touches report character coordinates. Keep every target on its
+-- rendered row so vertically adjacent controls can never steal a press.
 local function button(t,x,y,label,c)
   local v="["..label.."]";text(t,x,y,v,c or colors.cyan)
-  return {x1=x,x2=x+#v-1,y1=math.max(1,y-1),y2=y+1,x=x,y=y,label=label}
+  return {x1=x,x2=x+#v-1,y1=y,y2=y,x=x,y=y,label=label}
 end
 local function hit(bs,x,y)
   local picked, distance
@@ -387,11 +387,38 @@ local function act(choice,d)
     if positive(controls.overdriveField) and positive(controls.overdriveExport) then controls.request="OVERDRIVE";controls.overdriveApplied=0;controls.message="Saved Overdrive preset requested" else controls.message="No saved Overdrive preset: configure Manual Gates first" end
   elseif FRACTION[choice] then controls.request=choice;controls.message="Output request: "..choice end;save(controls)
 end
+-- Reactor supervision remains responsive at 10 Hz, while the expensive large
+-- monitor redraw and settings write run at 2 Hz. Touch events are handled
+-- continuously instead of competing with a redraw every tenth of a second.
+local data=binding.ready and read(binding) or nil
+if data then supervise(binding,data,controls);data=read(binding) or data end
+local function redraw()
+  buttons={};draw(target,binding,data,page,controls,buttons)
+end
+redraw()
+local controlTimer=os.startTimer(.1)
+local displayTimer=os.startTimer(.5)
 while true do
-  local data=binding.ready and read(binding) or nil;if data then supervise(binding,data,controls);data=read(binding) or data;save(controls) end;buttons={};draw(target,binding,data,page,controls,buttons);local timer=os.startTimer(.1)
-  while true do local e,a,b,c=os.pullEvent();if e=="timer" and a==timer then break end;if e=="key" then if a==keys.q then return end;if a==keys.one then page="overview";break elseif a==keys.two then page="raw";break elseif a==keys.three then page="setup";break elseif a==keys.four then page="gates";break end elseif e=="monitor_touch" and target~=term.current() then
-    if c>=3 and c<=4 then page=b<=10 and "overview" or b<=21 and "raw" or b<=29 and "setup" or "gates";break end
-    local choice=hit(buttons,b,c);if choice=="BACK" then page="overview";break elseif choice then act(choice,data);break end
-  elseif e=="peripheral" or e=="peripheral_detach" then binding=inspect();target=binding.monitor and peripheral.wrap(binding.monitor) or term.current();compactMonitor(target,binding.monitor~=nil);break end end
+  local e,a,b,c=os.pullEvent()
+  if e=="timer" and a==controlTimer then
+    data=binding.ready and read(binding) or nil
+    if data then supervise(binding,data,controls);data=read(binding) or data end
+    controlTimer=os.startTimer(.1)
+  elseif e=="timer" and a==displayTimer then
+    save(controls);redraw();displayTimer=os.startTimer(.5)
+  elseif e=="key" then
+    if a==keys.q then save(controls);return end
+    if a==keys.one then page="overview" elseif a==keys.two then page="raw" elseif a==keys.three then page="setup" elseif a==keys.four then page="gates" end
+    redraw()
+  elseif e=="monitor_touch" and binding.monitor and a==binding.monitor then
+    if c==3 then page=b<=10 and "overview" or b<=21 and "raw" or b<=29 and "setup" or "gates";redraw()
+    else
+      local choice=hit(buttons,b,c)
+      if choice=="BACK" then page="overview";redraw()
+      elseif choice then act(choice,data);redraw() end
+    end
+  elseif e=="peripheral" or e=="peripheral_detach" then
+    binding=inspect();target=binding.monitor and peripheral.wrap(binding.monitor) or term.current();compactMonitor(target,binding.monitor~=nil);data=binding.ready and read(binding) or nil;redraw()
+  end
 end
 
