@@ -12,15 +12,15 @@ This map uses the actual line numbers in the bundled `install.lua`.
 
 - Lines 225-398: **core/config.lua** (module contents 226-397)
 - Lines 400-587: **core/display.lua** (module contents 401-586)
-- Lines 589-667: **core/gui.lua** (module contents 590-666)
-- Lines 669-788: **core/gui_loader.lua** (module contents 670-787)
+- Lines 589-708: **core/gui_loader.lua** (module contents 590-707)
+- Lines 710-788: **core/gui.lua** (module contents 711-787)
 - Lines 790-865: **core/mainframe_authority.lua** (module contents 791-864)
 - Lines 867-1005: **core/module_loader.lua** (module contents 868-1004)
 - Lines 1007-1150: **core/module_manager.lua** (module contents 1008-1149)
 - Lines 1152-1227: **core/network.lua** (module contents 1153-1226)
 - Lines 1229-1279: **core/power_format.lua** (module contents 1230-1278)
-- Lines 1281-1429: **core/ui.lua** (module contents 1282-1428)
-- Lines 1431-1532: **core/ui_contract.lua** (module contents 1432-1531)
+- Lines 1281-1382: **core/ui_contract.lua** (module contents 1282-1381)
+- Lines 1384-1532: **core/ui.lua** (module contents 1385-1531)
 - Lines 1534-1682: **draconic/guardian.lua** (module contents 1535-1681)
 - Lines 1684-1696: **gui/control-room/manifest.lua** (module contents 1685-1695)
 - Lines 1698-1853: **gui/control-room/renderer.lua** (module contents 1699-1852)
@@ -38,14 +38,14 @@ This map uses the actual line numbers in the bundled `install.lua`.
 - Lines 1-224: **Installer/bootstrap code**
 - Lines 399-399: **Bundle table separator / installer code**
 - Lines 588-588: **Bundle table separator / installer code**
-- Lines 668-668: **Bundle table separator / installer code**
+- Lines 709-709: **Bundle table separator / installer code**
 - Lines 789-789: **Bundle table separator / installer code**
 - Lines 866-866: **Bundle table separator / installer code**
 - Lines 1006-1006: **Bundle table separator / installer code**
 - Lines 1151-1151: **Bundle table separator / installer code**
 - Lines 1228-1228: **Bundle table separator / installer code**
 - Lines 1280-1280: **Bundle table separator / installer code**
-- Lines 1430-1430: **Bundle table separator / installer code**
+- Lines 1383-1383: **Bundle table separator / installer code**
 - Lines 1533-1533: **Bundle table separator / installer code**
 - Lines 1683-1683: **Bundle table separator / installer code**
 - Lines 1697-1697: **Bundle table separator / installer code**
