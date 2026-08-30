@@ -370,7 +370,31 @@ local function draw(t,b,d,page,c,bs)
   else local px=1;for _,v in ipairs({"OFF","MIN","MED","MAX","OVERDRIVE"}) do local q=button(t,px,y,v,colors.red);bs[#bs+1]=q;px=q.x2+2 end;bs[#bs+1]=button(t,1,y+2,"RESTORE AUTOMATIC",colors.lime) end
   if c.arm and c.arm>0 then local labels={"LIFT SAFETY INTERLOCK","DISABLE AUTOMATIC CONTROL","TURN AUTHORIZATION KEY","ARM UNRESTRICTED CONTROL"};text(t,1,h-3,"UNRESTRICTED ARMING "..c.arm.."/4: "..labels[c.arm],colors.red);bs[#bs+1]=button(t,1,h-2,labels[c.arm],colors.red);bs[#bs+1]=button(t,35,h-2,"CANCEL",colors.lightGray) end
 end
-local binding,page,controls,buttons=inspect(),"overview",load(),{};local target=binding.monitor and peripheral.wrap(binding.monitor) or term.current();compactMonitor(target,binding.monitor~=nil)
+local function drawComputer(t,d,c)
+  local w,h=t.getSize();t.setBackgroundColor(colors.black);t.setTextColor(colors.white);t.clear()
+  local function line(y,s,color)
+    if y>h then return end
+    t.setCursorPos(1,y);t.setTextColor(color or colors.white);t.write(string.sub(tostring(s or ""),1,w))
+  end
+  line(1,"HELIOS DRACONIC GUARDIAN // COMPUTER",colors.yellow)
+  line(2,"Mode: "..tostring(c.mode).."  Request: "..tostring(c.request),c.mode=="UNRESTRICTED" and colors.red or colors.lime)
+  if d and d.reactor then
+    local r=d.reactor
+    line(4,"State "..tostring(r.status).."  Gen "..fmt(r.generationRate).." RF/t",colors.cyan)
+    line(5,"Core "..fmt(r.temperature).." C  Field "..string.format("%.1f%%",pct(r.fieldStrength,r.maxFieldStrength) or 0),colors.orange)
+    line(6,"Saturation "..string.format("%.1f%%",pct(r.energySaturation,r.maxEnergySaturation) or 0).."  Fuel conversion "..string.format("%.1f%%",pct(r.fuelConversion,r.maxFuelConversion) or 0))
+    line(7,"Field gate "..fmt(d.inputSet).."  Export gate "..fmt(d.outputSet),colors.lime)
+  else line(4,"TELEMETRY LOST",colors.red) end
+  line(9,"a start | s stop | c calibrate | r automatic")
+  line(10,"m assisted | u arm/confirm unrestricted")
+  line(11,"0 OFF | 1 MIN | 2 MED | 3 MAX | 4 OVERDRIVE")
+  line(12,"Field: f/F -/+100k | v/V -/+1M")
+  line(13,"Export: e/E -/+100k | x/X -/+1M")
+  line(14,"p apply manual | o save Overdrive | q quit")
+  line(16,"Manual field "..fmt(c.manualField or 0).."  export "..fmt(c.manualExport or 0),colors.cyan)
+  line(17,"Guardian: "..tostring(c.message),colors.lightGray)
+end
+local binding,page,controls,buttons=inspect(),"overview",load(),{};local computer=term.current();local target=binding.monitor and peripheral.wrap(binding.monitor) or computer;compactMonitor(target,binding.monitor~=nil)
 local function beginCalibration()
   controls.commissioning=true;controls.commissionFlow=COMMISSION_START_FLOW;controls.commissionSamples=0;controls.commissionShortfallSamples=0;controls.commissionSettleSamples=0;controls.commissionLastSafe=nil;controls.recovery=false;controls.commissioned=false;controls.rated=nil;controls.request="OFF"
   controls.initialRequested=true;controls.startActivated=false;controls.message="Automatic calibration requested by operator"
@@ -402,25 +426,37 @@ local function act(choice,d)
     if positive(controls.overdriveField) and positive(controls.overdriveExport) then controls.request="OVERDRIVE";controls.overdriveApplied=0;controls.message="Saved Overdrive preset requested" else controls.message="No saved Overdrive preset: configure Manual Gates first" end
   elseif FRACTION[choice] then controls.request=choice;controls.message="Output request: "..choice end
 end
+local function keyboard(ch,d)
+  local commands={a="INITIALIZE & ACTIVATE",s="SAFE SHUTDOWN",c="RECALIBRATE CEILING",r="RESTORE AUTOMATIC",m="ENABLE ASSISTED MANUAL",["0"]="OFF",["1"]="MIN",["2"]="MED",["3"]="MAX",["4"]="OVERDRIVE",f="FIELD -100k",F="FIELD +100k",v="FIELD -1M",V="FIELD +1M",e="EXPORT -100k",E="EXPORT +100k",x="EXPORT -1M",X="EXPORT +1M",p="APPLY MANUAL",o="SAVE AS OVERDRIVE PRESET"}
+  local manualKey={f=true,F=true,v=true,V=true,e=true,E=true,x=true,X=true,p=true,o=true,["4"]=true}
+  if manualKey[ch] and controls.mode~="UNRESTRICTED" then controls.message="Keyboard manual gates require Unrestricted mode";return end
+  if ch=="u" then act((controls.arm or 0)>0 and "KEYBOARD CONFIRM" or "ARM UNRESTRICTED",d)
+  elseif commands[ch] then act(commands[ch],d) end
+end
 -- Reactor supervision remains responsive at 10 Hz, while the expensive large
 -- monitor redraw and settings write run at 2 Hz. Touch events are handled
 -- continuously instead of competing with a redraw every tenth of a second.
 local data=binding.ready and read(binding) or nil
 if data then supervise(binding,data,controls);data=read(binding) or data end
 local function redraw()
-  buttons={};draw(target,binding,data,page,controls,buttons)
+  buttons={}
+  if target~=computer then draw(target,binding,data,page,controls,buttons) end
+  drawComputer(computer,data,controls)
 end
 redraw()
 local controlTimer=os.startTimer(.1)
-local displayTimer=os.startTimer(.5)
+local controlTicks=0
 while true do
   local e,a,b,c=os.pullEvent()
   if e=="timer" and a==controlTimer then
     data=binding.ready and read(binding) or nil
     if data then supervise(binding,data,controls);data=read(binding) or data end
+    controlTicks=controlTicks+1
+    if controlTicks>=5 then controlTicks=0;save(controls);redraw() end
     controlTimer=os.startTimer(.1)
-  elseif e=="timer" and a==displayTimer then
-    save(controls);redraw();displayTimer=os.startTimer(.5)
+  elseif e=="char" then
+    if a=="q" then save(controls);return end
+    if data then keyboard(a,data);redraw() end
   elseif e=="key" then
     if a==keys.q then save(controls);return end
     if a==keys.one then page="overview" elseif a==keys.two then page="raw" elseif a==keys.three then page="setup" elseif a==keys.four then page="gates" end
