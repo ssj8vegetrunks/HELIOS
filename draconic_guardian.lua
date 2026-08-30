@@ -62,16 +62,25 @@ local function call(n,m,...)
   if not n then return nil,"missing" end
   local ok,v=pcall(peripheral.call,n,m,...); if not ok then return nil,tostring(v) end; return v
 end
+local gateApplied,gateCommands={},{}
 local function read(b)
   local r,e=call(b.reactor,"getReactorInfo"); if type(r)~="table" then return nil,e or "getReactorInfo failed" end
   local inputSet=call(b.input,"getFlowOverride");if inputSet==nil then inputSet=call(b.input,"getSignalLowFlow") end
   local outputSet=call(b.output,"getFlowOverride");if outputSet==nil then outputSet=call(b.output,"getSignalLowFlow") end
+  if tonumber(inputSet) then gateApplied[b.input]=tonumber(inputSet) end
+  if tonumber(outputSet) then gateApplied[b.output]=tonumber(outputSet) end
   return {reactor=r,inputFlow=call(b.input,"getFlow"),outputFlow=call(b.output,"getFlow"),inputSet=inputSet,outputSet=outputSet,inputOverride=call(b.input,"getOverrideEnabled"),outputOverride=call(b.output,"getOverrideEnabled")}
 end
-local function gate(n,v)
+local function gate(n,v,force)
   local flow=math.max(0,math.floor(tonumber(v) or 0))
+  local applied=tonumber(gateApplied[n])
+  if not force and applied and math.abs(applied-flow)<1 then return true end
+  local previous=gateCommands[n]
+  local now=os.clock()
+  if not force and previous and previous.flow==flow and now-previous.sent<.75 then return true end
   local enabled,enableError=call(n,"setOverrideEnabled",true);if enabled==nil and enableError then return false,enableError end
   local _,flowError=call(n,"setFlowOverride",flow);if flowError then return false,flowError end
+  gateCommands[n]={flow=flow,sent=now}
   return true
 end
 local function positive(v) v=tonumber(v);return v and v>0 and math.floor(v) or nil end
@@ -91,10 +100,11 @@ local function acquireGates(b,d,c)
     c.message="CONTROL LOCKED: set the injector gate manually, then restart Guardian"
     return false
   end
+  if c.inputControlVerified==true and c.outputControlVerified==true then c.gatesOwned=true;c.gateError=nil;return true end
   if d.inputOverride==true and d.outputOverride==true then c.gatesOwned=true;c.inputControlVerified=true;c.outputControlVerified=true;c.gateError=nil;return true end
   -- Containment first, then export. Never close field support while taking control.
-  local inputOk,inputError=gate(b.input,injectorCap)
-  local outputOk,outputError=gate(b.output,0)
+  local inputOk,inputError=gate(b.input,injectorCap,true)
+  local outputOk,outputError=gate(b.output,0,true)
   local inputReported=call(b.input,"getOverrideEnabled")==true
   local outputReported=call(b.output,"getOverrideEnabled")==true
   local inputSet=call(b.input,"getFlowOverride");if inputSet==nil then inputSet=call(b.input,"getSignalLowFlow") end
@@ -112,7 +122,14 @@ local function acquireGates(b,d,c)
   else c.gateError=nil end
   return c.gatesOwned
 end
-local function reactor(n,m) return pcall(peripheral.call,n,m) end
+local reactorCommands={}
+local function reactor(n,m)
+  local now=os.clock();local previous=reactorCommands[n]
+  if previous and previous.method==m and now-previous.sent<.75 then return true end
+  local ok,result=pcall(peripheral.call,n,m)
+  if ok then reactorCommands[n]={method=m,sent=now} end
+  return ok,result
+end
 
 -- A requested export is only meaningful once the core is actually online.
 -- Keep the entire charge -> activate sequence in one place so the manual
@@ -166,7 +183,9 @@ local function button(t,x,y,label,c,pad)
 end
 local function hit(bs,x,y)
   local picked, distance
-  for _,b in ipairs(bs) do
+  -- Later controls are overlays (for example the unrestricted confirmation
+  -- row) and must win if they cover an older control.
+  for i=#bs,1,-1 do local b=bs[i]
     if y>=b.y1 and y<=b.y2 and x>=b.x1 and x<=b.x2 then
       local d=math.abs(y-b.y)*100+math.abs(x-(b.x+b.x2)/2)
       if not distance or d<distance then picked,distance=b,d end
@@ -176,7 +195,7 @@ local function hit(bs,x,y)
   -- scales. If the exact box missed, accept the nearest control within one
   -- row and three columns instead of making the operator repeatedly tap it.
   if not picked then
-    for _,b in ipairs(bs) do
+    for i=#bs,1,-1 do local b=bs[i]
       if math.abs(y-b.y)<=1 and x>=b.x1-3 and x<=b.x2+3 then
         local d=math.abs(y-b.y)*100+math.abs(x-(b.x+b.x2)/2)
         if not distance or d<distance then picked,distance=b,d end
@@ -434,7 +453,9 @@ local function drawComputer(t,d,c)
   line(16,"Manual field "..fmt(c.manualField or 0).."  export "..fmt(c.manualExport or 0),colors.cyan)
   line(17,"Guardian: "..tostring(c.message),colors.lightGray)
 end
-local binding,page,controls,buttons=inspect(),"overview",load(),{};local computer=term.current();local target=binding.monitor and peripheral.wrap(binding.monitor) or computer;compactMonitor(target,binding.monitor~=nil)
+local binding,page,controls,buttons=inspect(),"overview",load(),{}
+controls.inputControlVerified=false;controls.outputControlVerified=false;controls.gatesOwned=false;controls.telemetryStale=false
+local computer=term.current();local target=binding.monitor and peripheral.wrap(binding.monitor) or computer;compactMonitor(target,binding.monitor~=nil)
 local function beginCalibration()
   controls.commissioning=true;controls.commissionFlow=COMMISSION_START_FLOW;controls.commissionSamples=0;controls.commissionShortfallSamples=0;controls.commissionSettleSamples=0;controls.commissionLastSafe=nil;controls.recovery=false;controls.commissioned=false;controls.rated=nil;controls.request="OFF"
   controls.initialRequested=true;controls.startActivated=false;controls.message="Automatic calibration requested by operator"
@@ -442,7 +463,7 @@ end
 local function act(choice,d)
   if (choice=="AUTO COMMISSION" or choice=="RECALIBRATE CEILING") and controls.gatesOwned then beginCalibration()
   elseif choice=="INITIALIZE & ACTIVATE" and controls.gatesOwned then controls.initialRequested=true;controls.startActivated=false;controls.message="Initial start requested by operator"
-  elseif choice=="SAFE SHUTDOWN" then controls.request="OFF";controls.initialRequested=false;controls.startActivated=false;gate(binding.output,0);reactor(binding.reactor,"stopReactor");controls.message="Operator safe shutdown: output closed and stop sent"
+  elseif choice=="SAFE SHUTDOWN" then controls.request="OFF";controls.initialRequested=false;controls.startActivated=false;controls.message="Operator safe shutdown requested"
   elseif choice=="ENABLE ASSISTED MANUAL" then controls.mode="ASSISTED";controls.request="OFF";controls.message="Assisted manual enabled at OFF"
   elseif choice=="ARM UNRESTRICTED" then controls.arm=1;controls.message="Unrestricted arming started"
   elseif choice=="CANCEL" then controls.arm=0;controls.message="Unrestricted arming cancelled"
@@ -466,50 +487,93 @@ local function act(choice,d)
     if positive(controls.overdriveField) and positive(controls.overdriveExport) then controls.request="OVERDRIVE";controls.overdriveApplied=0;controls.startActivated=false;controls.message="Saved Overdrive preset requested" else controls.message="No saved Overdrive preset: configure Manual Gates first" end
   elseif FRACTION[choice] then controls.request=choice;controls.startActivated=false;controls.message="Output request: "..choice end
 end
-local function keyboard(ch,d)
+local function keyboardChoice(ch)
   local commands={a="INITIALIZE & ACTIVATE",s="SAFE SHUTDOWN",c="RECALIBRATE CEILING",r="RESTORE AUTOMATIC",m="ENABLE ASSISTED MANUAL",["0"]="OFF",["1"]="MIN",["2"]="MED",["3"]="MAX",["4"]="OVERDRIVE",f="FIELD -100k",F="FIELD +100k",v="FIELD -1M",V="FIELD +1M",e="EXPORT -100k",E="EXPORT +100k",x="EXPORT -1M",X="EXPORT +1M",p="APPLY MANUAL",o="SAVE AS OVERDRIVE PRESET"}
   local manualKey={f=true,F=true,v=true,V=true,e=true,E=true,x=true,X=true,p=true,o=true,["4"]=true}
-  if manualKey[ch] and controls.mode~="UNRESTRICTED" then controls.message="Keyboard manual gates require Unrestricted mode";return end
-  if ch=="u" then act((controls.arm or 0)>0 and "KEYBOARD CONFIRM" or "ARM UNRESTRICTED",d)
-  elseif commands[ch] then act(commands[ch],d) end
+  if manualKey[ch] and controls.mode~="UNRESTRICTED" then controls.message="Keyboard manual gates require Unrestricted mode";return nil end
+  if ch=="u" then return (controls.arm or 0)>0 and "KEYBOARD CONFIRM" or "ARM UNRESTRICTED" end
+  return commands[ch]
 end
--- Reactor supervision remains responsive at 10 Hz, while the expensive large
--- monitor redraw and settings write run at 2 Hz. Touch events are handled
--- continuously instead of competing with a redraw every tenth of a second.
 local data=binding.ready and read(binding) or nil
-if data then supervise(binding,data,controls);data=read(binding) or data end
 local function redraw()
   buttons={}
   if target~=computer then draw(target,binding,data,page,controls,buttons) end
   drawComputer(computer,data,controls)
 end
-redraw()
-local controlTimer=os.startTimer(.1)
-local controlTicks=0
-while true do
-  local e,a,b,c=os.pullEvent()
-  if e=="timer" and a==controlTimer then
-    data=binding.ready and read(binding) or nil
-    if data then supervise(binding,data,controls);data=read(binding) or data end
-    controlTicks=controlTicks+1
-    if controlTicks>=5 then controlTicks=0;save(controls);redraw() end
-    controlTimer=os.startTimer(.1)
-  elseif e=="char" then
-    if a=="q" then save(controls);return end
-    if data then keyboard(a,data);redraw() end
-  elseif e=="key" then
-    if a==keys.q then save(controls);return end
-    if a==keys.one then page="overview" elseif a==keys.two then page="raw" elseif a==keys.three then page="setup" elseif a==keys.four then page="gates" end
-    redraw()
-  elseif e=="monitor_touch" and binding.monitor and a==binding.monitor then
-    if c==3 then page=b<=10 and "overview" or b<=21 and "raw" or b<=29 and "setup" or "gates";redraw()
-    else
-      local choice=hit(buttons,b,c)
-      if choice=="BACK" then page="overview";redraw()
-      elseif choice then act(choice,data);redraw() end
+local DRAW_EVENT="guardian_redraw"
+local actions={}
+local function requestDraw() os.queueEvent(DRAW_EVENT) end
+local function enqueue(choice)
+  if not choice then return end
+  if choice=="SAFE SHUTDOWN" then actions={choice} else actions[#actions+1]=choice end
+  controls.message="Command queued: "..tostring(choice)
+  requestDraw()
+end
+local function inputWorker()
+  while true do
+    local e,a,b,c=os.pullEvent()
+    if e=="char" then
+      if a=="q" then save(controls);return end
+      enqueue(keyboardChoice(a))
+    elseif e=="key" then
+      if a==keys.q then save(controls);return end
+      if a==keys.one then page="overview" elseif a==keys.two then page="raw" elseif a==keys.three then page="setup" elseif a==keys.four then page="gates" end
+      requestDraw()
+    elseif e=="monitor_touch" and binding.monitor and a==binding.monitor then
+      if c==3 then page=b<=10 and "overview" or b<=21 and "raw" or b<=29 and "setup" or "gates";requestDraw()
+      else
+        local choice=hit(buttons,b,c)
+        if choice=="BACK" then page="overview";requestDraw() else enqueue(choice) end
+      end
+    elseif e=="peripheral" or e=="peripheral_detach" then
+      binding=inspect()
+      target=binding.monitor and peripheral.wrap(binding.monitor) or computer
+      compactMonitor(target,binding.monitor~=nil)
+      gateApplied={};gateCommands={};reactorCommands={}
+      controls.inputControlVerified=false;controls.outputControlVerified=false;controls.gatesOwned=false
+      data=nil
+      requestDraw()
     end
-  elseif e=="peripheral" or e=="peripheral_detach" then
-    binding=inspect();target=binding.monitor and peripheral.wrap(binding.monitor) or term.current();compactMonitor(target,binding.monitor~=nil);data=binding.ready and read(binding) or nil;redraw()
   end
 end
+local function controlWorker()
+  local timer=os.startTimer(.2)
+  local ticks=0
+  local lastTelemetry=os.clock()
+  while true do
+    local e,id=os.pullEvent("timer")
+    if id==timer then
+      local safeHandled=false
+      if actions[1]=="SAFE SHUTDOWN" then
+        actions={};safeHandled=true;act("SAFE SHUTDOWN",data or {})
+        if binding.ready then gate(binding.output,0);reactor(binding.reactor,"stopReactor") end
+      end
+      local nextData,readError
+      if binding.ready then nextData,readError=read(binding) end
+      if nextData then
+        data=nextData;lastTelemetry=os.clock();controls.telemetryStale=false;controls.telemetryAge=0
+        if not controls.gatesOwned then acquireGates(binding,data,controls) end
+        if not safeHandled then while #actions>0 do act(table.remove(actions,1),data) end end
+        supervise(binding,data,controls)
+      else
+        controls.telemetryAge=os.clock()-lastTelemetry
+        controls.telemetryStale=controls.telemetryAge>=2
+        if controls.telemetryStale and binding.ready then
+          gate(binding.output,0);reactor(binding.reactor,"stopReactor")
+          controls.message="TELEMETRY STALE: export closed, reactor stop requested"
+        elseif readError then controls.message="Telemetry retry: "..tostring(readError) end
+      end
+      ticks=ticks+1
+      if ticks%2==0 then requestDraw() end
+      if ticks>=5 then ticks=0;save(controls) end
+      timer=os.startTimer(.2)
+    end
+  end
+end
+local function displayWorker()
+  redraw()
+  while true do os.pullEvent(DRAW_EVENT);redraw() end
+end
+parallel.waitForAny(inputWorker,controlWorker,displayWorker)
+save(controls)
 
