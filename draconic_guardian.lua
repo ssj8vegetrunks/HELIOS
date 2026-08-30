@@ -91,12 +91,20 @@ local function acquireGates(b,d,c)
     c.message="CONTROL LOCKED: set the injector gate manually, then restart Guardian"
     return false
   end
-  if d.inputOverride==true and d.outputOverride==true then c.gatesOwned=true;c.gateError=nil;return true end
+  if d.inputOverride==true and d.outputOverride==true then c.gatesOwned=true;c.inputControlVerified=true;c.outputControlVerified=true;c.gateError=nil;return true end
   -- Containment first, then export. Never close field support while taking control.
   local inputOk,inputError=gate(b.input,injectorCap)
   local outputOk,outputError=gate(b.output,0)
-  local inputOwned=call(b.input,"getOverrideEnabled")==true
-  local outputOwned=call(b.output,"getOverrideEnabled")==true
+  local inputReported=call(b.input,"getOverrideEnabled")==true
+  local outputReported=call(b.output,"getOverrideEnabled")==true
+  local inputSet=call(b.input,"getFlowOverride");if inputSet==nil then inputSet=call(b.input,"getSignalLowFlow") end
+  local outputSet=call(b.output,"getFlowOverride");if outputSet==nil then outputSet=call(b.output,"getSignalLowFlow") end
+  -- Some DE builds show "Overridden" in the GUI but return false/nil from
+  -- getOverrideEnabled(). A successful command whose override setpoint reads
+  -- back exactly is equivalent proof that this computer owns the gate.
+  local inputOwned=inputReported or (inputOk and tonumber(inputSet) and math.abs(tonumber(inputSet)-injectorCap)<1)
+  local outputOwned=outputReported or (outputOk and tonumber(outputSet) and math.abs(tonumber(outputSet))<1)
+  c.inputControlVerified=inputOwned==true;c.outputControlVerified=outputOwned==true
   c.gatesOwned=inputOk and outputOk and inputOwned and outputOwned
   if not c.gatesOwned then
     c.message="CONTROL LOCKED: gate override not acquired (field "..tostring(inputOwned)..", output "..tostring(outputOwned)..")"
@@ -338,7 +346,8 @@ local function draw(t,b,d,page,c,bs)
     liveLine(ty+6,"Field drain: "..fmt(r.fieldDrainRate).." RF/t")
     liveLine(ty+7,"Saturation: "..string.format("%.1f%%",pct(r.energySaturation,r.maxEnergySaturation) or 0))
     liveLine(ty+8,"Fuel conversion: "..string.format("%.1f%%",pct(r.fuelConversion,r.maxFuelConversion) or 0))
-    liveLine(ty+10,"Field live/set: "..fmt(d.inputFlow).." / "..fmt(d.inputSet),d.inputOverride and colors.lime or colors.red)
+    local inputControlled=d.inputOverride==true or c.inputControlVerified==true
+    liveLine(ty+10,"Field live/set: "..fmt(d.inputFlow).." / "..fmt(d.inputSet),inputControlled and colors.lime or colors.red)
     liveLine(ty+11,"Export live/set: "..fmt(d.outputFlow).." / "..fmt(d.outputSet),exportApplied and colors.lime or colors.orange)
     return
   end
@@ -364,10 +373,12 @@ local function draw(t,b,d,page,c,bs)
   vertical(t,rightFuel,5,12,"FUEL",r.fuelConversion,tonumber(r.maxFuelConversion),colors.lime)
   center(5,"REACTOR TELEMETRY",colors.cyan);center(7,"State: "..tostring(r.status),colors.lime);center(8,"Generation: "..fmt(r.generationRate).." RF/t",colors.cyan)
   center(9,"Core temperature: "..fmt(r.temperature).." C",colors.orange);center(10,"Containment field strength: "..fmt(r.fieldStrength).." / "..fmt(r.maxFieldStrength));center(11,"Energy saturation: "..fmt(r.energySaturation).." / "..fmt(r.maxEnergySaturation));center(12,"Fuel conversion level: "..fmt(r.fuelConversion).." / "..fmt(r.maxFuelConversion))
-  center(14,"GATE CONTROL",colors.cyan);center(15,"Field: "..fmt(d.inputFlow).." / "..fmt(d.inputSet),d.inputOverride and colors.lime or colors.red);center(16,"Export: "..fmt(d.outputFlow).." / "..fmt(d.outputSet),d.outputOverride and colors.lime or colors.red);center(17,"modem=field; "..tostring(b.output).."=export",colors.lightGray);centerWrap(18,"GUARDIAN: "..c.message,c.mode=="UNRESTRICTED" and colors.red or colors.lightGray,3)
+  local inputControlled=d.inputOverride==true or c.inputControlVerified==true
+  local outputControlled=d.outputOverride==true or c.outputControlVerified==true
+  center(14,"GATE CONTROL",colors.cyan);center(15,"Field: "..fmt(d.inputFlow).." / "..fmt(d.inputSet),inputControlled and colors.lime or colors.red);center(16,"Export: "..fmt(d.outputFlow).." / "..fmt(d.outputSet),outputControlled and colors.lime or colors.red);center(17,"modem=field; "..tostring(b.output).."=export",colors.lightGray);centerWrap(18,"GUARDIAN: "..c.message,c.mode=="UNRESTRICTED" and colors.red or colors.lightGray,3)
   local y=h-7;if not c.gatesOwned then
     text(t,1,y-2,"GATE CONTROL NOT ACQUIRED - REACTOR START DISABLED",colors.red)
-    text(t,1,y-1,"Guardian must show field override true and output override true.",colors.orange)
+    text(t,1,y-1,"Field control: "..tostring(c.inputControlVerified).."  Export control: "..tostring(c.outputControlVerified),colors.orange)
     if c.gateError then text(t,1,y,"API error: "..tostring(c.gateError),colors.red) end
     bs[#bs+1]=button(t,1,y+3,"SAFE SHUTDOWN",colors.red)
   elseif not c.commissioned then
