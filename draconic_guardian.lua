@@ -172,6 +172,17 @@ local function hit(bs,x,y)
       if not distance or d<distance then picked,distance=b,d end
     end
   end
+  -- A wall monitor can report the neighbouring character at small text
+  -- scales. If the exact box missed, accept the nearest control within one
+  -- row and three columns instead of making the operator repeatedly tap it.
+  if not picked then
+    for _,b in ipairs(bs) do
+      if math.abs(y-b.y)<=1 and x>=b.x1-3 and x<=b.x2+3 then
+        local d=math.abs(y-b.y)*100+math.abs(x-(b.x+b.x2)/2)
+        if not distance or d<distance then picked,distance=b,d end
+      end
+    end
+  end
   return picked and picked.label
 end
 local function vertical(t,x,y,h,label,now,maximum,c)
@@ -322,16 +333,19 @@ local function draw(t,b,d,page,c,bs)
     if c.mode~="UNRESTRICTED" then text(t,1,7,"Arm Unrestricted control before changing either gate manually.",colors.orange);return end
     local r=d.reactor
     local status=string.lower(tostring(r.status or "unknown"))
+    local fieldTarget=tonumber(c.manualField) or tonumber(d.inputSet) or 0
     local exportTarget=tonumber(c.manualExport) or tonumber(d.outputSet) or 0
     local exportSet=tonumber(d.outputSet) or 0
-    local exportApplied=c.request=="MANUAL" and (status=="online" or status=="running") and math.abs(exportSet-exportTarget)<1
+    local fieldSet=tonumber(d.inputSet) or 0
+    local manualApplied=c.request=="MANUAL" and math.abs(fieldSet-fieldTarget)<1 and math.abs(exportSet-exportTarget)<1
+    local exportApplied=manualApplied and (status=="online" or status=="running")
     local presetField,presetExport=positive(c.overdriveField),positive(c.overdriveExport)
     local presetSaved=presetField and presetExport and presetField==positive(c.manualField or d.inputSet) and presetExport==positive(exportTarget)
     text(t,1,7,"FIELD GATE (injector): "..fmt(c.manualField or d.inputSet).." RF/t",colors.cyan)
     bs[#bs+1]=button(t,1,9,"FIELD -1M",colors.cyan,1);bs[#bs+1]=button(t,16,9,"FIELD -100k",colors.cyan,1);bs[#bs+1]=button(t,34,9,"FIELD +100k",colors.cyan,1);bs[#bs+1]=button(t,53,9,"FIELD +1M",colors.cyan,1)
     text(t,1,12,"EXPORT GATE: "..fmt(exportTarget).." RF/t"..(exportApplied and "  APPLIED" or "  PENDING"),exportApplied and colors.lime or colors.orange)
     bs[#bs+1]=button(t,1,14,"EXPORT -1M",colors.cyan,1);bs[#bs+1]=button(t,16,14,"EXPORT -100k",colors.cyan,1);bs[#bs+1]=button(t,34,14,"EXPORT +100k",colors.cyan,1);bs[#bs+1]=button(t,53,14,"EXPORT +1M",colors.cyan,1)
-    bs[#bs+1]=button(t,1,17,"USE LIVE GATES",colors.lightGray,1);bs[#bs+1]=button(t,22,17,"APPLY MANUAL",colors.lime,1)
+    bs[#bs+1]=button(t,1,17,"USE LIVE GATES",colors.lightGray,1);bs[#bs+1]=button(t,22,17,"APPLY MANUAL",manualApplied and colors.lime or colors.orange,1)
     bs[#bs+1]=button(t,1,20,"SAVE AS OVERDRIVE PRESET",presetSaved and colors.lime or colors.red,1);bs[#bs+1]=button(t,35,20,"BACK",colors.lightGray,1)
     text(t,1,23,"Overdrive keeps this field setting and ramps only export to the saved target.",colors.lightGray)
     local tx,ty=1,25
