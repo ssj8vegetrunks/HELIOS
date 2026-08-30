@@ -1,6 +1,8 @@
 local writes, calls = {}, {}
 local overrides = { right = false, flow_gate_1 = false }
-local overrideFlows = { right = 0, flow_gate_1 = 0 }
+-- The injector gate begins at the proven manual field-support limit. Guardian
+-- must adopt this rather than replacing it with a fixed bootstrap value.
+local overrideFlows = { right = 0, flow_gate_1 = 1600000 }
 local target = {}
 for _, method in ipairs({ "setBackgroundColor", "setTextColor", "clear", "setCursorPos", "write" }) do
     target[method] = function() end
@@ -69,13 +71,15 @@ os = {
 
 dofile("draconic_guardian.lua")
 
-local sawStop, sawCommissionFlow, sawBeyondFormerCap = false, false, false
+local sawStop, sawCommissionFlow, sawBeyondFormerCap, sawAdoptedInjectorLimit = false, false, false, false
 for _, entry in ipairs(calls) do if entry[2] == "stopReactor" then sawStop = true end end
 for _, entry in ipairs(writes) do if entry[1] == "right" and entry[2] == 50000 then sawCommissionFlow = true end end
 for _, entry in ipairs(writes) do if entry[1] == "right" and type(entry[2]) == "number" and entry[2] > 4000000 then sawBeyondFormerCap = true end end
+for _, entry in ipairs(writes) do if entry[1] == "flow_gate_1" and entry[2] == 1600000 then sawAdoptedInjectorLimit = true end end
 assert(sawStop, "manual OFF must request a controlled reactor stop")
 assert(sawCommissionFlow, "automatic commissioning must apply its conservative export")
 assert(sawBeyondFormerCap, "automatic calibration must not impose the former fixed 4M RF/t ceiling")
+assert(sawAdoptedInjectorLimit, "Guardian must preserve the existing injector field-support limit")
 assert(overrides.right and overrides.flow_gate_1, "Guardian must acquire direct override of both gates")
 print("draconic guardian control tests passed")
 

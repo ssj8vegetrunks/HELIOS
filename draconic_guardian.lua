@@ -69,10 +69,26 @@ local function gate(n,v)
   local _,flowError=call(n,"setFlowOverride",flow);if flowError then return false,flowError end
   return true
 end
+local function positive(v) v=tonumber(v);return v and v>0 and math.floor(v) or nil end
+local function adoptInjectorBaseline(d,c)
+  if not positive(c.injectorBaseline) then
+    -- Prefer the configured gate limit over live flow: live flow drops when
+    -- the reactor is cool, but the configured limit remains the proven field
+    -- support capacity selected by the operator.
+    c.injectorBaseline=positive(d.inputSet) or positive(d.inputFlow)
+  end
+  return positive(c.injectorBaseline)
+end
 local function acquireGates(b,d,c)
+  local injectorCap=adoptInjectorBaseline(d,c)
+  if not injectorCap then
+    c.gatesOwned=false;c.gateError="no positive injector gate limit to adopt"
+    c.message="CONTROL LOCKED: set the injector gate manually, then restart Guardian"
+    return false
+  end
   if d.inputOverride==true and d.outputOverride==true then c.gatesOwned=true;c.gateError=nil;return true end
   -- Containment first, then export. Never close field support while taking control.
-  local inputOk,inputError=gate(b.input,900000)
+  local inputOk,inputError=gate(b.input,injectorCap)
   local outputOk,outputError=gate(b.output,0)
   local inputOwned=call(b.input,"getOverrideEnabled")==true
   local outputOwned=call(b.output,"getOverrideEnabled")==true
@@ -90,7 +106,7 @@ local function reactor(n,m) return pcall(peripheral.call,n,m) end
 -- selector, commissioning, and the explicit activation control behave alike.
 local function ensureStarted(b,c,status,reason)
   gate(b.output,0)
-  gate(b.input,900000)
+  gate(b.input,positive(c.injectorBaseline) or 0)
   if status=="offline" or status=="stopping" or status=="cooling" then
     reactor(b.reactor,"chargeReactor")
     c.startActivated=false
@@ -147,7 +163,7 @@ end
 local function load()
   local d={mode="AUTO",request="OFF",rated=nil,commissioned=false,commissioning=false,commissionFlow=nil,commissionSamples=0,commissionShortfallSamples=0,commissionLastSafe=nil,recovery=false,arm=0,initialRequested=false,startActivated=false,message="Automatic safe supervision"}
   if not fs.exists(SETTINGS) then return d end;local ok,s=pcall(dofile,SETTINGS);if not ok or type(s)~="table" then return d end
-  d.mode=(s.mode=="ASSISTED" or s.mode=="UNRESTRICTED") and s.mode or "AUTO";d.request=FRACTION[s.request] and s.request or "OFF";d.rated=tonumber(s.rated);d.commissioned=s.commissioned==true;d.message=tostring(s.message or d.message);return d
+  d.mode=(s.mode=="ASSISTED" or s.mode=="UNRESTRICTED") and s.mode or "AUTO";d.request=FRACTION[s.request] and s.request or "OFF";d.rated=tonumber(s.rated);d.injectorBaseline=positive(s.injectorBaseline);d.commissioned=s.commissioned==true;d.message=tostring(s.message or d.message);return d
 end
 local function save(c) local h=fs.open(SETTINGS,"w");if h then h.write("return "..textutils.serialize(c));h.close() end end
 
@@ -157,7 +173,8 @@ local function supervise(b,d,c)
   local r=d.reactor;local status=string.lower(tostring(r.status or "unknown"));local field=pct(r.fieldStrength,r.maxFieldStrength) or 0
   local live=status=="online" or status=="running"
   local fuel=pct((tonumber(r.maxFuelConversion) or 0)-(tonumber(r.fuelConversion) or 0),r.maxFuelConversion) or 0;local temp=tonumber(r.temperature) or math.huge;local free=c.mode=="UNRESTRICTED"
-  local function stop(reason,charge) gate(b.output,0);reactor(b.reactor,"stopReactor");if charge then reactor(b.reactor,"chargeReactor");gate(b.input,900000) end;c.message="SAFETY INTERLOCK: "..reason;return true end
+  local injectorCap=positive(c.injectorBaseline) or 0
+  local function stop(reason,charge) gate(b.output,0);reactor(b.reactor,"stopReactor");if charge then reactor(b.reactor,"chargeReactor");gate(b.input,injectorCap) end;c.message="SAFETY INTERLOCK: "..reason;return true end
   if not acquireGates(b,d,c) then
     c.initialRequested=false;c.startActivated=false;c.commissioning=false
     reactor(b.reactor,"stopReactor")
@@ -170,10 +187,10 @@ local function supervise(b,d,c)
     if field<=FIELD_EMERGENCY then return stop("field below "..FIELD_EMERGENCY.."%",true) end
     if temp>MAX_TEMPERATURE then return stop("temperature above "..MAX_TEMPERATURE.." C") end
   elseif fuel<=MINIMUM_FUEL or field<=FIELD_EMERGENCY or temp>MAX_TEMPERATURE then c.message="UNRESTRICTED WARNING: a containment/fuel/temperature limit is exceeded" end
-  if status=="charging" then gate(b.input,900000);c.message="Charging containment";return end
+  if status=="charging" then gate(b.input,injectorCap);c.message="Charging containment";return end
   if c.initialRequested then
     if status=="offline" or status=="stopping" then
-      reactor(b.reactor,"chargeReactor");gate(b.input,900000);c.message="Initial start: charging containment"
+      reactor(b.reactor,"chargeReactor");gate(b.input,injectorCap);c.message="Initial start: charging containment"
       return
     end
     if not c.startActivated and (status=="charged" or status=="warming_up" or status=="warning_up") then
@@ -181,7 +198,7 @@ local function supervise(b,d,c)
       -- that transient value to reduce its stabilizer supply: doing so leaves
       -- the reactor at 1 RF/t and prevents it from ever reaching ONLINE.
       -- Keep containment fully supplied until live telemetry is available.
-      reactor(b.reactor,"activateReactor");gate(b.input,900000)
+      reactor(b.reactor,"activateReactor");gate(b.input,injectorCap)
       c.startActivated=true;c.message="Initial start: activation sent; waiting for ONLINE"
       return
     end
@@ -190,7 +207,7 @@ local function supervise(b,d,c)
   if c.recovery then
     -- A calibration that reaches its edge pauses with export closed until the
     -- field has rebuilt. This prevents an old manual request from resuming.
-    gate(b.output,0);gate(b.input,900000)
+    gate(b.output,0);gate(b.input,injectorCap)
     if field>=45 and temp<=COMMISSION_TEMP_LIMIT then
       c.recovery=false
       c.message="Calibration recovery complete; export remains OFF"
@@ -204,12 +221,12 @@ local function supervise(b,d,c)
       return
     end
     local trial=math.max(COMMISSION_START_FLOW,tonumber(c.commissionFlow) or COMMISSION_START_FLOW)
-    gate(b.input,math.max(1,(tonumber(r.fieldDrainRate) or 0)/(1-FIELD_TARGET/100)))
+    gate(b.input,injectorCap)
     gate(b.output,trial)
     -- Stop just above the hard 15% interlock. A 17% calibration cutoff leaves
     -- the guardian room to close export and rebuild the field safely.
     if field<COMMISSION_FIELD_FLOOR or temp>COMMISSION_TEMP_LIMIT or fuel<=MINIMUM_FUEL then
-      gate(b.output,0);gate(b.input,900000);c.commissioning=false;c.initialRequested=false;c.commissionSamples=0;c.commissionShortfallSamples=0;c.request="OFF";c.recovery=true
+      gate(b.output,0);gate(b.input,injectorCap);c.commissioning=false;c.initialRequested=false;c.commissionSamples=0;c.commissionShortfallSamples=0;c.request="OFF";c.recovery=true
       c.commissioned=tonumber(c.commissionLastSafe) and c.commissionLastSafe>0 or false;c.rated=c.commissionLastSafe
       c.message="Calibration reached the 17% field edge; output closed. Last verified ceiling "..fmt(c.rated or 0).." RF/t"
       return
@@ -238,17 +255,17 @@ local function supervise(b,d,c)
     end
     return
   end
-  if c.mode=="AUTO" then if live then gate(b.input,math.max(1,(tonumber(r.fieldDrainRate) or 0)/(1-FIELD_TARGET/100))) end;c.message="Automatic: field held near "..FIELD_TARGET.."%; output awaits HELIOS request";return end
+  if c.mode=="AUTO" then gate(b.input,injectorCap);gate(b.output,0);c.message="Automatic: adopted "..fmt(injectorCap).." RF/t injector limit; export closed";return end
   if not c.commissioned or not c.rated then c.message="Control locked: run automatic commissioning first";return end
   if c.request=="OFF" then gate(b.output,0);reactor(b.reactor,"stopReactor");c.message="Manual OFF: export closed";return end
   if status=="offline" or status=="stopping" or status=="cooling" then
     -- Cooling is the post-stop state in DE. Treat it as a restart state so a
     -- selected output cannot leave the Guardian waiting forever with export
     -- closed and residual generation still visible in telemetry.
-    reactor(b.reactor,"chargeReactor");gate(b.input,900000);c.message="Charging containment for requested output";return
+    reactor(b.reactor,"chargeReactor");gate(b.input,injectorCap);c.message="Charging containment for requested output";return
   end
   if status=="charged" then reactor(b.reactor,"activateReactor");c.message="Starting for requested output";return end
-  if live then gate(b.input,math.max(1,(tonumber(r.fieldDrainRate) or 0)/(1-FIELD_TARGET/100)));gate(b.output,c.rated*(FRACTION[c.request] or 0));c.message=(free and "UNRESTRICTED" or "ASSISTED").." "..c.request.." output applied" end
+  if live then gate(b.input,injectorCap);gate(b.output,c.rated*(FRACTION[c.request] or 0));c.message=(free and "UNRESTRICTED" or "ASSISTED").." "..c.request.." output applied" end
 end
 local function draw(t,b,d,page,c,bs)
   local w,h=t.getSize();t.setBackgroundColor(colors.black);t.setTextColor(colors.white);t.clear();text(t,1,1,"HELIOS // DRACONIC GUARDIAN",colors.yellow)
