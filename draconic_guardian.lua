@@ -312,13 +312,34 @@ local function draw(t,b,d,page,c,bs)
   if page=="gates" then
     text(t,1,5,"MANUAL GATES // unrestricted only",c.mode=="UNRESTRICTED" and colors.red or colors.orange)
     if c.mode~="UNRESTRICTED" then text(t,1,7,"Arm Unrestricted control before changing either gate manually.",colors.orange);return end
+    local r=d.reactor
+    local status=string.lower(tostring(r.status or "unknown"))
+    local exportTarget=tonumber(c.manualExport) or tonumber(d.outputSet) or 0
+    local exportSet=tonumber(d.outputSet) or 0
+    local exportApplied=c.request=="MANUAL" and (status=="online" or status=="running") and math.abs(exportSet-exportTarget)<1
+    local presetField,presetExport=positive(c.overdriveField),positive(c.overdriveExport)
+    local presetSaved=presetField and presetExport and presetField==positive(c.manualField or d.inputSet) and presetExport==positive(exportTarget)
     text(t,1,7,"FIELD GATE (injector): "..fmt(c.manualField or d.inputSet).." RF/t",colors.cyan)
     bs[#bs+1]=button(t,1,9,"FIELD -1M",colors.cyan,1);bs[#bs+1]=button(t,16,9,"FIELD -100k",colors.cyan,1);bs[#bs+1]=button(t,34,9,"FIELD +100k",colors.cyan,1);bs[#bs+1]=button(t,53,9,"FIELD +1M",colors.cyan,1)
-    text(t,1,12,"EXPORT GATE: "..fmt(c.manualExport or d.outputSet).." RF/t",colors.orange)
+    text(t,1,12,"EXPORT GATE: "..fmt(exportTarget).." RF/t"..(exportApplied and "  APPLIED" or "  PENDING"),exportApplied and colors.lime or colors.orange)
     bs[#bs+1]=button(t,1,14,"EXPORT -1M",colors.cyan,1);bs[#bs+1]=button(t,16,14,"EXPORT -100k",colors.cyan,1);bs[#bs+1]=button(t,34,14,"EXPORT +100k",colors.cyan,1);bs[#bs+1]=button(t,53,14,"EXPORT +1M",colors.cyan,1)
     bs[#bs+1]=button(t,1,17,"USE LIVE GATES",colors.lightGray,1);bs[#bs+1]=button(t,22,17,"APPLY MANUAL",colors.lime,1)
-    bs[#bs+1]=button(t,1,20,"SAVE AS OVERDRIVE PRESET",colors.red,1);bs[#bs+1]=button(t,35,20,"BACK",colors.lightGray,1)
+    bs[#bs+1]=button(t,1,20,"SAVE AS OVERDRIVE PRESET",presetSaved and colors.lime or colors.red,1);bs[#bs+1]=button(t,35,20,"BACK",colors.lightGray,1)
     text(t,1,23,"Overdrive keeps this field setting and ramps only export to the saved target.",colors.lightGray)
+    local tx,ty=1,25
+    if w>=92 then tx,ty=70,5 end
+    local tw=math.max(18,w-tx+1)
+    local function liveLine(y,s,color) if y<=h then text(t,tx,y,string.sub(tostring(s),1,tw),color) end end
+    liveLine(ty,"LIVE TELEMETRY",colors.cyan)
+    liveLine(ty+2,"State: "..tostring(r.status),colors.lime)
+    liveLine(ty+3,"Generation: "..fmt(r.generationRate).." RF/t",colors.cyan)
+    liveLine(ty+4,"Core temp: "..fmt(r.temperature).." C",colors.orange)
+    liveLine(ty+5,"Field strength: "..string.format("%.1f%%",pct(r.fieldStrength,r.maxFieldStrength) or 0))
+    liveLine(ty+6,"Field drain: "..fmt(r.fieldDrainRate).." RF/t")
+    liveLine(ty+7,"Saturation: "..string.format("%.1f%%",pct(r.energySaturation,r.maxEnergySaturation) or 0))
+    liveLine(ty+8,"Fuel conversion: "..string.format("%.1f%%",pct(r.fuelConversion,r.maxFuelConversion) or 0))
+    liveLine(ty+10,"Field live/set: "..fmt(d.inputFlow).." / "..fmt(d.inputSet),d.inputOverride and colors.lime or colors.red)
+    liveLine(ty+11,"Export live/set: "..fmt(d.outputFlow).." / "..fmt(d.outputSet),exportApplied and colors.lime or colors.orange)
     return
   end
   local r=d.reactor;if w<54 or h<25 then text(t,1,5,"Large monitor required for the Guardian console.",colors.orange);text(t,1,7,"State: "..tostring(r.status).."  Temp: "..fmt(r.temperature).." C");text(t,1,8,"Generation: "..fmt(r.generationRate).." RF/t");return end
