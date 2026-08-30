@@ -29,6 +29,12 @@ Install or update the standalone Draconic Guardian:
 wget run https://raw.githubusercontent.com/ssj8vegetrunks/HELIOS/testing/public-alpha/draconic_guardian.lua
 ```
 
+The command above is the legacy one-session launch. For persistent Guardian
+settings and automatic startup, run the HELIOS installer and select
+`Draconic Reactor Guardian`. Its calibration, manual values, and Overdrive
+preset are stored under `/helios/data/`, and its facility telemetry is
+advertised to a HELIOS Mainframe over `helios.facility.v1`.
+
 Start with the [tester guide](docs/TESTING.md), [site map](docs/SITE_MAP.md),
 [dependency map](docs/DEPENDENCY_MAP.md), or [module template](module-template/README.md).
 

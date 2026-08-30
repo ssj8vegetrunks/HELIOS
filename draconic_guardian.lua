@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.0
+-- HELIOS Draconic Guardian v1.1.0-alpha.1
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -18,7 +18,25 @@ local COMMISSION_SHORTFALL_SAMPLES = 20
 local COMMISSION_SETTLE_SAMPLES = 120
 local FRACTION = { OFF = 0, MIN = .25, MED = .50, MAX = 1 }
 local PRESET_RAMP_STEP, MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 50000, 100000, 1000000
-local SETTINGS = ".helios-draconic-guardian.lua"
+local GUARDIAN_VERSION = "1.1.0-alpha.1"
+local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
+  ".helios-draconic-guardian.lua"
+local facilityNetwork,facilityProtocol,facilityIdentity,facilitySequence
+local facilityConnected,facilityLastWelcome=false,nil
+if fs.exists("/helios/core/network.lua") and fs.exists("/helios/core/facility_protocol.lua") then
+  local okNetwork,loadedNetwork=pcall(dofile,"/helios/core/network.lua")
+  local okProtocol,loadedProtocol=pcall(dofile,"/helios/core/facility_protocol.lua")
+  if okNetwork and okProtocol then
+    facilityNetwork,facilityProtocol=loadedNetwork,loadedProtocol
+    facilityNetwork.openAll()
+    facilityIdentity=facilityProtocol.identity({
+      nodeId="guardian:draconic-"..tostring(os.getComputerID()),
+      sessionId=facilityNetwork.sessionId("guardian"),role="guardian",
+      software="draconic_guardian",softwareVersion=GUARDIAN_VERSION,
+    })
+    facilitySequence=0
+  end
+end
 
 local function hasType(name, fragment)
   for _, t in ipairs({ peripheral.getType(name) }) do
@@ -214,7 +232,10 @@ local function load()
   if not fs.exists(SETTINGS) then return d end;local ok,s=pcall(dofile,SETTINGS);if not ok or type(s)~="table" then return d end
   d.mode=(s.mode=="ASSISTED" or s.mode=="UNRESTRICTED") and s.mode or "AUTO";d.request=(FRACTION[s.request] or s.request=="MANUAL" or s.request=="OVERDRIVE") and s.request or "OFF";d.rated=tonumber(s.rated);d.injectorBaseline=positive(s.injectorBaseline);d.manualField=positive(s.manualField);d.manualExport=positive(s.manualExport) or 0;d.overdriveField=positive(s.overdriveField);d.overdriveExport=positive(s.overdriveExport);d.commissioned=s.commissioned==true;d.message=tostring(s.message or d.message);return d
 end
-local function save(c) local h=fs.open(SETTINGS,"w");if h then h.write("return "..textutils.serialize(c));h.close() end end
+local function save(c)
+  local parent=fs.getDir(SETTINGS);if parent~="" and not fs.exists(parent) then fs.makeDir(parent) end
+  local h=fs.open(SETTINGS,"w");if h then h.write("return "..textutils.serialize(c));h.close() end
+end
 
 -- AUTO and ASSISTED retain containment. UNRESTRICTED is visibly armed and lets
 -- the operator's command stand, while warnings remain live.
@@ -340,7 +361,7 @@ local function supervise(b,d,c)
   if live then gate(b.input,injectorCap);gate(b.output,c.rated*(FRACTION[c.request] or 0));c.message=(free and "UNRESTRICTED" or "ASSISTED").." "..c.request.." output applied" end
 end
 local function draw(t,b,d,page,c,bs)
-  local w,h=t.getSize();t.setBackgroundColor(colors.black);t.setTextColor(colors.white);t.clear();text(t,1,1,"HELIOS // DRACONIC GUARDIAN",colors.yellow)
+  local w,h=t.getSize();t.setBackgroundColor(colors.black);t.setTextColor(colors.white);t.clear();text(t,1,1,"HELIOS // DRACONIC GUARDIAN  "..GUARDIAN_VERSION,colors.yellow)
   local banner=c.mode=="UNRESTRICTED" and "UNRESTRICTED CONTROL - AUTOMATIC INTERVENTION DISABLED" or c.mode=="ASSISTED" and "ASSISTED MANUAL - HARD SAFETY INTERLOCKS ACTIVE" or "AUTOMATIC SAFE SUPERVISION"
   text(t,1,2,banner,c.mode=="UNRESTRICTED" and colors.red or colors.lime);text(t,1,3,"[OVERVIEW] [RAW DATA] [SETUP] [MANUAL GATES]",colors.cyan)
   if not b.ready then text(t,1,5,"SETUP INVALID",colors.red);for i,v in ipairs(b.reasons) do text(t,1,5+i,"- "..v) end;return end
@@ -435,7 +456,7 @@ local function drawComputer(t,d,c)
     if y>h then return end
     t.setCursorPos(1,y);t.setTextColor(color or colors.white);t.write(string.sub(tostring(s or ""),1,w))
   end
-  line(1,"HELIOS DRACONIC GUARDIAN // COMPUTER",colors.yellow)
+  line(1,"HELIOS DRACONIC GUARDIAN "..GUARDIAN_VERSION,colors.yellow)
   line(2,"Mode: "..tostring(c.mode).."  Request: "..tostring(c.request),c.mode=="UNRESTRICTED" and colors.red or colors.lime)
   if d and d.reactor then
     local r=d.reactor
@@ -452,6 +473,7 @@ local function drawComputer(t,d,c)
   line(14,"p apply manual | o save Overdrive | q quit")
   line(16,"Manual field "..fmt(c.manualField or 0).."  export "..fmt(c.manualExport or 0),colors.cyan)
   line(17,"Guardian: "..tostring(c.message),colors.lightGray)
+  line(18,"HELIOS link: "..(facilityConnected and "ONLINE" or (facilityNetwork and "WAITING" or "LOCAL ONLY")),facilityConnected and colors.lime or colors.gray)
 end
 local binding,page,controls,buttons=inspect(),"overview",load(),{}
 controls.inputControlVerified=false;controls.outputControlVerified=false;controls.gatesOwned=false;controls.telemetryStale=false
@@ -574,6 +596,52 @@ local function displayWorker()
   redraw()
   while true do os.pullEvent(DRAW_EVENT);redraw() end
 end
-parallel.waitForAny(inputWorker,controlWorker,displayWorker)
+local function facilityWorker()
+  if not facilityNetwork or not facilityProtocol or not facilityIdentity then
+    while true do os.pullEvent("guardian_network_disabled") end
+  end
+  local function send(kind,payload,target)
+    facilitySequence=facilitySequence+1
+    local message=facilityProtocol.make(kind,facilityIdentity,facilitySequence,payload,facilityNetwork.now())
+    if not message then return end
+    if target then facilityNetwork.sendOn(facilityProtocol.rednetProtocol,target,message)
+    else facilityNetwork.broadcastOn(facilityProtocol.rednetProtocol,message) end
+  end
+  local function snapshot()
+    local r=data and data.reactor or {}
+    return {
+      facilityType="draconic_reactor",state=tostring(r.status or "unknown"),
+      generationRate=tonumber(r.generationRate),temperature=tonumber(r.temperature),
+      fieldStrength=tonumber(r.fieldStrength),maxFieldStrength=tonumber(r.maxFieldStrength),
+      energySaturation=tonumber(r.energySaturation),maxEnergySaturation=tonumber(r.maxEnergySaturation),
+      fuelConversion=tonumber(r.fuelConversion),maxFuelConversion=tonumber(r.maxFuelConversion),
+      fieldGate=tonumber(data and data.inputSet),exportGate=tonumber(data and data.outputSet),
+      mode=controls.mode,request=controls.request,commissioned=controls.commissioned==true,
+      ratedOutput=tonumber(controls.rated),localAuthority=true,remoteCommands=false,
+      guardianMessage=tostring(controls.message or ""),telemetryStale=controls.telemetryStale==true,
+    }
+  end
+  send("hello",{facilityType="draconic_reactor",capabilities={"telemetry","heartbeat","local_guardian","ui_profile"},uiProfile="draconic_guardian"})
+  local heartbeat=os.startTimer(1)
+  local hello=os.startTimer(5)
+  while true do
+    local event,a,b,c=os.pullEvent()
+    if event=="timer" and a==heartbeat then
+      if facilityLastWelcome and facilityNetwork.now()-facilityLastWelcome>3 then
+        facilityConnected=false;requestDraw()
+      end
+      send("telemetry",snapshot());heartbeat=os.startTimer(1)
+    elseif event=="timer" and a==hello then
+      if not facilityConnected then send("hello",{facilityType="draconic_reactor",capabilities={"telemetry","heartbeat","local_guardian","ui_profile"},uiProfile="draconic_guardian"}) end
+      hello=os.startTimer(5)
+    elseif event=="rednet_message" and c==facilityProtocol.rednetProtocol then
+      local message=facilityProtocol.validate(b)
+      if message and (message.kind=="welcome" or message.kind=="acknowledgement") then
+        facilityConnected=true;facilityLastWelcome=facilityNetwork.now();requestDraw()
+      end
+    elseif event=="peripheral" or event=="peripheral_detach" then facilityNetwork.openAll() end
+  end
+end
+parallel.waitForAny(inputWorker,controlWorker,displayWorker,facilityWorker)
 save(controls)
 

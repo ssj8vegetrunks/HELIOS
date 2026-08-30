@@ -2,6 +2,11 @@
 local args = { ... }
 local config = dofile("/helios/core/config.lua").load()
 
+if config.role == "guardian" then
+    dofile("/helios/draconic/controller.lua")
+    return
+end
+
 if args[1] == "probe" then
     dofile("/helios/tools/discovery_probe.lua")
     return
@@ -86,6 +91,25 @@ if args[1] == "status" then
         print("Mainframe ID: " .. tostring(config.mainframeId or "not paired"))
     end
     print("Computer ID: " .. tostring(config.computerId))
+    return
+end
+
+if args[1] == "facilities" then
+    if config.role ~= "mainframe" then
+        error("Only the HELIOS mainframe maintains the facility registry.", 0)
+    end
+    local path = "/helios/data/facilities.lua"
+    local facilities = fs.exists(path) and dofile(path) or {}
+    local count = 0
+    for nodeId, facility in pairs(facilities) do
+        count = count + 1
+        print(("%s  %s  %s %s  computer %s"):format(
+            tostring(nodeId), tostring(facility.facilityType or "unknown"),
+            tostring(facility.software or "unknown"),
+            tostring(facility.softwareVersion or "unknown"),
+            tostring(facility.id or "unknown")))
+    end
+    if count == 0 then print("No facilities have registered yet.") end
     return
 end
 

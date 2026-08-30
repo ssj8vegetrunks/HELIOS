@@ -58,6 +58,11 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 
 - No HELIOS module dependencies detected.
 
+### `draconic/controller.lua`
+
+- depends on → `core/facility_protocol.lua`
+- depends on → `core/network.lua`
+
 ### `gui/control-room/manifest.lua`
 
 - No HELIOS module dependencies detected.
@@ -98,6 +103,7 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 - depends on → `core/power_format.lua`
 - depends on → `core/ui.lua`
 - depends on → `core/ui_contract.lua`
+- depends on → `core/facility_protocol.lua`
 - depends on → `mainframe/device_registry.lua`
 - depends on → `mainframe/manual_control.lua`
 - depends on → `mainframe/reactor_governor.lua`
@@ -159,7 +165,8 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 
 ### `core/facility_protocol.lua`
 
-- No HELIOS modules directly depend on this module.
+- used by ← `draconic/controller.lua`
+- used by ← `mainframe/main.lua`
 
 ### `core/gui.lua`
 
@@ -188,6 +195,7 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 ### `core/network.lua`
 
 - used by ← `mainframe/main.lua`
+- used by ← `draconic/controller.lua`
 - used by ← `terminal/main.lua`
 
 ### `core/power_format.lua`

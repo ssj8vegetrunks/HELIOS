@@ -23,6 +23,7 @@ function mainframe.run(config)
     if not storageAdapter then error(storageModuleError, 0) end
     local powerFormat = dofile("/helios/core/power_format.lua")
     local network = dofile("/helios/core/network.lua")
+    local facilityProtocol = dofile("/helios/core/facility_protocol.lua")
     local authority = dofile("/helios/core/mainframe_authority.lua")
     local devices = {}
     local reactors = {}
@@ -44,6 +45,21 @@ function mainframe.run(config)
     local terminals = network.loadPeers()
     local missingDevices = {}
     local sessionId = network.sessionId("mainframe")
+    local facilityIdentity = assert(facilityProtocol.identity({
+        nodeId = "mainframe:" .. tostring(os.getComputerID()),
+        sessionId = sessionId,
+        role = "mainframe",
+        software = "helios",
+        softwareVersion = config.version,
+    }))
+    local facilitySequence = 0
+    local facilityTracker = facilityProtocol.newSequenceTracker()
+    local facilityFile = "/helios/data/facilities.lua"
+    local facilities = {}
+    if fs.exists(facilityFile) then
+        local loadedOk, loaded = pcall(dofile, facilityFile)
+        if loadedOk and type(loaded) == "table" then facilities = loaded end
+    end
     local authorityState = authority.new(config.control.mainframeAuthority,
         os.getComputerID())
     local identityClaims = {}
@@ -530,7 +546,80 @@ function mainframe.run(config)
         end
     end
 
+    local function saveFacilities()
+        if not fs.exists("/helios/data") then fs.makeDir("/helios/data") end
+        local handle = fs.open(facilityFile, "w")
+        if not handle then return false end
+        local registrations = {}
+        for nodeId, facility in pairs(facilities) do
+            registrations[nodeId] = {
+                id = facility.id,
+                nodeId = facility.nodeId,
+                role = facility.role,
+                software = facility.software,
+                softwareVersion = facility.softwareVersion,
+                facilityType = facility.facilityType,
+                capabilities = facility.capabilities,
+                uiProfile = facility.uiProfile,
+                lastSeen = facility.lastSeen,
+            }
+        end
+        handle.write("return " .. textutils.serialize(registrations))
+        handle.close()
+        return true
+    end
+
+    local function sendFacility(kind, target, payload)
+        facilitySequence = facilitySequence + 1
+        local outgoing = facilityProtocol.make(kind, facilityIdentity,
+            facilitySequence, payload, network.now())
+        if outgoing then
+            return network.sendOn(facilityProtocol.rednetProtocol, target, outgoing)
+        end
+        return false
+    end
+
+    local function handleFacility(sender, message)
+        local accepted, clean = facilityProtocol.acceptSequence(facilityTracker, message)
+        if not accepted then return false end
+        local nodeId = clean.source.nodeId
+        local previous = facilities[nodeId] or {}
+        facilities[nodeId] = {
+            id = sender,
+            nodeId = nodeId,
+            role = clean.source.role,
+            software = clean.source.software,
+            softwareVersion = clean.source.softwareVersion,
+            facilityType = clean.payload.facilityType or previous.facilityType,
+            capabilities = clean.payload.capabilities or previous.capabilities,
+            uiProfile = clean.payload.uiProfile or previous.uiProfile,
+            telemetry = clean.kind == "telemetry" and clean.payload or previous.telemetry,
+            lastSeen = network.now(),
+        }
+        -- Persist registration metadata, not the one-second telemetry stream.
+        -- Live telemetry stays in memory to avoid needless disk churn.
+        if clean.kind == "hello" then saveFacilities() end
+        local acknowledgement = facilityProtocol.acknowledge(clean, facilityIdentity,
+            facilitySequence + 1, "accepted", nil, network.now())
+        if acknowledgement then
+            facilitySequence = facilitySequence + 1
+            network.sendOn(facilityProtocol.rednetProtocol, sender, acknowledgement)
+        end
+        if clean.kind == "hello" then
+            sendFacility("welcome", sender, {
+                acceptedContract = facilityProtocol.name,
+                acceptedVersion = facilityProtocol.version,
+                telemetryOnly = true,
+                remoteCommands = false,
+            })
+        end
+        return true
+    end
+
     local function handleNetwork(sender, message, protocol)
+        if protocol == facilityProtocol.rednetProtocol then
+            return handleFacility(sender, message)
+        end
         if protocol ~= network.protocol or not network.valid(message) then return false end
         if message.kind == "mainframe_presence" then
             local changed = authority.observe(authorityState, sender, message, network.now())

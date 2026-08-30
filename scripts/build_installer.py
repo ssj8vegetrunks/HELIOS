@@ -33,6 +33,10 @@ def main() -> None:
     entries.append(
         f'    ["tools/discovery_probe.lua"] = {lua_long_string(probe.read_text())},'
     )
+    guardian = ROOT / "draconic_guardian.lua"
+    entries.append(
+        f'    ["draconic/controller.lua"] = {lua_long_string(guardian.read_text())},'
+    )
 
     rebuilt = before + START + "\n\n".join(entries) + END + after
     INSTALLER.write_text(rebuilt)

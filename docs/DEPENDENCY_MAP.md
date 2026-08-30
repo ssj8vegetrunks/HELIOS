@@ -9,7 +9,8 @@ install.lua
     |   |-- official Module Pack
     |   |   |-- Extreme Reactors adapters
     |   |   `-- Universal Energy Storage adapter
-    |   `-- local displays + helios.v1 terminal snapshots
+    |   |-- local displays + helios.v1 terminal snapshots
+    |   `-- helios.facility.v1 Guardian registration + telemetry
     `-- Remote
         `-- read-only network snapshots + local display
 
@@ -20,7 +21,8 @@ draconic_guardian.lua
 |-- CC:Tweaked
 |-- Advanced Peripherals / Draconic Evolution peripheral integration
 |-- local reactor, injector and two Flux Gate peripherals
-`-- optional Advanced Monitor (standalone; no HELIOS link yet)
+|-- optional Advanced Monitor
+`-- optional HELIOS Core networking modules (read-only facility link)
 
 module-template/
 `-- developer source only; not installed or loaded automatically

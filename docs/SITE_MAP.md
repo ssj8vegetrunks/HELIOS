@@ -4,7 +4,7 @@
 
 | Path | Purpose | Hardware writes |
 |---|---|---|
-| `install.lua` | HELIOS Mainframe/Remote installer | Only after role setup and explicit operation |
+| `install.lua` | HELIOS Mainframe/Remote/Guardian installer | Only after role setup and explicit operation |
 | `discovery_probe.lua` | Standalone peripheral and method inventory | No |
 | `draconic_guardian.lua` | Standalone Draconic Reactor Guardian | Yes, guarded and locally authoritative |
 | `module-template/` | Copyable Lua developer starter | No; actuator examples fail closed |
@@ -33,6 +33,7 @@ HELIOS/
 |   `-- universal_energy/
 |-- src/
 |   |-- core/
+|   |-- draconic/
 |   |-- mainframe/
 |   |-- terminal/
 |   |-- gui/
@@ -47,6 +48,8 @@ HELIOS/
 /helios/
 |-- helios.lua
 |-- core/
+|-- data/            (persistent local state and facility registry)
+|-- draconic/        (Draconic Guardian role)
 |-- gui/
 |-- mainframe/       (Mainframe role)
 |-- terminal/        (Remote role)
@@ -55,5 +58,6 @@ HELIOS/
     `-- discovery_probe.lua
 ```
 
-The standalone Guardian is intentionally separate from HELIOS Core during this
-Alpha. Its proven local safety loop must not become dependent on a network link.
+The Guardian safety loop remains locally authoritative and operates without a
+network link. A persistent Guardian installation reuses HELIOS Core only for
+startup, storage, and the read-only facility-network transport.

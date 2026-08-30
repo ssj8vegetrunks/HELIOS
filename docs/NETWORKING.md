@@ -52,6 +52,12 @@ Guardian                         HELIOS Mainframe
    |--- ui_offer / status ------------>|
 ```
 
-The current implementation supplies the envelope, validation, sequence, and
-acknowledgement primitives. Runtime registration and the Guardian transport
-worker are the next integration step.
+The Draconic Guardian now advertises itself at startup, publishes one-second
+read-only telemetry, and continues operating locally if HELIOS is absent. The
+Mainframe validates and registers Guardian traffic, acknowledges accepted
+messages, returns a telemetry-only welcome, and persists facility registration
+metadata in `/helios/data/facilities.lua`. Live telemetry remains in memory so
+the one-second stream does not churn the computer disk.
+
+`helios facilities` lists registered facility identities. Remote commands are
+still deliberately absent from Alpha 1.
