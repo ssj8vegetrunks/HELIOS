@@ -16,7 +16,8 @@ local COMMISSION_SHORTFALL_SAMPLES = 20
 -- is a settling period, not evidence that the output path has reached its
 -- ceiling, so do not score it as a failed sample.
 local COMMISSION_SETTLE_SAMPLES = 120
-local FRACTION = { OFF = 0, MIN = .25, MED = .50, MAX = 1, OVERDRIVE = 1.25 }
+local FRACTION = { OFF = 0, MIN = .25, MED = .50, MAX = 1 }
+local PRESET_RAMP_STEP, MANUAL_GATE_STEP = 50000, 100000
 local SETTINGS = ".helios-draconic-guardian.lua"
 
 local function hasType(name, fragment)
@@ -167,7 +168,7 @@ end
 local function load()
   local d={mode="AUTO",request="OFF",rated=nil,commissioned=false,commissioning=false,commissionFlow=nil,commissionSamples=0,commissionShortfallSamples=0,commissionSettleSamples=0,commissionLastSafe=nil,recovery=false,arm=0,initialRequested=false,startActivated=false,message="Automatic safe supervision"}
   if not fs.exists(SETTINGS) then return d end;local ok,s=pcall(dofile,SETTINGS);if not ok or type(s)~="table" then return d end
-  d.mode=(s.mode=="ASSISTED" or s.mode=="UNRESTRICTED") and s.mode or "AUTO";d.request=FRACTION[s.request] and s.request or "OFF";d.rated=tonumber(s.rated);d.injectorBaseline=positive(s.injectorBaseline);d.commissioned=s.commissioned==true;d.message=tostring(s.message or d.message);return d
+  d.mode=(s.mode=="ASSISTED" or s.mode=="UNRESTRICTED") and s.mode or "AUTO";d.request=(FRACTION[s.request] or s.request=="MANUAL" or s.request=="OVERDRIVE") and s.request or "OFF";d.rated=tonumber(s.rated);d.injectorBaseline=positive(s.injectorBaseline);d.manualField=positive(s.manualField);d.manualExport=positive(s.manualExport) or 0;d.overdriveField=positive(s.overdriveField);d.overdriveExport=positive(s.overdriveExport);d.commissioned=s.commissioned==true;d.message=tostring(s.message or d.message);return d
 end
 local function save(c) local h=fs.open(SETTINGS,"w");if h then h.write("return "..textutils.serialize(c));h.close() end end
 
@@ -268,6 +269,29 @@ local function supervise(b,d,c)
   end
   if c.mode=="AUTO" then gate(b.input,injectorCap);gate(b.output,0);c.message="Automatic: adopted "..fmt(injectorCap).." RF/t injector limit; export closed";return end
   if not c.commissioned or not c.rated then c.message="Control locked: run automatic commissioning first";return end
+  -- Manual Gates and the saved Overdrive preset use the operator's exact
+  -- field/export pair. Overdrive ramps only its export value so a cold core
+  -- can gain efficiency instead of being hit with the whole load at once.
+  if c.request=="MANUAL" or c.request=="OVERDRIVE" then
+    local fieldTarget=positive(c.request=="OVERDRIVE" and c.overdriveField or c.manualField) or injectorCap
+    local exportTarget=positive(c.request=="OVERDRIVE" and c.overdriveExport or c.manualExport) or 0
+    if status=="offline" or status=="stopping" or status=="cooling" then reactor(b.reactor,"chargeReactor");gate(b.input,fieldTarget);c.message="Charging containment for manual gate targets";return end
+    if status=="charged" then reactor(b.reactor,"activateReactor");gate(b.input,fieldTarget);c.message="Starting for manual gate targets";return end
+    if live then
+      gate(b.input,fieldTarget)
+      local applied=exportTarget
+      if c.request=="OVERDRIVE" then
+        local previous=tonumber(c.overdriveApplied) or 0
+        -- Hold instead of climbing whenever containment is below its normal
+        -- operating target; the saved preset is never silently replaced.
+        if field>=FIELD_TARGET then previous=math.min(exportTarget,previous+PRESET_RAMP_STEP) end
+        c.overdriveApplied=previous;applied=previous
+        c.message="Overdrive preset ramp: "..fmt(applied).." / "..fmt(exportTarget).." RF/t"
+      else c.message="Manual gates applied: field "..fmt(fieldTarget)..", export "..fmt(exportTarget).." RF/t" end
+      gate(b.output,applied)
+      return
+    end
+  end
   if c.request=="OFF" then gate(b.output,0);reactor(b.reactor,"stopReactor");c.message="Manual OFF: export closed";return end
   if status=="offline" or status=="stopping" or status=="cooling" then
     -- Cooling is the post-stop state in DE. Treat it as a restart state so a
@@ -281,15 +305,30 @@ end
 local function draw(t,b,d,page,c,bs)
   local w,h=t.getSize();t.setBackgroundColor(colors.black);t.setTextColor(colors.white);t.clear();text(t,1,1,"HELIOS // DRACONIC GUARDIAN",colors.yellow)
   local banner=c.mode=="UNRESTRICTED" and "UNRESTRICTED CONTROL - AUTOMATIC INTERVENTION DISABLED" or c.mode=="ASSISTED" and "ASSISTED MANUAL - HARD SAFETY INTERLOCKS ACTIVE" or "AUTOMATIC SAFE SUPERVISION"
-  text(t,1,2,banner,c.mode=="UNRESTRICTED" and colors.red or colors.lime);text(t,1,3,"[OVERVIEW] [RAW DATA] [SETUP]",colors.cyan)
+  text(t,1,2,banner,c.mode=="UNRESTRICTED" and colors.red or colors.lime);text(t,1,3,"[OVERVIEW] [RAW DATA] [SETUP] [MANUAL GATES]",colors.cyan)
   if not b.ready then text(t,1,5,"SETUP INVALID",colors.red);for i,v in ipairs(b.reasons) do text(t,1,5+i,"- "..v) end;return end
   if not d then text(t,1,5,"TELEMETRY LOST",colors.red);return end
   if page=="setup" then text(t,1,5,"FIXED GATE TOPOLOGY VALID",colors.lime);text(t,1,7,"Reactor component: "..b.reactor);text(t,1,8,"Export gate (LEFT/RIGHT): "..b.output);text(t,1,9,"Injector field gate (MODEM): "..b.input);text(t,1,10,"Wired modem: "..b.modem);text(t,1,12,"Export and containment roles are fixed; Guardian will not infer them.",colors.orange);return end
   if page=="raw" then text(t,1,5,"RAW DRACONIC TELEMETRY",colors.cyan);local ks={};for k in pairs(d.reactor) do ks[#ks+1]=tostring(k) end;sort(ks);for i,k in ipairs(ks) do if i+6<h then text(t,1,i+6,k..": "..tostring(d.reactor[k])) end end;return end
+  if page=="gates" then
+    text(t,1,5,"MANUAL GATES // unrestricted only",c.mode=="UNRESTRICTED" and colors.red or colors.orange)
+    if c.mode~="UNRESTRICTED" then text(t,1,7,"Arm Unrestricted control before changing either gate manually.",colors.orange);return end
+    text(t,1,7,"FIELD GATE (injector): "..fmt(c.manualField or d.inputSet).." RF/t",colors.cyan)
+    bs[#bs+1]=button(t,1,9,"FIELD -100k",colors.cyan);bs[#bs+1]=button(t,20,9,"FIELD +100k",colors.cyan)
+    text(t,1,12,"EXPORT GATE: "..fmt(c.manualExport or d.outputSet).." RF/t",colors.orange)
+    bs[#bs+1]=button(t,1,14,"EXPORT -100k",colors.cyan);bs[#bs+1]=button(t,20,14,"EXPORT +100k",colors.cyan)
+    bs[#bs+1]=button(t,1,17,"USE LIVE GATES",colors.lightGray);bs[#bs+1]=button(t,22,17,"APPLY MANUAL",colors.lime)
+    bs[#bs+1]=button(t,1,20,"SAVE AS OVERDRIVE PRESET",colors.red);bs[#bs+1]=button(t,35,20,"BACK",colors.lightGray)
+    text(t,1,23,"Overdrive keeps this field setting and ramps only export to the saved target.",colors.lightGray)
+    return
+  end
   local r=d.reactor;if w<54 or h<25 then text(t,1,5,"Large monitor required for the Guardian console.",colors.orange);text(t,1,7,"State: "..tostring(r.status).."  Temp: "..fmt(r.temperature).." C");text(t,1,8,"Generation: "..fmt(r.generationRate).." RF/t");return end
-  vertical(t,2,5,12,"SAT",r.energySaturation,tonumber(r.maxEnergySaturation),colors.blue);vertical(t,8,5,12,"FIELD",r.fieldStrength,tonumber(r.maxFieldStrength),colors.red);vertical(t,16,5,12,"FUEL",(tonumber(r.maxFuelConversion) or 0)-(tonumber(r.fuelConversion) or 0),tonumber(r.maxFuelConversion),colors.lime);vertical(t,23,5,12,"OUT",r.generationRate,math.max(1,tonumber(c.rated) or tonumber(c.commissionFlow) or 1),colors.orange)
-  local x=31;text(t,x,5,"REACTOR TELEMETRY",colors.cyan);text(t,x,7,"State:       "..tostring(r.status),colors.lime);text(t,x,8,"Generation:  "..fmt(r.generationRate).." RF/t",colors.cyan);text(t,x,9,"Temperature: "..fmt(r.temperature).." C",colors.orange);text(t,x,10,"Field drain: "..fmt(r.fieldDrainRate).." RF/t");text(t,x,11,"Fuel burned: "..fmt(r.fuelConversion).." / "..fmt(r.maxFuelConversion));text(t,x,12,"Saturation:  "..fmt(r.energySaturation).." / "..fmt(r.maxEnergySaturation));text(t,x,14,"GATE CONTROL (live diagnostics)",colors.cyan);text(t,x,15,"Field:  "..fmt(d.inputFlow).." / "..fmt(d.inputSet).." RF/t  override "..tostring(d.inputOverride),d.inputOverride and colors.lime or colors.red);text(t,x,16,"Gate flow: "..fmt(d.outputFlow).." / "..fmt(d.outputSet).." RF/t  override "..tostring(d.outputOverride),d.outputOverride and colors.lime or colors.red);text(t,x,18,"GUARDIAN: "..c.message,c.mode=="UNRESTRICTED" and colors.red or colors.lightGray)
-  text(t,x,17,"Roles: modem=injector field; "..tostring(b.output).."=export",colors.lightGray)
+  -- Four reactor-GUI style telemetry bars: reactor state on the left, stored
+  -- energy/fuel conversion on the right. The orb is deliberately omitted.
+  vertical(t,2,5,12,"CORE",r.temperature,MAX_TEMPERATURE,colors.orange);vertical(t,9,5,12,"FIELD",r.fieldStrength,tonumber(r.maxFieldStrength),colors.red);vertical(t,21,5,12,"SAT",r.energySaturation,tonumber(r.maxEnergySaturation),colors.blue);vertical(t,28,5,12,"FUEL",r.fuelConversion,tonumber(r.maxFuelConversion),colors.lime)
+  text(t,1,19,"Core temp     Containment field       Energy saturation   Fuel conversion",colors.lightGray)
+  local x=38;text(t,x,5,"REACTOR TELEMETRY",colors.cyan);text(t,x,7,"State: "..tostring(r.status),colors.lime);text(t,x,8,"Generation: "..fmt(r.generationRate).." RF/t",colors.cyan);text(t,x,9,"Temperature: "..fmt(r.temperature).." C",colors.orange);text(t,x,10,"Field drain: "..fmt(r.fieldDrainRate).." RF/t");text(t,x,11,"Fuel: "..fmt(r.fuelConversion).." / "..fmt(r.maxFuelConversion));text(t,x,12,"Saturation: "..fmt(r.energySaturation).." / "..fmt(r.maxEnergySaturation));text(t,x,14,"GATE CONTROL",colors.cyan);text(t,x,15,"Field: "..fmt(d.inputFlow).." / "..fmt(d.inputSet),d.inputOverride and colors.lime or colors.red);text(t,x,16,"Export: "..fmt(d.outputFlow).." / "..fmt(d.outputSet),d.outputOverride and colors.lime or colors.red);text(t,x,18,"GUARDIAN: "..c.message,c.mode=="UNRESTRICTED" and colors.red or colors.lightGray)
+  text(t,x,17,"modem=field; "..tostring(b.output).."=export",colors.lightGray)
   local y=h-7;if not c.gatesOwned then
     text(t,1,y-2,"GATE CONTROL NOT ACQUIRED - REACTOR START DISABLED",colors.red)
     text(t,1,y-1,"Guardian must show field override true and output override true.",colors.orange)
@@ -324,10 +363,25 @@ local function act(choice,d)
   elseif choice=="CANCEL" then controls.arm=0;controls.message="Unrestricted arming cancelled"
   elseif controls.arm and controls.arm>0 and choice then controls.arm=controls.arm+1;if controls.arm>4 then controls.arm=0;controls.mode="UNRESTRICTED";controls.request="OFF";controls.message="UNRESTRICTED CONTROL ARMED: operator commands are not overridden" end
   elseif choice=="RESTORE AUTOMATIC" then controls.mode="AUTO";controls.request="OFF";controls.arm=0;controls.message="Automatic safety restored"
+  elseif choice=="USE LIVE GATES" then controls.manualField=positive(d.inputSet) or positive(d.inputFlow) or controls.injectorBaseline;controls.manualExport=positive(d.outputSet) or positive(d.outputFlow) or 0;controls.message="Copied live gate limits into manual controls"
+  elseif choice=="FIELD -100k" then controls.manualField=math.max(0,(tonumber(controls.manualField) or positive(d.inputSet) or controls.injectorBaseline or 0)-MANUAL_GATE_STEP)
+  elseif choice=="FIELD +100k" then controls.manualField=(tonumber(controls.manualField) or positive(d.inputSet) or controls.injectorBaseline or 0)+MANUAL_GATE_STEP
+  elseif choice=="EXPORT -100k" then controls.manualExport=math.max(0,(tonumber(controls.manualExport) or positive(d.outputSet) or 0)-MANUAL_GATE_STEP)
+  elseif choice=="EXPORT +100k" then controls.manualExport=(tonumber(controls.manualExport) or positive(d.outputSet) or 0)+MANUAL_GATE_STEP
+  elseif choice=="APPLY MANUAL" then controls.request="MANUAL";controls.overdriveApplied=0;controls.message="Manual gate pair requested"
+  elseif choice=="SAVE AS OVERDRIVE PRESET" then
+    local field=positive(controls.manualField) or positive(d.inputSet) or controls.injectorBaseline
+    local export=positive(controls.manualExport) or positive(d.outputSet)
+    if field and export then controls.overdriveField=field;controls.overdriveExport=export;controls.message="Overdrive preset saved: field "..fmt(field)..", export "..fmt(export).." RF/t" else controls.message="Preset not saved: set positive field and export limits first" end
+  elseif choice=="OVERDRIVE" then
+    if positive(controls.overdriveField) and positive(controls.overdriveExport) then controls.request="OVERDRIVE";controls.overdriveApplied=0;controls.message="Saved Overdrive preset requested" else controls.message="No saved Overdrive preset: configure Manual Gates first" end
   elseif FRACTION[choice] then controls.request=choice;controls.message="Output request: "..choice end;save(controls)
 end
 while true do
   local data=binding.ready and read(binding) or nil;if data then supervise(binding,data,controls);data=read(binding) or data;save(controls) end;buttons={};draw(target,binding,data,page,controls,buttons);local timer=os.startTimer(.1)
-  while true do local e,a,b,c=os.pullEvent();if e=="timer" and a==timer then break end;if e=="key" then if a==keys.q then return end;if a==keys.one then page="overview";break elseif a==keys.two then page="raw";break elseif a==keys.three then page="setup";break end elseif e=="monitor_touch" and target~=term.current() then if c>=3 and c<=4 then page=b<=10 and "overview" or b<=21 and "raw" or "setup";break end;local choice=hit(buttons,b,c);if choice then act(choice,data);break end elseif e=="peripheral" or e=="peripheral_detach" then binding=inspect();target=binding.monitor and peripheral.wrap(binding.monitor) or term.current();compactMonitor(target,binding.monitor~=nil);break end end
+  while true do local e,a,b,c=os.pullEvent();if e=="timer" and a==timer then break end;if e=="key" then if a==keys.q then return end;if a==keys.one then page="overview";break elseif a==keys.two then page="raw";break elseif a==keys.three then page="setup";break elseif a==keys.four then page="gates";break end elseif e=="monitor_touch" and target~=term.current() then
+    if c>=3 and c<=4 then page=b<=10 and "overview" or b<=21 and "raw" or b<=29 and "setup" or "gates";break end
+    local choice=hit(buttons,b,c);if choice=="BACK" then page="overview";break elseif choice then act(choice,data);break end
+  elseif e=="peripheral" or e=="peripheral_detach" then binding=inspect();target=binding.monitor and peripheral.wrap(binding.monitor) or term.current();compactMonitor(target,binding.monitor~=nil);break end end
 end
 
