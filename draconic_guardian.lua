@@ -148,12 +148,11 @@ local function fmt(n)
 end
 local function text(t,x,y,s,c) local w=select(1,t.getSize());if y>=1 then t.setCursorPos(x,y);t.setTextColor(c or colors.white);t.write(string.sub(tostring(s),1,math.max(0,w-x+1))) end end
 local function compactMonitor(t,isMonitor) if isMonitor and t and type(t.setTextScale)=="function" then pcall(t.setTextScale,.5) end end
--- Scaled monitors frequently report a touch one or two character rows away
--- from the rendered glyph. Give every visible control a generous target and
--- resolve any overlap by choosing the label closest to the touch.
+-- Accept a one-row vertical miss on scaled monitors. Keep horizontal bounds
+-- exact so adjacent controls never compete for the same press.
 local function button(t,x,y,label,c)
   local v="["..label.."]";text(t,x,y,v,c or colors.cyan)
-  return {x1=math.max(1,x-1),x2=x+#v,y1=math.max(1,y-2),y2=y+2,x=x,y=y,label=label}
+  return {x1=x,x2=x+#v-1,y1=math.max(1,y-1),y2=y+1,x=x,y=y,label=label}
 end
 local function hit(bs,x,y)
   local picked, distance
@@ -328,12 +327,18 @@ local function draw(t,b,d,page,c,bs)
     return
   end
   local r=d.reactor;if w<54 or h<25 then text(t,1,5,"Large monitor required for the Guardian console.",colors.orange);text(t,1,7,"State: "..tostring(r.status).."  Temp: "..fmt(r.temperature).." C");text(t,1,8,"Generation: "..fmt(r.generationRate).." RF/t");return end
-  -- Four reactor-GUI style telemetry bars: reactor state on the left, stored
-  -- energy/fuel conversion on the right. The orb is deliberately omitted.
-  vertical(t,2,5,12,"CORE",r.temperature,MAX_TEMPERATURE,colors.orange);vertical(t,9,5,12,"FIELD",r.fieldStrength,tonumber(r.maxFieldStrength),colors.red);vertical(t,21,5,12,"SAT",r.energySaturation,tonumber(r.maxEnergySaturation),colors.blue);vertical(t,28,5,12,"FUEL",r.fuelConversion,tonumber(r.maxFuelConversion),colors.lime)
-  text(t,1,19,"Core temp     Containment field       Energy saturation   Fuel conversion",colors.lightGray)
-  local x=38;text(t,x,5,"REACTOR TELEMETRY",colors.cyan);text(t,x,7,"State: "..tostring(r.status),colors.lime);text(t,x,8,"Generation: "..fmt(r.generationRate).." RF/t",colors.cyan);text(t,x,9,"Temperature: "..fmt(r.temperature).." C",colors.orange);text(t,x,10,"Field drain: "..fmt(r.fieldDrainRate).." RF/t");text(t,x,11,"Fuel: "..fmt(r.fuelConversion).." / "..fmt(r.maxFuelConversion));text(t,x,12,"Saturation: "..fmt(r.energySaturation).." / "..fmt(r.maxEnergySaturation));text(t,x,14,"GATE CONTROL",colors.cyan);text(t,x,15,"Field: "..fmt(d.inputFlow).." / "..fmt(d.inputSet),d.inputOverride and colors.lime or colors.red);text(t,x,16,"Export: "..fmt(d.outputFlow).." / "..fmt(d.outputSet),d.outputOverride and colors.lime or colors.red);text(t,x,18,"GUARDIAN: "..c.message,c.mode=="UNRESTRICTED" and colors.red or colors.lightGray)
-  text(t,x,17,"modem=field; "..tostring(b.output).."=export",colors.lightGray)
+  -- Match the reactor GUI's composition: two bars, central telemetry, two
+  -- bars. Every central line is clipped before the right-hand pair.
+  local x,rightSat,rightFuel=18,w-11,w-5
+  local centerWidth=math.max(12,rightSat-x-2)
+  local function center(y,s,color) text(t,x,y,string.sub(tostring(s),1,centerWidth),color) end
+  vertical(t,2,5,12,"CORE",r.temperature,MAX_TEMPERATURE,colors.orange)
+  vertical(t,9,5,12,"FIELD",r.fieldStrength,tonumber(r.maxFieldStrength),colors.red)
+  vertical(t,rightSat,5,12,"SAT",r.energySaturation,tonumber(r.maxEnergySaturation),colors.blue)
+  vertical(t,rightFuel,5,12,"FUEL",r.fuelConversion,tonumber(r.maxFuelConversion),colors.lime)
+  center(5,"REACTOR TELEMETRY",colors.cyan);center(7,"State: "..tostring(r.status),colors.lime);center(8,"Generation: "..fmt(r.generationRate).." RF/t",colors.cyan)
+  center(9,"Core temperature: "..fmt(r.temperature).." C",colors.orange);center(10,"Containment field strength: "..fmt(r.fieldStrength).." / "..fmt(r.maxFieldStrength));center(11,"Energy saturation: "..fmt(r.energySaturation).." / "..fmt(r.maxEnergySaturation));center(12,"Fuel conversion level: "..fmt(r.fuelConversion).." / "..fmt(r.maxFuelConversion))
+  center(14,"GATE CONTROL",colors.cyan);center(15,"Field: "..fmt(d.inputFlow).." / "..fmt(d.inputSet),d.inputOverride and colors.lime or colors.red);center(16,"Export: "..fmt(d.outputFlow).." / "..fmt(d.outputSet),d.outputOverride and colors.lime or colors.red);center(17,"modem=field; "..tostring(b.output).."=export",colors.lightGray);center(18,"GUARDIAN: "..c.message,c.mode=="UNRESTRICTED" and colors.red or colors.lightGray)
   local y=h-7;if not c.gatesOwned then
     text(t,1,y-2,"GATE CONTROL NOT ACQUIRED - REACTOR START DISABLED",colors.red)
     text(t,1,y-1,"Guardian must show field override true and output override true.",colors.orange)
