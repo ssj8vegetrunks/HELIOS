@@ -333,13 +333,23 @@ local function draw(t,b,d,page,c,bs)
   local x,rightSat,rightFuel=18,w-11,w-5
   local centerWidth=math.max(12,rightSat-x-2)
   local function center(y,s,color) text(t,x,y,string.sub(tostring(s),1,centerWidth),color) end
+  local function centerWrap(y,s,color,maxLines)
+    local remaining=tostring(s or "")
+    for line=1,(maxLines or 1) do
+      if #remaining<=centerWidth then center(y+line-1,remaining,color);return end
+      local chunk=string.sub(remaining,1,centerWidth)
+      local split=chunk:match("^.*()%s") or centerWidth
+      center(y+line-1,string.sub(remaining,1,split-1),color)
+      remaining=string.gsub(string.sub(remaining,split+1),"^%s+","")
+    end
+  end
   vertical(t,2,5,12,"CORE",r.temperature,MAX_TEMPERATURE,colors.orange)
   vertical(t,9,5,12,"FIELD",r.fieldStrength,tonumber(r.maxFieldStrength),colors.red)
   vertical(t,rightSat,5,12,"SAT",r.energySaturation,tonumber(r.maxEnergySaturation),colors.blue)
   vertical(t,rightFuel,5,12,"FUEL",r.fuelConversion,tonumber(r.maxFuelConversion),colors.lime)
   center(5,"REACTOR TELEMETRY",colors.cyan);center(7,"State: "..tostring(r.status),colors.lime);center(8,"Generation: "..fmt(r.generationRate).." RF/t",colors.cyan)
   center(9,"Core temperature: "..fmt(r.temperature).." C",colors.orange);center(10,"Containment field strength: "..fmt(r.fieldStrength).." / "..fmt(r.maxFieldStrength));center(11,"Energy saturation: "..fmt(r.energySaturation).." / "..fmt(r.maxEnergySaturation));center(12,"Fuel conversion level: "..fmt(r.fuelConversion).." / "..fmt(r.maxFuelConversion))
-  center(14,"GATE CONTROL",colors.cyan);center(15,"Field: "..fmt(d.inputFlow).." / "..fmt(d.inputSet),d.inputOverride and colors.lime or colors.red);center(16,"Export: "..fmt(d.outputFlow).." / "..fmt(d.outputSet),d.outputOverride and colors.lime or colors.red);center(17,"modem=field; "..tostring(b.output).."=export",colors.lightGray);center(18,"GUARDIAN: "..c.message,c.mode=="UNRESTRICTED" and colors.red or colors.lightGray)
+  center(14,"GATE CONTROL",colors.cyan);center(15,"Field: "..fmt(d.inputFlow).." / "..fmt(d.inputSet),d.inputOverride and colors.lime or colors.red);center(16,"Export: "..fmt(d.outputFlow).." / "..fmt(d.outputSet),d.outputOverride and colors.lime or colors.red);center(17,"modem=field; "..tostring(b.output).."=export",colors.lightGray);centerWrap(18,"GUARDIAN: "..c.message,c.mode=="UNRESTRICTED" and colors.red or colors.lightGray,3)
   local y=h-7;if not c.gatesOwned then
     text(t,1,y-2,"GATE CONTROL NOT ACQUIRED - REACTOR START DISABLED",colors.red)
     text(t,1,y-1,"Guardian must show field override true and output override true.",colors.orange)
