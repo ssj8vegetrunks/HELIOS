@@ -14,6 +14,7 @@
 - [Control and safety](CONTROL.md)
 - [GUI behavior](GUI.md)
 - [UI command boundary](UI_API.md)
+- [Networking contracts](NETWORKING.md)
 - [Generated source map](SOURCE_MAP.md)
 - [Generated dependency tree](DEPENDENCY_TREE.md)
 

@@ -14,6 +14,10 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 
 - No HELIOS module dependencies detected.
 
+### `core/facility_protocol.lua`
+
+- No HELIOS module dependencies detected.
+
 ### `core/gui.lua`
 
 - No HELIOS module dependencies detected.
@@ -152,6 +156,10 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 
 - used by ← `mainframe/main.lua`
 - used by ← `terminal/main.lua`
+
+### `core/facility_protocol.lua`
+
+- No HELIOS modules directly depend on this module.
 
 ### `core/gui.lua`
 

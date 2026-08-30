@@ -24,15 +24,26 @@ function network.openAll()
     return opened
 end
 
+function network.sendOn(protocol, target, message)
+    if type(protocol) ~= "string" or protocol == "" or
+       type(target) ~= "number" or type(message) ~= "table" then return false end
+    return rednet.send(target, message, protocol)
+end
+
+function network.broadcastOn(protocol, message)
+    if type(protocol) ~= "string" or protocol == "" or type(message) ~= "table" then
+        return false
+    end
+    rednet.broadcast(message, protocol)
+    return true
+end
+
 function network.send(target, message)
-    if type(target) ~= "number" or type(message) ~= "table" then return false end
-    return rednet.send(target, message, network.protocol)
+    return network.sendOn(network.protocol, target, message)
 end
 
 function network.broadcast(message)
-    if type(message) ~= "table" then return false end
-    rednet.broadcast(message, network.protocol)
-    return true
+    return network.broadcastOn(network.protocol, message)
 end
 
 function network.valid(message, kind)
