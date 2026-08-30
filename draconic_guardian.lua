@@ -17,7 +17,7 @@ local COMMISSION_SHORTFALL_SAMPLES = 20
 -- ceiling, so do not score it as a failed sample.
 local COMMISSION_SETTLE_SAMPLES = 120
 local FRACTION = { OFF = 0, MIN = .25, MED = .50, MAX = 1 }
-local PRESET_RAMP_STEP, MANUAL_GATE_STEP = 50000, 100000
+local PRESET_RAMP_STEP, MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 50000, 100000, 1000000
 local SETTINGS = ".helios-draconic-guardian.lua"
 
 local function hasType(name, fragment)
@@ -150,9 +150,10 @@ local function text(t,x,y,s,c) local w=select(1,t.getSize());if y>=1 then t.setC
 local function compactMonitor(t,isMonitor) if isMonitor and t and type(t.setTextScale)=="function" then pcall(t.setTextScale,.5) end end
 -- Monitor touches report character coordinates. Keep every target on its
 -- rendered row so vertically adjacent controls can never steal a press.
-local function button(t,x,y,label,c)
+local function button(t,x,y,label,c,pad)
   local v="["..label.."]";text(t,x,y,v,c or colors.cyan)
-  return {x1=x,x2=x+#v-1,y1=y,y2=y,x=x,y=y,label=label}
+  pad=math.max(0,math.floor(tonumber(pad) or 0))
+  return {x1=math.max(1,x-pad),x2=x+#v-1+pad,y1=math.max(1,y-pad),y2=y+pad,x=x,y=y,label=label}
 end
 local function hit(bs,x,y)
   local picked, distance
@@ -318,11 +319,11 @@ local function draw(t,b,d,page,c,bs)
     text(t,1,5,"MANUAL GATES // unrestricted only",c.mode=="UNRESTRICTED" and colors.red or colors.orange)
     if c.mode~="UNRESTRICTED" then text(t,1,7,"Arm Unrestricted control before changing either gate manually.",colors.orange);return end
     text(t,1,7,"FIELD GATE (injector): "..fmt(c.manualField or d.inputSet).." RF/t",colors.cyan)
-    bs[#bs+1]=button(t,1,9,"FIELD -100k",colors.cyan);bs[#bs+1]=button(t,20,9,"FIELD +100k",colors.cyan)
+    bs[#bs+1]=button(t,1,9,"FIELD -1M",colors.cyan,1);bs[#bs+1]=button(t,16,9,"FIELD -100k",colors.cyan,1);bs[#bs+1]=button(t,34,9,"FIELD +100k",colors.cyan,1);bs[#bs+1]=button(t,53,9,"FIELD +1M",colors.cyan,1)
     text(t,1,12,"EXPORT GATE: "..fmt(c.manualExport or d.outputSet).." RF/t",colors.orange)
-    bs[#bs+1]=button(t,1,14,"EXPORT -100k",colors.cyan);bs[#bs+1]=button(t,20,14,"EXPORT +100k",colors.cyan)
-    bs[#bs+1]=button(t,1,17,"USE LIVE GATES",colors.lightGray);bs[#bs+1]=button(t,22,17,"APPLY MANUAL",colors.lime)
-    bs[#bs+1]=button(t,1,20,"SAVE AS OVERDRIVE PRESET",colors.red);bs[#bs+1]=button(t,35,20,"BACK",colors.lightGray)
+    bs[#bs+1]=button(t,1,14,"EXPORT -1M",colors.cyan,1);bs[#bs+1]=button(t,16,14,"EXPORT -100k",colors.cyan,1);bs[#bs+1]=button(t,34,14,"EXPORT +100k",colors.cyan,1);bs[#bs+1]=button(t,53,14,"EXPORT +1M",colors.cyan,1)
+    bs[#bs+1]=button(t,1,17,"USE LIVE GATES",colors.lightGray,1);bs[#bs+1]=button(t,22,17,"APPLY MANUAL",colors.lime,1)
+    bs[#bs+1]=button(t,1,20,"SAVE AS OVERDRIVE PRESET",colors.red,1);bs[#bs+1]=button(t,35,20,"BACK",colors.lightGray,1)
     text(t,1,23,"Overdrive keeps this field setting and ramps only export to the saved target.",colors.lightGray)
     return
   end
@@ -376,8 +377,12 @@ local function act(choice,d)
   elseif choice=="USE LIVE GATES" then controls.manualField=positive(d.inputSet) or positive(d.inputFlow) or controls.injectorBaseline;controls.manualExport=positive(d.outputSet) or positive(d.outputFlow) or 0;controls.message="Copied live gate limits into manual controls"
   elseif choice=="FIELD -100k" then controls.manualField=math.max(0,(tonumber(controls.manualField) or positive(d.inputSet) or controls.injectorBaseline or 0)-MANUAL_GATE_STEP)
   elseif choice=="FIELD +100k" then controls.manualField=(tonumber(controls.manualField) or positive(d.inputSet) or controls.injectorBaseline or 0)+MANUAL_GATE_STEP
+  elseif choice=="FIELD -1M" then controls.manualField=math.max(0,(tonumber(controls.manualField) or positive(d.inputSet) or controls.injectorBaseline or 0)-MANUAL_GATE_LARGE_STEP)
+  elseif choice=="FIELD +1M" then controls.manualField=(tonumber(controls.manualField) or positive(d.inputSet) or controls.injectorBaseline or 0)+MANUAL_GATE_LARGE_STEP
   elseif choice=="EXPORT -100k" then controls.manualExport=math.max(0,(tonumber(controls.manualExport) or positive(d.outputSet) or 0)-MANUAL_GATE_STEP)
   elseif choice=="EXPORT +100k" then controls.manualExport=(tonumber(controls.manualExport) or positive(d.outputSet) or 0)+MANUAL_GATE_STEP
+  elseif choice=="EXPORT -1M" then controls.manualExport=math.max(0,(tonumber(controls.manualExport) or positive(d.outputSet) or 0)-MANUAL_GATE_LARGE_STEP)
+  elseif choice=="EXPORT +1M" then controls.manualExport=(tonumber(controls.manualExport) or positive(d.outputSet) or 0)+MANUAL_GATE_LARGE_STEP
   elseif choice=="APPLY MANUAL" then controls.request="MANUAL";controls.overdriveApplied=0;controls.message="Manual gate pair requested"
   elseif choice=="SAVE AS OVERDRIVE PRESET" then
     local field=positive(controls.manualField) or positive(d.inputSet) or controls.injectorBaseline
@@ -385,7 +390,7 @@ local function act(choice,d)
     if field and export then controls.overdriveField=field;controls.overdriveExport=export;controls.message="Overdrive preset saved: field "..fmt(field)..", export "..fmt(export).." RF/t" else controls.message="Preset not saved: set positive field and export limits first" end
   elseif choice=="OVERDRIVE" then
     if positive(controls.overdriveField) and positive(controls.overdriveExport) then controls.request="OVERDRIVE";controls.overdriveApplied=0;controls.message="Saved Overdrive preset requested" else controls.message="No saved Overdrive preset: configure Manual Gates first" end
-  elseif FRACTION[choice] then controls.request=choice;controls.message="Output request: "..choice end;save(controls)
+  elseif FRACTION[choice] then controls.request=choice;controls.message="Output request: "..choice end
 end
 -- Reactor supervision remains responsive at 10 Hz, while the expensive large
 -- monitor redraw and settings write run at 2 Hz. Touch events are handled
