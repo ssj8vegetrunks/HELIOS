@@ -23,10 +23,12 @@ fs = {
 textutils = { serialize = function() return "{}" end }
 term = { current = function() return target end }
 peripheral = {
-    isPresent = function(side) return side == "back" or side == "right" or side == "bottom" or side == "top" end,
-    getNames = function() return { "back", "right", "bottom", "top", "flow_gate_1" } end,
+    -- The reactor is intentionally reached through the wired CC network,
+    -- while the export gate remains directly on the computer's right side.
+    isPresent = function(side) return side == "right" or side == "bottom" or side == "top" end,
+    getNames = function() return { "right", "bottom", "top", "draconic_reactor_2", "flow_gate_1" } end,
     getType = function(name)
-        if name == "back" then return "draconic_reactor" end
+        if name == "draconic_reactor_2" then return "draconic_reactor" end
         if name == "right" or name == "flow_gate_1" then return "flow_gate" end
         if name == "top" then return "monitor" end
         return "modem"

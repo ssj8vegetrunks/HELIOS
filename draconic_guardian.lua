@@ -24,20 +24,34 @@ end
 local function sort(t) table.sort(t, function(a,b) return tostring(a) < tostring(b) end); return t end
 local function localSides() local r = {}; for _, s in ipairs(rs.getSides()) do if peripheral.isPresent(s) then r[s] = true end end; return r end
 local function inspect()
-  local p, reactors, outputs, modems, monitors = localSides(), {}, {}, {}, {}
+  local p, localReactors, remoteReactors, directGates, exportGates, modems, monitors = localSides(), {}, {}, {}, {}, {}, {}
   for side in pairs(p) do
-    if hasType(side, "draconic_reactor") then reactors[#reactors+1] = side end
-    if hasType(side, "flow_gate") then outputs[#outputs+1] = side end
+    if hasType(side, "draconic_reactor") then localReactors[#localReactors+1] = side end
+    if hasType(side, "flow_gate") then
+      directGates[#directGates+1] = side
+      -- Fixed Guardian topology: one local Flux Gate on LEFT or RIGHT is the
+      -- reactor's export throttle. It never provides containment power.
+      if side == "left" or side == "right" then exportGates[#exportGates+1] = side end
+    end
     if hasType(side, "modem") then modems[#modems+1] = side end
     if hasType(side, "monitor") then monitors[#monitors+1] = side end
   end
-  local inputs = {}; for _, n in ipairs(peripheral.getNames()) do if not p[n] and hasType(n,"flow_gate") then inputs[#inputs+1]=n end end
-  sort(reactors);sort(outputs);sort(modems);sort(monitors);sort(inputs)
-  local why={}; if #reactors~=1 then why[#why+1]="Require exactly one local Draconic reactor component" end
-  if #outputs~=1 then why[#why+1]="Require exactly one local output flow gate" end
+  local inputs = {}; for _, n in ipairs(peripheral.getNames()) do
+    if not p[n] then
+      if hasType(n,"draconic_reactor") then remoteReactors[#remoteReactors+1]=n end
+      if hasType(n,"flow_gate") then inputs[#inputs+1]=n end
+    end
+  end
+  local reactors={};for _,n in ipairs(localReactors) do reactors[#reactors+1]=n end;for _,n in ipairs(remoteReactors) do reactors[#reactors+1]=n end
+  sort(reactors);sort(directGates);sort(exportGates);sort(modems);sort(monitors);sort(inputs)
+  local why={}; if #reactors~=1 then why[#why+1]="Require exactly one reactor component (direct or wired)" end
+  if #exportGates~=1 then why[#why+1]="Require exactly one local export gate on LEFT or RIGHT (never both)" end
+  if #directGates~=#exportGates then why[#why+1]="No other Flux Gate may be directly attached to the Guardian" end
   if #modems<1 then why[#why+1]="Require one local wired modem/peripheral hub" end
-  if #inputs~=1 then why[#why+1]="Require exactly one remote field-input flow gate" end
-  return {ready=#why==0,reasons=why,reactor=reactors[1],output=outputs[1],modem=modems[1],monitor=monitors[1],input=inputs[1]}
+  -- The sole remote gate reachable through the wired modem is always the
+  -- injector-feed gate. Guardian uses it only to sustain field strength.
+  if #inputs~=1 then why[#why+1]="Require exactly one modem-connected injector field gate" end
+  return {ready=#why==0,reasons=why,reactor=reactors[1],output=exportGates[1],modem=modems[1],monitor=monitors[1],input=inputs[1]}
 end
 local function call(n,m,...)
   if not n then return nil,"missing" end
@@ -70,6 +84,40 @@ local function acquireGates(b,d,c)
   return c.gatesOwned
 end
 local function reactor(n,m) return pcall(peripheral.call,n,m) end
+
+-- A requested export is only meaningful once the core is actually online.
+-- Keep the entire charge -> activate sequence in one place so the manual
+-- selector, commissioning, and the explicit activation control behave alike.
+local function ensureStarted(b,c,status,reason)
+  gate(b.output,0)
+  gate(b.input,900000)
+  if status=="offline" or status=="stopping" or status=="cooling" then
+    reactor(b.reactor,"chargeReactor")
+    c.startActivated=false
+    c.message=reason..": charging containment"
+    return true
+  end
+  if status=="charging" then
+    c.startActivated=false
+    c.message=reason..": charging containment"
+    return true
+  end
+  if status=="charged" or status=="warming_up" or status=="warning_up" then
+    if not c.startActivated then
+      reactor(b.reactor,"activateReactor")
+      c.startActivated=true
+    end
+    c.message=reason..": activation sent; waiting for ONLINE"
+    return true
+  end
+  if status=="online" or status=="running" then
+    c.initialRequested=false
+    c.startActivated=false
+    return false
+  end
+  c.message=reason..": waiting for reactor state "..string.upper(status)
+  return true
+end
 local function pct(a,b) if tonumber(a) and tonumber(b) and tonumber(b)>0 then return tonumber(a)/tonumber(b)*100 end end
 local function clamp(x) return math.max(0,math.min(1,tonumber(x) or 0)) end
 local function fmt(n)
@@ -208,11 +256,12 @@ local function draw(t,b,d,page,c,bs)
   text(t,1,2,banner,c.mode=="UNRESTRICTED" and colors.red or colors.lime);text(t,1,3,"[OVERVIEW] [RAW DATA] [SETUP]",colors.cyan)
   if not b.ready then text(t,1,5,"SETUP INVALID",colors.red);for i,v in ipairs(b.reasons) do text(t,1,5+i,"- "..v) end;return end
   if not d then text(t,1,5,"TELEMETRY LOST",colors.red);return end
-  if page=="setup" then text(t,1,5,"LOCAL SAFETY BOUNDARY VALID",colors.lime);text(t,1,7,"Reactor component: "..b.reactor);text(t,1,8,"Output gate:       "..b.output);text(t,1,9,"Field-input gate:  "..b.input);text(t,1,10,"Wired modem:       "..b.modem);text(t,1,12,"No normal HELIOS mainframe may control these peripherals.",colors.orange);return end
+  if page=="setup" then text(t,1,5,"FIXED GATE TOPOLOGY VALID",colors.lime);text(t,1,7,"Reactor component: "..b.reactor);text(t,1,8,"Export gate (LEFT/RIGHT): "..b.output);text(t,1,9,"Injector field gate (MODEM): "..b.input);text(t,1,10,"Wired modem: "..b.modem);text(t,1,12,"Export and containment roles are fixed; Guardian will not infer them.",colors.orange);return end
   if page=="raw" then text(t,1,5,"RAW DRACONIC TELEMETRY",colors.cyan);local ks={};for k in pairs(d.reactor) do ks[#ks+1]=tostring(k) end;sort(ks);for i,k in ipairs(ks) do if i+6<h then text(t,1,i+6,k..": "..tostring(d.reactor[k])) end end;return end
   local r=d.reactor;if w<54 or h<25 then text(t,1,5,"Large monitor required for the Guardian console.",colors.orange);text(t,1,7,"State: "..tostring(r.status).."  Temp: "..fmt(r.temperature).." C");text(t,1,8,"Generation: "..fmt(r.generationRate).." RF/t");return end
   vertical(t,2,5,12,"SAT",r.energySaturation,tonumber(r.maxEnergySaturation),colors.blue);vertical(t,8,5,12,"FIELD",r.fieldStrength,tonumber(r.maxFieldStrength),colors.red);vertical(t,16,5,12,"FUEL",(tonumber(r.maxFuelConversion) or 0)-(tonumber(r.fuelConversion) or 0),tonumber(r.maxFuelConversion),colors.lime);vertical(t,23,5,12,"OUT",r.generationRate,math.max(1,tonumber(c.rated) or tonumber(c.commissionFlow) or 1),colors.orange)
   local x=31;text(t,x,5,"REACTOR TELEMETRY",colors.cyan);text(t,x,7,"State:       "..tostring(r.status),colors.lime);text(t,x,8,"Generation:  "..fmt(r.generationRate).." RF/t",colors.cyan);text(t,x,9,"Temperature: "..fmt(r.temperature).." C",colors.orange);text(t,x,10,"Field drain: "..fmt(r.fieldDrainRate).." RF/t");text(t,x,11,"Fuel burned: "..fmt(r.fuelConversion).." / "..fmt(r.maxFuelConversion));text(t,x,12,"Saturation:  "..fmt(r.energySaturation).." / "..fmt(r.maxEnergySaturation));text(t,x,14,"GATE CONTROL (live diagnostics)",colors.cyan);text(t,x,15,"Field:  "..fmt(d.inputFlow).." / "..fmt(d.inputSet).." RF/t  override "..tostring(d.inputOverride),d.inputOverride and colors.lime or colors.red);text(t,x,16,"Gate flow: "..fmt(d.outputFlow).." / "..fmt(d.outputSet).." RF/t  override "..tostring(d.outputOverride),d.outputOverride and colors.lime or colors.red);text(t,x,18,"GUARDIAN: "..c.message,c.mode=="UNRESTRICTED" and colors.red or colors.lightGray)
+  text(t,x,17,"Roles: modem=injector field; "..tostring(b.output).."=export",colors.lightGray)
   local y=h-7;if not c.gatesOwned then
     text(t,1,y-2,"GATE CONTROL NOT ACQUIRED - REACTOR START DISABLED",colors.red)
     text(t,1,y-1,"Guardian must show field override true and output override true.",colors.orange)
