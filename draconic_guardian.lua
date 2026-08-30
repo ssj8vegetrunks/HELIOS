@@ -148,17 +148,22 @@ local function fmt(n)
 end
 local function text(t,x,y,s,c) local w=select(1,t.getSize());if y>=1 then t.setCursorPos(x,y);t.setTextColor(c or colors.white);t.write(string.sub(tostring(s),1,math.max(0,w-x+1))) end end
 local function compactMonitor(t,isMonitor) if isMonitor and t and type(t.setTextScale)=="function" then pcall(t.setTextScale,.5) end end
--- A monitor touch may land one character-row below its glyph on scaled displays.
--- Give each visible control a small, non-overlapping touch target instead of
--- requiring the operator to hit its single text baseline exactly.
+-- Scaled monitors frequently report a touch one or two character rows away
+-- from the rendered glyph. Give every visible control a generous target and
+-- resolve any overlap by choosing the label closest to the touch.
 local function button(t,x,y,label,c)
   local v="["..label.."]";text(t,x,y,v,c or colors.cyan)
-  return {x1=x,x2=x+#v-1,y1=y,y2=y+1,label=label}
+  return {x1=math.max(1,x-1),x2=x+#v,y1=math.max(1,y-2),y2=y+2,x=x,y=y,label=label}
 end
 local function hit(bs,x,y)
+  local picked, distance
   for _,b in ipairs(bs) do
-    if y>=b.y1 and y<=b.y2 and x>=b.x1 and x<=b.x2 then return b.label end
+    if y>=b.y1 and y<=b.y2 and x>=b.x1 and x<=b.x2 then
+      local d=math.abs(y-b.y)*100+math.abs(x-(b.x+b.x2)/2)
+      if not distance or d<distance then picked,distance=b,d end
+    end
   end
+  return picked and picked.label
 end
 local function vertical(t,x,y,h,label,now,maximum,c)
   local f=maximum and clamp((tonumber(now) or 0)/maximum) or 0;text(t,x,y,label,colors.lightGray)
