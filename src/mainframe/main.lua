@@ -2319,6 +2319,13 @@ function mainframe.run(config)
         local customState, customButtons, customManifest = {}, {}, nil
         local customRenderer
 
+        local function displayedReactors()
+            local result = {}
+            for _, reactor in ipairs(reactors) do result[#result + 1] = reactor end
+            for _, reactor in ipairs(facilityReactorViews()) do result[#result + 1] = reactor end
+            return result
+        end
+
         local function reloadCustomRenderer()
             customRenderer, customManifest = nil, nil
             local width, height = display.monitorSize()
@@ -2403,7 +2410,7 @@ function mainframe.run(config)
             gui.text(1, 7, state, colour)
             gui.text(1, 8, detail, colors.white, colors.black, width)
             gui.text(1, 10, ("REACTORS  %d   TURBINES  %d   STORAGE  %d"):format(
-                #reactors, #turbines, #storages), colors.cyan)
+                #displayedReactors(), #turbines, #storages), colors.cyan)
             local reserve = minimumPowerReserve()
             gui.text(1, 12, "POWER RESERVE", colors.lightGray)
             gui.progress(1, 13, math.max(10, width - 8), reserve or 0,
@@ -2428,12 +2435,46 @@ function mainframe.run(config)
         local function reactorPage()
             header("REACTORS")
             local width = select(1, term.getSize())
-            if #reactors == 0 then
+            local reactorList = displayedReactors()
+            if #reactorList == 0 then
                 gui.text(1, 7, "NO REACTORS FOUND", colors.orange)
                 return
             end
-            selected.reactors = math.max(1, math.min(selected.reactors, #reactors))
-            local reactor = reactors[selected.reactors]
+            selected.reactors = math.max(1, math.min(selected.reactors, #reactorList))
+            local reactor = reactorList[selected.reactors]
+            if reactor.facility then
+                local function ratio(value, maximum)
+                    value, maximum = tonumber(value), tonumber(maximum)
+                    if not value or not maximum or maximum <= 0 then return nil end
+                    return math.max(0, math.min(100, value / maximum * 100))
+                end
+                local field = ratio(reactor.fieldStrength, reactor.maxFieldStrength)
+                local saturation = ratio(reactor.energySaturation, reactor.maxEnergySaturation)
+                local fuel = ratio(reactor.fuelConversion, reactor.maxFuelConversion)
+                gui.text(1, 6, ("%d/%d  %s"):format(selected.reactors, #reactorList,
+                    deviceName(reactor.name)), colors.cyan, colors.black, width)
+                gui.text(1, 7, "TYPE DRACONIC / REMOTE GUARDIAN", colors.magenta)
+                gui.text(1, 8, "LINK " .. (reactor.online and "ONLINE" or "STALE"),
+                    reactor.online and colors.lime or colors.orange)
+                gui.text(1, 9, "STATE " .. string.upper(tostring(reactor.state or "UNKNOWN")), colors.white)
+                gui.text(1, 10, "GENERATION " .. powerFormat.power(reactor.generationRate,
+                    config.power, true), colors.cyan)
+                gui.text(1, 11, reactor.temperature and
+                    ("CORE %.2f C"):format(reactor.temperature) or "CORE N/A", colors.orange)
+                gui.text(1, 12, field and ("FIELD %.1f%%"):format(field) or "FIELD N/A", colors.white)
+                gui.text(1, 13, saturation and
+                    ("SATURATION %.1f%%"):format(saturation) or "SATURATION N/A", colors.white)
+                gui.text(1, 14, fuel and
+                    ("FUEL CONVERSION %.1f%%"):format(fuel) or "FUEL CONVERSION N/A", colors.white)
+                gui.text(1, 15, "FIELD GATE " .. powerFormat.power(reactor.fieldGate,
+                    config.power, true), colors.lime)
+                gui.text(1, 16, "EXPORT GATE " .. powerFormat.power(reactor.exportGate,
+                    config.power, true), colors.lime)
+                gui.text(1, 17, "GUARDIAN " .. tostring(reactor.mode or "UNKNOWN") .. " / " ..
+                    tostring(reactor.request or "UNKNOWN"), colors.orange)
+                gui.text(1, 19, "[<] PREVIOUS     NEXT [>]", colors.cyan)
+                return
+            end
             local output = reactor.mode == "steam" and reactor.steamProduction or reactor.energyProduction
             local target = reactor.mode == "steam" and
                 tonumber(reactor.governor and reactor.governor.targetSteam) or
@@ -2450,7 +2491,7 @@ function mainframe.run(config)
                 math.min(100, (tonumber(output) or 0) / scale * 100) or
                 tonumber(reactor.energyPercent) or 0
             local barWidth = math.max(10, width - 10)
-            gui.text(1, 6, ("%d/%d  %s"):format(selected.reactors, #reactors,
+            gui.text(1, 6, ("%d/%d  %s"):format(selected.reactors, #reactorList,
                 deviceName(reactor.name)), colors.cyan, colors.black, width)
             gui.text(1, 7, ("TYPE %-8s  %s"):format(string.upper(reactor.mode or "unknown"),
                 reactor.active == true and "ACTIVE" or "OFFLINE"),
@@ -2591,25 +2632,28 @@ function mainframe.run(config)
             elseif gui.hit(buttons.monitorOnly, touchX, touchY) then
                 selectAuthority("monitor")
             elseif event == "key" and value == keys.left then
-                if page == "reactors" and #reactors > 0 then
-                    selected.reactors = ((selected.reactors - 2) % #reactors) + 1
+                local reactorList = displayedReactors()
+                if page == "reactors" and #reactorList > 0 then
+                    selected.reactors = ((selected.reactors - 2) % #reactorList) + 1
                 elseif page == "turbines" and #turbines > 0 then
                     selected.turbines = ((selected.turbines - 2) % #turbines) + 1
                 elseif page == "storage" and #storages > 0 then
                     selected.storage = ((selected.storage - 2) % #storages) + 1
                 end
             elseif event == "key" and value == keys.right then
-                if page == "reactors" and #reactors > 0 then
-                    selected.reactors = (selected.reactors % #reactors) + 1
+                local reactorList = displayedReactors()
+                if page == "reactors" and #reactorList > 0 then
+                    selected.reactors = (selected.reactors % #reactorList) + 1
                 elseif page == "turbines" and #turbines > 0 then
                     selected.turbines = (selected.turbines % #turbines) + 1
                 elseif page == "storage" and #storages > 0 then
                     selected.storage = (selected.storage % #storages) + 1
                 end
             elseif event == "mouse_click" or event == "monitor_touch" then
-                if touchY == 17 and page == "reactors" and #reactors > 0 then
-                    selected.reactors = touchX < 15 and ((selected.reactors - 2) % #reactors) + 1 or
-                        (selected.reactors % #reactors) + 1
+                local reactorList = displayedReactors()
+                if (touchY == 17 or touchY == 19) and page == "reactors" and #reactorList > 0 then
+                    selected.reactors = touchX < 15 and ((selected.reactors - 2) % #reactorList) + 1 or
+                        (selected.reactors % #reactorList) + 1
                 elseif touchY == 16 and page == "turbines" and #turbines > 0 then
                     selected.turbines = touchX < 15 and ((selected.turbines - 2) % #turbines) + 1 or
                         (selected.turbines % #turbines) + 1
