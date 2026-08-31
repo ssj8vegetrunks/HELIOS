@@ -24,6 +24,14 @@ local hello = assert(protocol.make("hello", guardian, 1, {
     ui = { profile = "draconic", version = 1, format = "helios.ui" },
 }, 1000))
 
+local collector = assert(protocol.make("collector_presence", mainframe, 1, {
+    siteId = "default",
+    collectorPriority = 50,
+    leaseSeconds = 5,
+}, 1000))
+assert(protocol.validate(collector, "collector_presence"),
+    "collector-presence envelopes must validate")
+
 assert(hello.messageId == "guardian-session-1:1", "message IDs must be deterministic")
 local validated = assert(protocol.validate(hello, "hello"))
 assert(validated.source.computerId == 25 and validated.payload.facilityType == "draconic_reactor",

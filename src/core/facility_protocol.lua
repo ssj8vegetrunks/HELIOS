@@ -6,6 +6,7 @@ protocol.rednetProtocol = "helios.facility.v1"
 
 local kinds = {
     hello = true,
+    collector_presence = true,
     welcome = true,
     heartbeat = true,
     telemetry = true,

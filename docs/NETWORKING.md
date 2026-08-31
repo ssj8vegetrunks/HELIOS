@@ -18,6 +18,8 @@ Supported traffic:
 
 - `hello` — node identity, facility type, software version, capabilities, and
   optional GUI-profile offer;
+- `collector_presence` — a small broadcast announcing the active telemetry
+  collector, its priority, site, and renewable lease;
 - `welcome` — Mainframe identity and accepted compatibility policy;
 - `heartbeat` — liveness without a full telemetry payload;
 - `telemetry` — normalized, serializable facility state;
@@ -61,3 +63,22 @@ the one-second stream does not churn the computer disk.
 
 `helios facilities` lists registered facility identities. Remote commands are
 still deliberately absent from Alpha 1.
+
+## Collector authority and fallback
+
+Continuous facility telemetry is never broadcast. A Guardian broadcasts only
+its discovery `hello`, then binds to one collector and unicasts telemetry for
+the duration of that collector's lease.
+
+Collector priority is reserved as follows:
+
+1. Overseer (`100`)
+2. the elected primary HELIOS Mainframe (`50`)
+3. no collector; the Guardian continues local operation
+
+Only a Mainframe for which the existing authority election allows control may
+advertise itself as the fallback collector. A valid Overseer presence suppresses
+Mainframe facility collection until the Overseer lease expires. The Guardian
+then automatically falls back to the elected primary Mainframe. All discovery,
+presence, welcome, and telemetry messages must carry the same `siteId`; the
+current preserved default is `default`.

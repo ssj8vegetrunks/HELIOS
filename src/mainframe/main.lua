@@ -54,6 +54,8 @@ function mainframe.run(config)
     }))
     local facilitySequence = 0
     local facilityTracker = facilityProtocol.newSequenceTracker()
+    local facilitySiteId = tostring((config.network or {}).siteId or "default")
+    local overseerCollectorLeaseUntil = 0
     local facilityFile = "/helios/data/facilities.lua"
     local facilities = {}
     if fs.exists(facilityFile) then
@@ -214,6 +216,25 @@ function mainframe.run(config)
             version = config.version,
             sentAt = network.now(),
         })
+    end
+
+    local function isFacilityCollector()
+        return authority.canControl(authorityState) and
+            network.now() >= overseerCollectorLeaseUntil
+    end
+
+    local function advertiseFacilityCollector()
+        if not isFacilityCollector() then return false end
+        facilitySequence = facilitySequence + 1
+        local message = facilityProtocol.make("collector_presence", facilityIdentity,
+            facilitySequence, {
+                siteId = facilitySiteId,
+                collectorRole = "mainframe",
+                collectorPriority = 50,
+                leaseSeconds = 5,
+            }, network.now())
+        if not message then return false end
+        return network.broadcastOn(facilityProtocol.rednetProtocol, message)
     end
 
     local function selectAuthority(mode)
@@ -422,6 +443,7 @@ function mainframe.run(config)
     local function pollReactors()
         authority.expire(authorityState, network.now(), 5)
         advertiseMainframe()
+        advertiseFacilityCollector()
         reactors = reactorAdapter.readAll(devices)
         turbines = turbineAdapter.readAll(devices)
         storages = storageAdapter.readAll(devices, config.power)
@@ -582,6 +604,16 @@ function mainframe.run(config)
     local function handleFacility(sender, message)
         local accepted, clean = facilityProtocol.acceptSequence(facilityTracker, message)
         if not accepted then return false end
+        if clean.payload.siteId ~= facilitySiteId then return false end
+        if clean.kind == "collector_presence" and clean.source.role == "overseer" then
+            overseerCollectorLeaseUntil = network.now() + math.max(2,
+                math.min(30, tonumber(clean.payload.leaseSeconds) or 5))
+            return true
+        end
+        if not isFacilityCollector() then return false end
+        if clean.source.role ~= "guardian" and clean.source.role ~= "facility" then
+            return false
+        end
         local nodeId = clean.source.nodeId
         local previous = facilities[nodeId] or {}
         facilities[nodeId] = {
@@ -607,8 +639,12 @@ function mainframe.run(config)
         end
         if clean.kind == "hello" then
             sendFacility("welcome", sender, {
+                siteId = facilitySiteId,
                 acceptedContract = facilityProtocol.name,
                 acceptedVersion = facilityProtocol.version,
+                collectorRole = "mainframe",
+                collectorPriority = 50,
+                leaseSeconds = 5,
                 telemetryOnly = true,
                 remoteCommands = false,
             })

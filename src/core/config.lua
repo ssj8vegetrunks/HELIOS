@@ -158,6 +158,9 @@ function config.load()
     loaded.power.ratios.J = tonumber(loaded.power.ratios.J) or 2.5
     loaded.power.ratios.EU = tonumber(loaded.power.ratios.EU) or 0.25
     loaded.deviceAliases = loaded.deviceAliases or {}
+    loaded.network = loaded.network or {}
+    loaded.network.siteId = type(loaded.network.siteId) == "string" and
+        loaded.network.siteId ~= "" and loaded.network.siteId or "default"
     return loaded
 end
 

@@ -383,6 +383,9 @@ function config.load()
     loaded.power.ratios.J = tonumber(loaded.power.ratios.J) or 2.5
     loaded.power.ratios.EU = tonumber(loaded.power.ratios.EU) or 0.25
     loaded.deviceAliases = loaded.deviceAliases or {}
+    loaded.network = loaded.network or {}
+    loaded.network.siteId = type(loaded.network.siteId) == "string" and
+        loaded.network.siteId ~= "" and loaded.network.siteId or "default"
     return loaded
 end
 
@@ -596,6 +599,7 @@ protocol.rednetProtocol = "helios.facility.v1"
 
 local kinds = {
     hello = true,
+    collector_presence = true,
     welcome = true,
     heartbeat = true,
     telemetry = true,
@@ -2436,6 +2440,8 @@ function mainframe.run(config)
     }))
     local facilitySequence = 0
     local facilityTracker = facilityProtocol.newSequenceTracker()
+    local facilitySiteId = tostring((config.network or {}).siteId or "default")
+    local overseerCollectorLeaseUntil = 0
     local facilityFile = "/helios/data/facilities.lua"
     local facilities = {}
     if fs.exists(facilityFile) then
@@ -2596,6 +2602,25 @@ function mainframe.run(config)
             version = config.version,
             sentAt = network.now(),
         })
+    end
+
+    local function isFacilityCollector()
+        return authority.canControl(authorityState) and
+            network.now() >= overseerCollectorLeaseUntil
+    end
+
+    local function advertiseFacilityCollector()
+        if not isFacilityCollector() then return false end
+        facilitySequence = facilitySequence + 1
+        local message = facilityProtocol.make("collector_presence", facilityIdentity,
+            facilitySequence, {
+                siteId = facilitySiteId,
+                collectorRole = "mainframe",
+                collectorPriority = 50,
+                leaseSeconds = 5,
+            }, network.now())
+        if not message then return false end
+        return network.broadcastOn(facilityProtocol.rednetProtocol, message)
     end
 
     local function selectAuthority(mode)
@@ -2804,6 +2829,7 @@ function mainframe.run(config)
     local function pollReactors()
         authority.expire(authorityState, network.now(), 5)
         advertiseMainframe()
+        advertiseFacilityCollector()
         reactors = reactorAdapter.readAll(devices)
         turbines = turbineAdapter.readAll(devices)
         storages = storageAdapter.readAll(devices, config.power)
@@ -2964,6 +2990,16 @@ function mainframe.run(config)
     local function handleFacility(sender, message)
         local accepted, clean = facilityProtocol.acceptSequence(facilityTracker, message)
         if not accepted then return false end
+        if clean.payload.siteId ~= facilitySiteId then return false end
+        if clean.kind == "collector_presence" and clean.source.role == "overseer" then
+            overseerCollectorLeaseUntil = network.now() + math.max(2,
+                math.min(30, tonumber(clean.payload.leaseSeconds) or 5))
+            return true
+        end
+        if not isFacilityCollector() then return false end
+        if clean.source.role ~= "guardian" and clean.source.role ~= "facility" then
+            return false
+        end
         local nodeId = clean.source.nodeId
         local previous = facilities[nodeId] or {}
         facilities[nodeId] = {
@@ -2989,8 +3025,12 @@ function mainframe.run(config)
         end
         if clean.kind == "hello" then
             sendFacility("welcome", sender, {
+                siteId = facilitySiteId,
                 acceptedContract = facilityProtocol.name,
                 acceptedVersion = facilityProtocol.version,
+                collectorRole = "mainframe",
+                collectorPriority = 50,
+                leaseSeconds = 5,
                 telemetryOnly = true,
                 remoteCommands = false,
             })
@@ -8205,6 +8245,16 @@ local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" o
   ".helios-draconic-guardian.lua"
 local facilityNetwork,facilityProtocol,facilityIdentity,facilitySequence
 local facilityConnected,facilityLastWelcome=false,nil
+local facilityCollectorId,facilityCollectorRole,facilityCollectorPriority=nil,nil,-1
+local facilityCollectorLeaseUntil=0
+local facilitySiteId="default"
+if fs.exists("/helios/config.lua") then
+  local okConfig,guardianConfig=pcall(dofile,"/helios/config.lua")
+  if okConfig and type(guardianConfig)=="table" and type(guardianConfig.network)=="table" and
+     type(guardianConfig.network.siteId)=="string" and guardianConfig.network.siteId~="" then
+    facilitySiteId=guardianConfig.network.siteId
+  end
+end
 if fs.exists("/helios/core/network.lua") and fs.exists("/helios/core/facility_protocol.lua") then
   local okNetwork,loadedNetwork=pcall(dofile,"/helios/core/network.lua")
   local okProtocol,loadedProtocol=pcall(dofile,"/helios/core/facility_protocol.lua")
@@ -8792,7 +8842,7 @@ local function facilityWorker()
   local function snapshot()
     local r=data and data.reactor or {}
     return {
-      facilityType="draconic_reactor",state=tostring(r.status or "unknown"),
+      siteId=facilitySiteId,facilityType="draconic_reactor",state=tostring(r.status or "unknown"),
       generationRate=tonumber(r.generationRate),temperature=tonumber(r.temperature),
       fieldStrength=tonumber(r.fieldStrength),maxFieldStrength=tonumber(r.maxFieldStrength),
       energySaturation=tonumber(r.energySaturation),maxEnergySaturation=tonumber(r.maxEnergySaturation),
@@ -8803,23 +8853,48 @@ local function facilityWorker()
       guardianMessage=tostring(controls.message or ""),telemetryStale=controls.telemetryStale==true,
     }
   end
-  send("hello",{facilityType="draconic_reactor",capabilities={"telemetry","heartbeat","local_guardian","ui_profile"},uiProfile="draconic_guardian"})
+  local function hello(target)
+    send("hello",{siteId=facilitySiteId,facilityType="draconic_reactor",capabilities={"telemetry","heartbeat","local_guardian","ui_profile"},uiProfile="draconic_guardian"},target)
+  end
+  local function releaseCollector()
+    facilityCollectorId,facilityCollectorRole,facilityCollectorPriority=nil,nil,-1
+    facilityCollectorLeaseUntil=0;facilityConnected=false;facilityLastWelcome=nil
+    requestDraw()
+  end
+  hello()
   local heartbeat=os.startTimer(1)
-  local hello=os.startTimer(5)
+  local helloTimer=os.startTimer(5)
   while true do
     local event,a,b,c=os.pullEvent()
     if event=="timer" and a==heartbeat then
-      if facilityLastWelcome and facilityNetwork.now()-facilityLastWelcome>3 then
-        facilityConnected=false;requestDraw()
+      local now=facilityNetwork.now()
+      if facilityCollectorId and now>=facilityCollectorLeaseUntil then
+        releaseCollector()
       end
-      send("telemetry",snapshot());heartbeat=os.startTimer(1)
-    elseif event=="timer" and a==hello then
-      if not facilityConnected then send("hello",{facilityType="draconic_reactor",capabilities={"telemetry","heartbeat","local_guardian","ui_profile"},uiProfile="draconic_guardian"}) end
-      hello=os.startTimer(5)
+      if facilityCollectorId then send("telemetry",snapshot(),facilityCollectorId) end
+      heartbeat=os.startTimer(1)
+    elseif event=="timer" and a==helloTimer then
+      if not facilityCollectorId then hello() end
+      helloTimer=os.startTimer(5)
     elseif event=="rednet_message" and c==facilityProtocol.rednetProtocol then
       local message=facilityProtocol.validate(b)
-      if message and (message.kind=="welcome" or message.kind=="acknowledgement") then
-        facilityConnected=true;facilityLastWelcome=facilityNetwork.now();requestDraw()
+      if message and message.payload.siteId==facilitySiteId then
+        local role=message.source.role
+        local priority=tonumber(message.payload.collectorPriority) or (role=="overseer" and 100 or 50)
+        local lease=math.max(2,math.min(30,tonumber(message.payload.leaseSeconds) or 5))
+        if message.kind=="collector_presence" and (role=="mainframe" or role=="overseer") then
+          if a==facilityCollectorId then
+            facilityCollectorLeaseUntil=facilityNetwork.now()+lease
+          elseif not facilityCollectorId or priority>facilityCollectorPriority then hello(a) end
+        elseif message.kind=="welcome" and (role=="mainframe" or role=="overseer") and
+               (not facilityCollectorId or a==facilityCollectorId or priority>facilityCollectorPriority) then
+          facilityCollectorId,facilityCollectorRole,facilityCollectorPriority=a,role,priority
+          facilityCollectorLeaseUntil=facilityNetwork.now()+lease
+          facilityConnected=true;facilityLastWelcome=facilityNetwork.now();requestDraw()
+        elseif message.kind=="acknowledgement" and a==facilityCollectorId then
+          facilityCollectorLeaseUntil=facilityNetwork.now()+lease
+          facilityConnected=true;facilityLastWelcome=facilityNetwork.now()
+        end
       end
     elseif event=="peripheral" or event=="peripheral_detach" then facilityNetwork.openAll() end
   end
@@ -8862,6 +8937,7 @@ local function buildConfig(role, display, existing)
     local ratios = type(power.ratios) == "table" and power.ratios or {}
     local control = type(existing.control) == "table" and existing.control or {}
     local aliases = type(existing.deviceAliases) == "table" and existing.deviceAliases or {}
+    local networkSettings = type(existing.network) == "table" and existing.network or {}
     local merged = {
         version = VERSION,
         role = role,
@@ -9007,6 +9083,10 @@ local function buildConfig(role, display, existing)
                 control.turbineProfiles or {},
         },
         deviceAliases = aliases,
+        network = {
+            siteId = type(networkSettings.siteId) == "string" and
+                networkSettings.siteId ~= "" and networkSettings.siteId or "default",
+        },
     }
     return "return " .. textutils.serialize(merged)
 end
