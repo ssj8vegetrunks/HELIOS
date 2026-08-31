@@ -196,9 +196,12 @@ local function embeddedInstallBytes(configText, role)
     for _, contents in pairs(FILES) do
         bytes = bytes + #contents
     end
-    -- The external pack is currently much smaller than this allowance. Keeping
-    -- a reserve here also covers its manifest and filesystem bookkeeping.
-    if role == "mainframe" then bytes = bytes + (64 * 1024) end
+    -- A staged upgrade temporarily coexists with the installed copy. CC's
+    -- filesystem bookkeeping, the HTTP response, and the external module pack
+    -- need substantially more headroom than their raw file sizes suggest on a
+    -- 1 MB computer. If this reserve is unavailable, use the data-preserving
+    -- in-place upgrade path instead of failing near the end of installation.
+    if role == "mainframe" then bytes = bytes + (256 * 1024) end
     return bytes
 end
 
