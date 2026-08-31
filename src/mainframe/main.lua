@@ -536,6 +536,49 @@ function mainframe.run(config)
     end
 
     -- @section REMOTE TELEMETRY
+    local function facilityReactorViews()
+        local result = {}
+        local now = network.now()
+        for nodeId, facility in pairs(facilities) do
+            if facility.facilityType == "draconic_reactor" then
+                local telemetry = facility.telemetry or {}
+                local age = math.max(0, now - (tonumber(facility.lastSeen) or 0))
+                local state = tostring(telemetry.state or "unknown")
+                result[#result + 1] = {
+                    name = nodeId,
+                    facility = true,
+                    remote = true,
+                    facilityType = facility.facilityType,
+                    softwareVersion = facility.softwareVersion,
+                    computerId = facility.id,
+                    online = age <= 7,
+                    telemetryAge = age,
+                    active = state == "running" or state == "online",
+                    state = state,
+                    mode = telemetry.mode,
+                    request = telemetry.request,
+                    generationRate = telemetry.generationRate,
+                    energyProduction = telemetry.generationRate,
+                    temperature = telemetry.temperature,
+                    fieldStrength = telemetry.fieldStrength,
+                    maxFieldStrength = telemetry.maxFieldStrength,
+                    energySaturation = telemetry.energySaturation,
+                    maxEnergySaturation = telemetry.maxEnergySaturation,
+                    fuelConversion = telemetry.fuelConversion,
+                    maxFuelConversion = telemetry.maxFuelConversion,
+                    fieldGate = telemetry.fieldGate,
+                    exportGate = telemetry.exportGate,
+                    guardianMessage = telemetry.guardianMessage,
+                    localAuthority = telemetry.localAuthority,
+                    commissioned = telemetry.commissioned,
+                    ratedOutput = telemetry.ratedOutput,
+                }
+            end
+        end
+        table.sort(result, function(a, b) return tostring(a.name) < tostring(b.name) end)
+        return result
+    end
+
     local function snapshotFor(assignment)
         local includeAll = assignment == "all"
         return uiContract.attach({
@@ -545,6 +588,8 @@ function mainframe.run(config)
             sentAt = network.now(),
             assignment = assignment,
             reactors = (includeAll or assignment == "reactor") and reactors or {},
+            facilityReactors = (includeAll or assignment == "reactor") and
+                facilityReactorViews() or {},
             turbines = (includeAll or assignment == "turbine") and turbines or {},
             storages = (includeAll or assignment == "battery") and storages or {},
             aliases = config.deviceAliases,

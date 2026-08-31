@@ -1966,6 +1966,19 @@ local function nameOf(name, snapshot)
     return (snapshot.aliases and snapshot.aliases[name]) or name or "UNKNOWN"
 end
 
+local function displayedReactors(snapshot)
+    local result = {}
+    for _, reactor in ipairs(snapshot.reactors or {}) do result[#result + 1] = reactor end
+    for _, reactor in ipairs(snapshot.facilityReactors or {}) do result[#result + 1] = reactor end
+    return result
+end
+
+local function percent(value, maximum)
+    value, maximum = tonumber(value), tonumber(maximum)
+    if not value or not maximum or maximum <= 0 then return nil end
+    return math.max(0, math.min(100, value / maximum * 100))
+end
+
 function renderer.render(snapshot, state, services)
     local gui, formatter = services.gui, services.powerFormat
     local width, height = term.getSize()
@@ -1988,6 +2001,7 @@ function renderer.render(snapshot, state, services)
     x = buttons.turbines.x2 + 2
     buttons.power = gui.button(x, 4, "POWER", colors.yellow, state.page == "power" and colors.gray or colors.black)
     buttons.advanced = gui.button(1, height, "ADVANCED", colors.white, colors.gray)
+    local allReactors = displayedReactors(snapshot)
 
     if state.page == "home" then
         local left = math.max(22, math.floor(width * 0.42))
@@ -2006,7 +2020,7 @@ function renderer.render(snapshot, state, services)
                 if maximum then steamMaximum = steamMaximum + maximum else maximumKnown = false end
             end
         end
-        local generation = sum(snapshot.reactors, "energyProduction") + sum(snapshot.turbines, "energyProduction")
+        local generation = sum(allReactors, "energyProduction") + sum(snapshot.turbines, "energyProduction")
         local fill, draw = sum(snapshot.storages, "input"), sum(snapshot.storages, "output")
         local net = fill - draw
         instrument(gui, 1, 6, left, "POWER STORAGE", reserve,
@@ -2040,6 +2054,13 @@ function renderer.render(snapshot, state, services)
             line("  " .. (dispatch and (dispatch .. " - ") or "") ..
                 tostring(plan.reason or (reactor.active and "ONLINE" or "OFFLINE")), colors.lightGray)
         end
+        for _, reactor in ipairs(snapshot.facilityReactors or {}) do
+            line("F " .. nameOf(reactor.name, snapshot) .. ": " ..
+                (reactor.online and string.upper(tostring(reactor.state or "ONLINE")) or "LINK STALE"),
+                reactor.online and colors.magenta or colors.orange)
+            line("  DRACONIC GUARDIAN - " ..
+                tostring(reactor.guardianMessage or reactor.mode or "MONITORING"), colors.lightGray)
+        end
         for _, turbine in ipairs(snapshot.turbines or {}) do
             local plan = turbine.governor or {}
             line("T " .. nameOf(turbine.name, snapshot) .. ": " .. tostring(plan.state or "MONITORING"), colors.cyan)
@@ -2049,7 +2070,7 @@ function renderer.render(snapshot, state, services)
         line(("Storage reserve %.1f%%"):format(reserve), reserve < 20 and colors.orange or colors.lime)
         gui.text(rightX, height - 1, "+" .. string.rep("-", rightWidth - 2) .. "+", colors.gray)
     else
-        local list = state.page == "reactors" and (snapshot.reactors or {}) or
+        local list = state.page == "reactors" and allReactors or
             state.page == "turbines" and (snapshot.turbines or {}) or (snapshot.storages or {})
         local key = state.page == "power" and "power" or state.page
         if #list == 0 then gui.text(1, 7, "NO DEVICES REPORTED", colors.orange) else
@@ -2057,8 +2078,37 @@ function renderer.render(snapshot, state, services)
             local item = list[state.selected[key]]
             gui.text(1, 7, ("%d/%d  %s"):format(state.selected[key], #list, nameOf(item.name, snapshot)), colors.cyan)
             local row = 9
-            for _, field in ipairs({"active", "state", "dispatchMode", "powerDispatchRequested", "rotorSpeed", "steamProduction", "energyProduction", "fuelPercent", "waste", "percent", "input", "output", "stored", "capacity"}) do
-                if item[field] ~= nil then gui.text(1, row, string.upper(field) .. ": " .. tostring(item[field]), colors.white); row = row + 1 end
+            if item.facility then
+                local fieldPercent = percent(item.fieldStrength, item.maxFieldStrength)
+                local saturationPercent = percent(item.energySaturation, item.maxEnergySaturation)
+                local fuelPercent = percent(item.fuelConversion, item.maxFuelConversion)
+                local details = {
+                    {"TYPE", "DRACONIC / REMOTE GUARDIAN", colors.magenta},
+                    {"LINK", item.online and "ONLINE" or "STALE", item.online and colors.lime or colors.orange},
+                    {"STATE", string.upper(tostring(item.state or "UNKNOWN")), colors.white},
+                    {"GENERATION", formatter.power(item.generationRate, snapshot.power, true), colors.cyan},
+                    {"CORE", item.temperature and ("%.2f C"):format(item.temperature) or "N/A", colors.orange},
+                    {"FIELD", fieldPercent and ("%.1f%%"):format(fieldPercent) or "N/A", colors.white},
+                    {"SATURATION", saturationPercent and ("%.1f%%"):format(saturationPercent) or "N/A", colors.white},
+                    {"FUEL CONVERSION", fuelPercent and ("%.1f%%"):format(fuelPercent) or "N/A", colors.white},
+                    {"FIELD GATE", formatter.power(item.fieldGate, snapshot.power, true), colors.lime},
+                    {"EXPORT GATE", formatter.power(item.exportGate, snapshot.power, true), colors.lime},
+                    {"GUARDIAN", tostring(item.mode or "UNKNOWN") .. " / " .. tostring(item.request or "UNKNOWN"), colors.orange},
+                    {"VERSION", tostring(item.softwareVersion or "UNKNOWN"), colors.lightGray},
+                }
+                for _, detail in ipairs(details) do
+                    if row < height - 3 then
+                        gui.text(1, row, detail[1] .. ": " .. detail[2], detail[3], colors.black, width)
+                        row = row + 1
+                    end
+                end
+                if item.guardianMessage and row < height - 3 then
+                    gui.text(1, row, tostring(item.guardianMessage), colors.lightGray, colors.black, width)
+                end
+            else
+                for _, field in ipairs({"active", "state", "dispatchMode", "powerDispatchRequested", "rotorSpeed", "steamProduction", "energyProduction", "fuelPercent", "waste", "percent", "input", "output", "stored", "capacity"}) do
+                    if item[field] ~= nil then gui.text(1, row, string.upper(field) .. ": " .. tostring(item[field]), colors.white); row = row + 1 end
+                end
             end
             local plan = item.governor or {}
             if plan.state then gui.text(1, row + 1, "GOVERNOR: " .. tostring(plan.state), colors.orange) end
@@ -2922,6 +2972,49 @@ function mainframe.run(config)
     end
 
     -- @section REMOTE TELEMETRY
+    local function facilityReactorViews()
+        local result = {}
+        local now = network.now()
+        for nodeId, facility in pairs(facilities) do
+            if facility.facilityType == "draconic_reactor" then
+                local telemetry = facility.telemetry or {}
+                local age = math.max(0, now - (tonumber(facility.lastSeen) or 0))
+                local state = tostring(telemetry.state or "unknown")
+                result[#result + 1] = {
+                    name = nodeId,
+                    facility = true,
+                    remote = true,
+                    facilityType = facility.facilityType,
+                    softwareVersion = facility.softwareVersion,
+                    computerId = facility.id,
+                    online = age <= 7,
+                    telemetryAge = age,
+                    active = state == "running" or state == "online",
+                    state = state,
+                    mode = telemetry.mode,
+                    request = telemetry.request,
+                    generationRate = telemetry.generationRate,
+                    energyProduction = telemetry.generationRate,
+                    temperature = telemetry.temperature,
+                    fieldStrength = telemetry.fieldStrength,
+                    maxFieldStrength = telemetry.maxFieldStrength,
+                    energySaturation = telemetry.energySaturation,
+                    maxEnergySaturation = telemetry.maxEnergySaturation,
+                    fuelConversion = telemetry.fuelConversion,
+                    maxFuelConversion = telemetry.maxFuelConversion,
+                    fieldGate = telemetry.fieldGate,
+                    exportGate = telemetry.exportGate,
+                    guardianMessage = telemetry.guardianMessage,
+                    localAuthority = telemetry.localAuthority,
+                    commissioned = telemetry.commissioned,
+                    ratedOutput = telemetry.ratedOutput,
+                }
+            end
+        end
+        table.sort(result, function(a, b) return tostring(a.name) < tostring(b.name) end)
+        return result
+    end
+
     local function snapshotFor(assignment)
         local includeAll = assignment == "all"
         return uiContract.attach({
@@ -2931,6 +3024,8 @@ function mainframe.run(config)
             sentAt = network.now(),
             assignment = assignment,
             reactors = (includeAll or assignment == "reactor") and reactors or {},
+            facilityReactors = (includeAll or assignment == "reactor") and
+                facilityReactorViews() or {},
             turbines = (includeAll or assignment == "turbine") and turbines or {},
             storages = (includeAll or assignment == "battery") and storages or {},
             aliases = config.deviceAliases,
