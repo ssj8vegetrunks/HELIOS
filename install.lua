@@ -234,7 +234,8 @@ function config.load()
     if type(loaded) ~= "table" then
         error("HELIOS configuration is invalid.", 0)
     end
-    if loaded.role ~= "mainframe" and loaded.role ~= "terminal" then
+    if loaded.role ~= "mainframe" and loaded.role ~= "terminal" and
+       loaded.role ~= "guardian" then
         error("HELIOS configuration contains an invalid role.", 0)
     end
     loaded.discovery = loaded.discovery or {}
@@ -9017,11 +9018,31 @@ local function runInstaller()
         if ok and type(loaded) == "table" then existingConfig = loaded end
     end
     title("Installer " .. VERSION)
-    local role = choose("Select this computer's role:", {
-        { label = "Mainframe", value = "mainframe" },
-        { label = "Remote Terminal", value = "terminal" },
-        { label = "Draconic Reactor Guardian", value = "guardian" },
+    local selection = choose("Select an installation category:", {
+        { label = "Install Mainframe", value = "mainframe" },
+        { label = "Install Remote Terminal", value = "terminal" },
+        { label = "Modules", value = "modules" },
     })
+    local role = selection
+    local installLabel
+    if selection == "modules" then
+        title("Modules")
+        local module = choose("Select a module:", {
+            { label = "Hardware Probe (run once, read-only)", value = "probe" },
+            { label = "Draconic Reactor Guardian", value = "guardian" },
+        })
+        if module == "probe" then
+            local temporaryProbe = "/.helios-probe-run.lua"
+            if fs.exists(temporaryProbe) then fs.delete(temporaryProbe) end
+            writeFile(temporaryProbe, FILES["tools/discovery_probe.lua"])
+            local ran, reason = shell.run(temporaryProbe)
+            if fs.exists(temporaryProbe) then fs.delete(temporaryProbe) end
+            if not ran then error("Probe failed: " .. tostring(reason), 0) end
+            return
+        end
+        role = "guardian"
+        installLabel = "Module: Draconic Reactor Guardian"
+    end
 
     if role == "mainframe" and not (existingConfig and existingConfig.role == "mainframe") then
         title("Checking HELIOS Network")
@@ -9049,7 +9070,7 @@ local function runInstaller()
     end
 
     title("Ready to Install")
-    print("Role: " .. role)
+    print(installLabel or ("Role: " .. role))
     if display then print("Display: " .. display) end
     print("Location: " .. INSTALL_DIR)
     print("")
@@ -9147,7 +9168,7 @@ shell.run("/helios/helios.lua", ...)
     term.setTextColor(colors.lime)
     print("HELIOS " .. VERSION .. " installed successfully.")
     term.setTextColor(colors.white)
-    print("Role: " .. role)
+    print(installLabel or ("Role: " .. role))
     if modulePackVersion then print("Module Pack: " .. tostring(modulePackVersion)) end
     if display then print("Display: " .. display) end
     if previousInstall then print("Previous version: " .. previousInstall) end

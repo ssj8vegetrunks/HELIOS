@@ -9,6 +9,10 @@
 | `draconic_guardian.lua` | Standalone Draconic Reactor Guardian | Yes, guarded and locally authoritative |
 | `module-template/` | Copyable Lua developer starter | No; actuator examples fail closed |
 
+The installer presents Mainframe and Remote Terminal as HELIOS computer roles.
+Read-only Probe and the Draconic Guardian are selected from the separate
+`Modules` submenu.
+
 ## Repository layout
 
 ```text
