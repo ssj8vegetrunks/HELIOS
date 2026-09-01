@@ -41,6 +41,7 @@ function mainframe.run(config)
     local conditionSamples = {}
     local silenceButton
     local alarmButton
+    local scramButton
     local modemCount = network.openAll()
     local terminals = network.loadPeers()
     local missingDevices = {}
@@ -335,17 +336,23 @@ function mainframe.run(config)
         local function alarmName(name)
             return (config.deviceAliases and config.deviceAliases[name]) or name
         end
-        local function add(level, key, message)
+        local function add(level, key, message, metadata)
             activeKeys[key] = true
             conditionSamples[key] = (conditionSamples[key] or 0) + 1
             if conditionSamples[key] >= config.alarms.confirmSamples then
-                candidates[#candidates + 1] = { level = level, key = key, message = message }
+                candidates[#candidates + 1] = {
+                    level = level, key = key, message = message,
+                    facilityNodeId = metadata and metadata.facilityNodeId or nil,
+                }
             end
         end
-        local function addConfirmed(level, key, message)
+        local function addConfirmed(level, key, message, metadata)
             activeKeys[key] = true
             conditionSamples[key] = config.alarms.confirmSamples
-            candidates[#candidates + 1] = { level = level, key = key, message = message }
+            candidates[#candidates + 1] = {
+                level = level, key = key, message = message,
+                facilityNodeId = metadata and metadata.facilityNodeId or nil,
+            }
         end
 
         for _, reactor in ipairs(reactors) do
@@ -390,6 +397,20 @@ function mainframe.run(config)
         for _, storage in ipairs(storages) do
             if storage.error and not maintenance then
                 add(2, storage.name .. ":telemetry", alarmName(storage.name) .. " TELEMETRY LOST")
+            end
+        end
+        local facilityNow = network.now()
+        for nodeId, facility in pairs(facilities) do
+            local telemetry = facility.telemetry
+            local age = facilityNow - (tonumber(facility.lastSeen) or 0)
+            if type(telemetry) == "table" and age <= 7 and
+               tonumber(telemetry.alarmLevel) then
+                local level = math.max(1, math.min(3, tonumber(telemetry.alarmLevel)))
+                addConfirmed(level, nodeId .. ":" ..
+                    tostring(telemetry.alarmCode or "facility-alarm"),
+                    tostring(telemetry.alarmMessage or
+                        (alarmName(nodeId) .. " FACILITY ALARM")),
+                    { facilityNodeId = nodeId })
             end
         end
         if not maintenance then
@@ -569,6 +590,9 @@ function mainframe.run(config)
                     fieldGate = telemetry.fieldGate,
                     exportGate = telemetry.exportGate,
                     guardianMessage = telemetry.guardianMessage,
+                    alarmLevel = telemetry.alarmLevel,
+                    alarmCode = telemetry.alarmCode,
+                    alarmMessage = telemetry.alarmMessage,
                     localAuthority = telemetry.localAuthority,
                     commissioned = telemetry.commissioned,
                     ratedOutput = telemetry.ratedOutput,
@@ -644,6 +668,17 @@ function mainframe.run(config)
             return network.sendOn(facilityProtocol.rednetProtocol, target, outgoing)
         end
         return false
+    end
+
+    local function scramFacility(nodeId)
+        local facility = facilities[nodeId]
+        if not facility or not facility.id then return false end
+        return sendFacility("emergency_command", facility.id, {
+            siteId = facilitySiteId,
+            targetNodeId = nodeId,
+            action = "scram",
+            reason = "operator requested emergency shutdown from HELIOS",
+        })
     end
 
     local function handleFacility(sender, message)
@@ -935,10 +970,17 @@ function mainframe.run(config)
             alarmButton = ui.inlineButton("ALARM", alarmColour())
             write(" ")
             silenceButton = ui.inlineButton("SILENCE", colors.gray)
+            if currentAlarm.facilityNodeId then
+                write(" ")
+                scramButton = ui.inlineButton("SCRAM", colors.red)
+            else
+                scramButton = nil
+            end
             print("")
         else
             alarmButton = nil
             silenceButton = nil
+            scramButton = nil
             ui.status("Alarms", config.alarms.enabled and "CLEAR" or "DISABLED",
                 config.alarms.enabled and colors.lime or colors.gray)
         end
@@ -2447,6 +2489,10 @@ function mainframe.run(config)
                 page == "storage" and colors.gray or colors.black)
             buttons.advanced = gui.button(1, select(2, term.getSize()), "ADVANCED",
                 colors.white, colors.gray)
+            if currentAlarm and currentAlarm.facilityNodeId then
+                buttons.scram = gui.button(12, select(2, term.getSize()), "SCRAM",
+                    colors.white, colors.red)
+            end
         end
 
         local function overview()
@@ -2646,7 +2692,7 @@ function mainframe.run(config)
                 draw()
                 display.useMonitors()
                 local ok, rendered = pcall(customRenderer.render, snapshotFor("all"), customState, {
-                    gui = gui, powerFormat = powerFormat,
+                    gui = gui, powerFormat = powerFormat, allowEmergency = true,
                 })
                 if ok then customButtons = rendered or {} else customRenderer = nil end
                 display.useNative()
@@ -2662,6 +2708,9 @@ function mainframe.run(config)
                     event, value, message, protocol, { eventPoint = ui.eventPoint, hit = gui.hit })
                 if not handled then customRenderer = nil
                 elseif action == "advanced" then display.useMirrored(); return "advanced" end
+                if action == "scram" and currentAlarm and currentAlarm.facilityNodeId then
+                    scramFacility(currentAlarm.facilityNodeId)
+                end
                 if event == "monitor_touch" then touchX, touchY = nil, nil end
             end
             if event == "key" and value == keys.q then display.useMirrored(); return "quit"
@@ -2674,6 +2723,9 @@ function mainframe.run(config)
             elseif gui.hit(buttons.turbines, touchX, touchY) then page = "turbines"
             elseif gui.hit(buttons.storage, touchX, touchY) then page = "storage"
             elseif gui.hit(buttons.advanced, touchX, touchY) then display.useMirrored(); return "advanced"
+            elseif gui.hit(buttons.scram, touchX, touchY) and
+                   currentAlarm and currentAlarm.facilityNodeId then
+                scramFacility(currentAlarm.facilityNodeId)
             elseif gui.hit(buttons.keepControl, touchX, touchY) then
                 selectAuthority("control")
             elseif gui.hit(buttons.monitorOnly, touchX, touchY) then
@@ -2795,6 +2847,9 @@ function mainframe.run(config)
             local touchX, touchY = x, y
             if alarmButton and ui.hit(alarmButton, touchX, touchY) then
                 openAlarmLocation()
+            elseif scramButton and ui.hit(scramButton, touchX, touchY) and
+                   currentAlarm and currentAlarm.facilityNodeId then
+                scramFacility(currentAlarm.facilityNodeId)
             elseif silenceButton and ui.hit(silenceButton, touchX, touchY) then
                 silenceCurrentAlarm()
             elseif ui.hit(dashboardButtons.reactors, touchX, touchY) then openFacility("reactors")

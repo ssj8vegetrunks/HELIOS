@@ -194,6 +194,23 @@ local function ensureStarted(b,c,status,reason,fieldTarget)
   return true
 end
 local function pct(a,b) if tonumber(a) and tonumber(b) and tonumber(b)>0 then return tonumber(a)/tonumber(b)*100 end end
+local function imminentMeltdown(r)
+  local status=string.lower(tostring(r and r.status or "unknown"))
+  local atRisk=status=="online" or status=="running" or status=="stopping" or status=="cooling"
+  if not atRisk then return false end
+  local field=pct(r.fieldStrength,r.maxFieldStrength)
+  local temperature=tonumber(r.temperature)
+  local fuelRemaining=pct((tonumber(r.maxFuelConversion) or 0)-
+    (tonumber(r.fuelConversion) or 0),r.maxFuelConversion)
+  local reasons={}
+  -- These are announcement thresholds only. They never alter gates, modes, or
+  -- reactor state. Unrestricted remains genuinely unrestricted.
+  if field and field<=25 then reasons[#reasons+1]=string.format("field %.1f%%",field) end
+  if temperature and temperature>=7000 then reasons[#reasons+1]=string.format("core %.0f C",temperature) end
+  if fuelRemaining and fuelRemaining<=12 then reasons[#reasons+1]=string.format("fuel %.1f%%",fuelRemaining) end
+  if #reasons==0 then return false end
+  return true,"IMMINENT DRACONIC REACTOR MELTDOWN: "..table.concat(reasons,", ")
+end
 local function clamp(x) return math.max(0,math.min(1,tonumber(x) or 0)) end
 local function fmt(n)
   n=tonumber(n);if not n then return "N/A" end;local u={"","k","M","B","T","Qa"};local i=1
@@ -266,7 +283,10 @@ local function supervise(b,d,c)
     -- Containment must win in every state, not only when DE calls it running.
     if field<=FIELD_EMERGENCY then return stop("field below "..FIELD_EMERGENCY.."%",true) end
     if temp>MAX_TEMPERATURE then return stop("temperature above "..MAX_TEMPERATURE.." C") end
-  elseif fuel<=MINIMUM_FUEL or field<=FIELD_EMERGENCY or temp>MAX_TEMPERATURE then c.message="UNRESTRICTED WARNING: a containment/fuel/temperature limit is exceeded" end
+  else
+    local imminent,warning=imminentMeltdown(r)
+    if imminent then c.message="UNRESTRICTED WARNING: "..warning end
+  end
   if status=="charging" then gate(b.input,injectorCap);c.message="Charging containment";return end
   if c.initialRequested then
     if status=="offline" or status=="stopping" then
@@ -619,6 +639,7 @@ local function facilityWorker()
   end
   local function snapshot()
     local r=data and data.reactor or {}
+    local imminent,alarmMessage=imminentMeltdown(r)
     return {
       siteId=facilitySiteId,facilityType="draconic_reactor",state=tostring(r.status or "unknown"),
       generationRate=tonumber(r.generationRate),temperature=tonumber(r.temperature),
@@ -629,6 +650,9 @@ local function facilityWorker()
       mode=controls.mode,request=controls.request,commissioned=controls.commissioned==true,
       ratedOutput=tonumber(controls.rated),localAuthority=true,remoteCommands=false,
       guardianMessage=tostring(controls.message or ""),telemetryStale=controls.telemetryStale==true,
+      alarmLevel=imminent and 3 or nil,
+      alarmCode=imminent and "draconic_meltdown_imminent" or nil,
+      alarmMessage=alarmMessage,
     }
   end
   local function hello(target)
@@ -672,6 +696,17 @@ local function facilityWorker()
         elseif message.kind=="acknowledgement" and a==facilityCollectorId then
           facilityCollectorLeaseUntil=facilityNetwork.now()+lease
           facilityConnected=true;facilityLastWelcome=facilityNetwork.now()
+        elseif message.kind=="emergency_command" and a==facilityCollectorId and
+               (role=="mainframe" or role=="overseer") and
+               message.payload.targetNodeId==facilityIdentity.nodeId and
+               message.payload.action=="scram" then
+          actions={"SAFE SHUTDOWN"}
+          controls.message="REMOTE SCRAM REQUEST ACCEPTED FROM "..string.upper(role)
+          send("status",{
+            siteId=facilitySiteId,commandMessageId=message.messageId,
+            action="scram",status="accepted",
+          },a)
+          requestDraw()
         end
       end
     elseif event=="peripheral" or event=="peripheral_detach" then facilityNetwork.openAll() end

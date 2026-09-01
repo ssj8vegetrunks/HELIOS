@@ -11,8 +11,9 @@ protection. It remains unchanged during facility-network development.
 
 ## Facility network Alpha 1
 
-`helios.facility.v1` is the new Guardian/facility discovery and telemetry
-contract. Its first release deliberately has no remote command message.
+`helios.facility.v1` is the Guardian/facility discovery and telemetry contract.
+It deliberately has no general remote-control message. Its only command is the
+narrowly scoped, operator-triggered emergency SCRAM request.
 
 Supported traffic:
 
@@ -23,6 +24,7 @@ Supported traffic:
 - `welcome` — Mainframe identity and accepted compatibility policy;
 - `heartbeat` — liveness without a full telemetry payload;
 - `telemetry` — normalized, serializable facility state;
+- `emergency_command` — authenticated collector-to-Guardian SCRAM request only;
 - `ui_offer` / `ui_request` — optional declarative GUI negotiation;
 - `acknowledgement` — accepted, rejected, or duplicate processing result;
 - `status` / `error` — human-readable operational state.
@@ -34,11 +36,13 @@ timestamp, deterministic message ID, and a safe payload.
 ## Safety boundary
 
 - Guardians retain local control authority and continue operating offline.
-- A Mainframe may observe facility telemetry without acquiring actuator access.
+- A Mainframe may observe facility telemetry without acquiring ordinary
+  actuator access. During a Guardian critical alarm, an operator may explicitly
+  request SCRAM; the Guardian executes that request locally and reports status.
 - Unknown contracts, kinds, roles, malformed identities, stale sequences,
   duplicates, forged message IDs, functions, cycles, and oversized/deep payloads
   fail validation.
-- Adding commands later requires a separate authorization design, explicit
+- Adding any command beyond SCRAM requires a separate authorization design, explicit
   capability negotiation, acknowledgement/readback, idempotency, and local
   Guardian refusal rules. It will not be implied by telemetry connectivity.
 
@@ -50,6 +54,8 @@ Guardian                         HELIOS Mainframe
    |<-- acknowledgement ---------------|
    |<-- welcome -----------------------|
    |--- telemetry / heartbeat -------->|
+   |<-- emergency SCRAM (operator) -----|
+   |--- status ------------------------>|
    |<-- ui_request (when required) ----|
    |--- ui_offer / status ------------>|
 ```
@@ -61,8 +67,9 @@ messages, returns a telemetry-only welcome, and persists facility registration
 metadata in `/helios/data/facilities.lua`. Live telemetry remains in memory so
 the one-second stream does not churn the computer disk.
 
-`helios facilities` lists registered facility identities. Remote commands are
-still deliberately absent from Alpha 1.
+`helios facilities` lists registered facility identities. General remote
+commands remain deliberately absent from Alpha 1; SCRAM is the sole emergency
+exception and does not grant gate-control authority.
 
 ## Collector authority and fallback
 

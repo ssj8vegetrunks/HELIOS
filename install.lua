@@ -606,6 +606,7 @@ local kinds = {
     welcome = true,
     heartbeat = true,
     telemetry = true,
+    emergency_command = true,
     ui_offer = true,
     ui_request = true,
     acknowledgement = true,
@@ -812,10 +813,91 @@ function protocol.describe()
         rednetProtocol = protocol.rednetProtocol,
         messageKinds = supported,
         remoteCommands = false,
+        emergencyCommands = true,
     }
 end
 
 return protocol
+]=],
+
+    ["core/gui.lua"] = [=[
+local gui = {}
+
+local function clamp(value, low, high)
+    value = tonumber(value) or 0
+    return math.max(low, math.min(high, value))
+end
+
+function gui.prepare()
+    term.setBackgroundColor(colors.black)
+    term.setTextColor(colors.white)
+    term.clear()
+    term.setCursorPos(1, 1)
+end
+
+function gui.text(x, y, value, foreground, background, width)
+    local screenWidth, screenHeight = term.getSize()
+    if y < 1 or y > screenHeight or x > screenWidth then return end
+    x = math.max(1, x)
+    local text = tostring(value or "")
+    width = math.max(0, math.min(tonumber(width) or #text, screenWidth - x + 1))
+    text = string.sub(text, 1, width)
+    if #text < width then text = text .. string.rep(" ", width - #text) end
+    term.setCursorPos(x, y)
+    term.setBackgroundColor(background or colors.black)
+    term.setTextColor(foreground or colors.white)
+    term.write(text)
+    term.setBackgroundColor(colors.black)
+    term.setTextColor(colors.white)
+end
+
+function gui.button(x, y, label, foreground, background)
+    local text = "[" .. tostring(label) .. "]"
+    gui.text(x, y, text, foreground, background)
+    return { x1 = x, x2 = x + #text - 1, y = y }
+end
+
+function gui.hit(button, x, y)
+    return button and x and y and y == button.y and x >= button.x1 and x <= button.x2
+end
+
+function gui.progress(x, y, width, percent, foreground, background)
+    width = math.max(1, math.floor(tonumber(width) or 1))
+    percent = clamp(percent, 0, 100)
+    local filled = math.floor(width * percent / 100 + 0.5)
+    gui.text(x, y, string.rep(" ", filled), colors.white, foreground or colors.lime)
+    gui.text(x + filled, y, string.rep(" ", width - filled), colors.white,
+        background or colors.gray)
+    return filled
+end
+
+function gui.rpmGauge(x, y, width, rpm)
+    width = math.max(10, math.floor(tonumber(width) or 10))
+    local zones = {
+        { limit = 800, colour = colors.orange },
+        { limit = 1000, colour = colors.lime },
+        { limit = 1700, colour = colors.orange },
+        { limit = 1900, colour = colors.lime },
+        { limit = 2100, colour = colors.red },
+    }
+    local previous, used = 0, 0
+    for index, zone in ipairs(zones) do
+        local segment
+        if index == #zones then
+            segment = width - used
+        else
+            segment = math.max(1, math.floor(width * (zone.limit - previous) / 2100))
+        end
+        gui.text(x + used, y, string.rep(" ", segment), colors.white, zone.colour)
+        used = used + segment
+        previous = zone.limit
+    end
+    local marker = math.floor(clamp(rpm, 0, 2100) / 2100 * (width - 1))
+    gui.text(x + marker, y, "^", colors.white, colors.black)
+    return marker
+end
+
+return gui
 ]=],
 
     ["core/gui_loader.lua"] = [=[
@@ -937,86 +1019,6 @@ function loader.install(baseUrl, coreVersion)
 end
 
 return loader
-]=],
-
-    ["core/gui.lua"] = [=[
-local gui = {}
-
-local function clamp(value, low, high)
-    value = tonumber(value) or 0
-    return math.max(low, math.min(high, value))
-end
-
-function gui.prepare()
-    term.setBackgroundColor(colors.black)
-    term.setTextColor(colors.white)
-    term.clear()
-    term.setCursorPos(1, 1)
-end
-
-function gui.text(x, y, value, foreground, background, width)
-    local screenWidth, screenHeight = term.getSize()
-    if y < 1 or y > screenHeight or x > screenWidth then return end
-    x = math.max(1, x)
-    local text = tostring(value or "")
-    width = math.max(0, math.min(tonumber(width) or #text, screenWidth - x + 1))
-    text = string.sub(text, 1, width)
-    if #text < width then text = text .. string.rep(" ", width - #text) end
-    term.setCursorPos(x, y)
-    term.setBackgroundColor(background or colors.black)
-    term.setTextColor(foreground or colors.white)
-    term.write(text)
-    term.setBackgroundColor(colors.black)
-    term.setTextColor(colors.white)
-end
-
-function gui.button(x, y, label, foreground, background)
-    local text = "[" .. tostring(label) .. "]"
-    gui.text(x, y, text, foreground, background)
-    return { x1 = x, x2 = x + #text - 1, y = y }
-end
-
-function gui.hit(button, x, y)
-    return button and x and y and y == button.y and x >= button.x1 and x <= button.x2
-end
-
-function gui.progress(x, y, width, percent, foreground, background)
-    width = math.max(1, math.floor(tonumber(width) or 1))
-    percent = clamp(percent, 0, 100)
-    local filled = math.floor(width * percent / 100 + 0.5)
-    gui.text(x, y, string.rep(" ", filled), colors.white, foreground or colors.lime)
-    gui.text(x + filled, y, string.rep(" ", width - filled), colors.white,
-        background or colors.gray)
-    return filled
-end
-
-function gui.rpmGauge(x, y, width, rpm)
-    width = math.max(10, math.floor(tonumber(width) or 10))
-    local zones = {
-        { limit = 800, colour = colors.orange },
-        { limit = 1000, colour = colors.lime },
-        { limit = 1700, colour = colors.orange },
-        { limit = 1900, colour = colors.lime },
-        { limit = 2100, colour = colors.red },
-    }
-    local previous, used = 0, 0
-    for index, zone in ipairs(zones) do
-        local segment
-        if index == #zones then
-            segment = width - used
-        else
-            segment = math.max(1, math.floor(width * (zone.limit - previous) / 2100))
-        end
-        gui.text(x + used, y, string.rep(" ", segment), colors.white, zone.colour)
-        used = used + segment
-        previous = zone.limit
-    end
-    local marker = math.floor(clamp(rpm, 0, 2100) / 2100 * (width - 1))
-    gui.text(x + marker, y, "^", colors.white, colors.black)
-    return marker
-end
-
-return gui
 ]=],
 
     ["core/mainframe_authority.lua"] = [=[
@@ -1521,109 +1523,6 @@ end
 return formatter
 ]=],
 
-    ["core/ui_contract.lua"] = [=[
-local contract = {}
-
-contract.name = "helios.ui"
-contract.version = 1
-
-local commands = {
-    ["navigate"] = { authority = "local", confirmation = false },
-    ["alarm.silence"] = { authority = "operator", confirmation = false },
-    ["control.set_authority"] = { authority = "operator", confirmation = true },
-    ["reactor.set_active"] = { authority = "manual", confirmation = false },
-    ["reactor.adjust_rods"] = { authority = "manual", confirmation = false },
-    ["turbine.set_active"] = { authority = "manual", confirmation = false },
-    ["turbine.adjust_flow"] = { authority = "manual", confirmation = false },
-}
-
-local function copySafe(value, seen)
-    local kind = type(value)
-    if kind == "nil" or kind == "boolean" or kind == "number" or kind == "string" then
-        return value
-    end
-    if kind ~= "table" then return nil end
-    seen = seen or {}
-    if seen[value] then return nil end
-    seen[value] = true
-    local result = {}
-    for key, item in pairs(value) do
-        local safeKey = copySafe(key, seen)
-        local safeValue = copySafe(item, seen)
-        if safeKey ~= nil and safeValue ~= nil then result[safeKey] = safeValue end
-    end
-    seen[value] = nil
-    return result
-end
-
-function contract.describe()
-    return {
-        name = contract.name,
-        version = contract.version,
-        commands = copySafe(commands),
-        guarantees = {
-            telemetryOnly = true,
-            noHardwareHandles = true,
-            guardedCommandDispatch = true,
-            textFallback = true,
-        },
-    }
-end
-
-function contract.attach(snapshot)
-    local safe = copySafe(snapshot or {})
-    safe.uiContract = contract.describe()
-    return safe
-end
-
-function contract.validateCommand(envelope)
-    if type(envelope) ~= "table" then return nil, "Command envelope must be a table" end
-    local name = tostring(envelope.name or "")
-    local descriptor = commands[name]
-    if not descriptor then return nil, "Unsupported UI command: " .. name end
-    if envelope.target ~= nil and type(envelope.target) ~= "string" then
-        return nil, "Command target must be a string"
-    end
-    if envelope.arguments ~= nil and type(envelope.arguments) ~= "table" then
-        return nil, "Command arguments must be a table"
-    end
-    return {
-        name = name,
-        target = envelope.target,
-        arguments = copySafe(envelope.arguments or {}),
-        confirmed = envelope.confirmed == true,
-        descriptor = copySafe(descriptor),
-    }
-end
-
-function contract.authorize(command, context)
-    context = context or {}
-    local authority = command.descriptor.authority
-    if authority == "local" then return true end
-    if context.remote == true then return false, "Remote UI is read-only" end
-    if context.idConflict == true then return false, "Computer ID conflict blocks commands" end
-    if authority == "manual" and context.controlMode ~= "manual" then
-        return false, "Manual authority is required"
-    end
-    if command.descriptor.confirmation and command.confirmed ~= true then
-        return false, "Operator confirmation is required"
-    end
-    return true
-end
-
-function contract.dispatch(envelope, context, handlers)
-    local command, validationError = contract.validateCommand(envelope)
-    if not command then return false, validationError end
-    local authorized, authorizationError = contract.authorize(command, context)
-    if not authorized then return false, authorizationError end
-    local handler = type(handlers) == "table" and handlers[command.name] or nil
-    if type(handler) ~= "function" then return false, "No guarded handler is registered" end
-    return handler(command.target, command.arguments, command)
-end
-
-return contract
-]=],
-
     ["core/ui.lua"] = [=[
 local ui = {}
 -- @section UI STATE AND INPUT
@@ -1772,6 +1671,109 @@ function ui.waitForExit(render)
 end
 
 return ui
+]=],
+
+    ["core/ui_contract.lua"] = [=[
+local contract = {}
+
+contract.name = "helios.ui"
+contract.version = 1
+
+local commands = {
+    ["navigate"] = { authority = "local", confirmation = false },
+    ["alarm.silence"] = { authority = "operator", confirmation = false },
+    ["control.set_authority"] = { authority = "operator", confirmation = true },
+    ["reactor.set_active"] = { authority = "manual", confirmation = false },
+    ["reactor.adjust_rods"] = { authority = "manual", confirmation = false },
+    ["turbine.set_active"] = { authority = "manual", confirmation = false },
+    ["turbine.adjust_flow"] = { authority = "manual", confirmation = false },
+}
+
+local function copySafe(value, seen)
+    local kind = type(value)
+    if kind == "nil" or kind == "boolean" or kind == "number" or kind == "string" then
+        return value
+    end
+    if kind ~= "table" then return nil end
+    seen = seen or {}
+    if seen[value] then return nil end
+    seen[value] = true
+    local result = {}
+    for key, item in pairs(value) do
+        local safeKey = copySafe(key, seen)
+        local safeValue = copySafe(item, seen)
+        if safeKey ~= nil and safeValue ~= nil then result[safeKey] = safeValue end
+    end
+    seen[value] = nil
+    return result
+end
+
+function contract.describe()
+    return {
+        name = contract.name,
+        version = contract.version,
+        commands = copySafe(commands),
+        guarantees = {
+            telemetryOnly = true,
+            noHardwareHandles = true,
+            guardedCommandDispatch = true,
+            textFallback = true,
+        },
+    }
+end
+
+function contract.attach(snapshot)
+    local safe = copySafe(snapshot or {})
+    safe.uiContract = contract.describe()
+    return safe
+end
+
+function contract.validateCommand(envelope)
+    if type(envelope) ~= "table" then return nil, "Command envelope must be a table" end
+    local name = tostring(envelope.name or "")
+    local descriptor = commands[name]
+    if not descriptor then return nil, "Unsupported UI command: " .. name end
+    if envelope.target ~= nil and type(envelope.target) ~= "string" then
+        return nil, "Command target must be a string"
+    end
+    if envelope.arguments ~= nil and type(envelope.arguments) ~= "table" then
+        return nil, "Command arguments must be a table"
+    end
+    return {
+        name = name,
+        target = envelope.target,
+        arguments = copySafe(envelope.arguments or {}),
+        confirmed = envelope.confirmed == true,
+        descriptor = copySafe(descriptor),
+    }
+end
+
+function contract.authorize(command, context)
+    context = context or {}
+    local authority = command.descriptor.authority
+    if authority == "local" then return true end
+    if context.remote == true then return false, "Remote UI is read-only" end
+    if context.idConflict == true then return false, "Computer ID conflict blocks commands" end
+    if authority == "manual" and context.controlMode ~= "manual" then
+        return false, "Manual authority is required"
+    end
+    if command.descriptor.confirmation and command.confirmed ~= true then
+        return false, "Operator confirmation is required"
+    end
+    return true
+end
+
+function contract.dispatch(envelope, context, handlers)
+    local command, validationError = contract.validateCommand(envelope)
+    if not command then return false, validationError end
+    local authorized, authorizationError = contract.authorize(command, context)
+    if not authorized then return false, authorizationError end
+    local handler = type(handlers) == "table" and handlers[command.name] or nil
+    if type(handler) ~= "function" then return false, "No guarded handler is registered" end
+    return handler(command.target, command.arguments, command)
+end
+
+return contract
 ]=],
 
     ["draconic/guardian.lua"] = [=[
@@ -2004,6 +2006,10 @@ function renderer.render(snapshot, state, services)
     x = buttons.turbines.x2 + 2
     buttons.power = gui.button(x, 4, "POWER", colors.yellow, state.page == "power" and colors.gray or colors.black)
     buttons.advanced = gui.button(1, height, "ADVANCED", colors.white, colors.gray)
+    if services.allowEmergency and alarm and alarm.facilityNodeId then
+        buttons.scram = gui.button(math.max(12, width - 8), height,
+            "SCRAM", colors.white, colors.red)
+    end
     local allReactors = displayedReactors(snapshot)
 
     if state.page == "home" then
@@ -2125,6 +2131,7 @@ end
 
 function renderer.handle(state, buttons, event, a, b, c, services)
     local x, y = services.eventPoint(event, a, b, c)
+    if services.hit(buttons.scram, x, y) then return "scram" end
     if event == "key" and a == keys.a or services.hit(buttons.advanced, x, y) then return "advanced" end
     if event == "key" and a == keys.v then state.page = "reactors"
     elseif event == "key" and a == keys.g then state.page = "turbines"
@@ -2480,6 +2487,7 @@ function mainframe.run(config)
     local conditionSamples = {}
     local silenceButton
     local alarmButton
+    local scramButton
     local modemCount = network.openAll()
     local terminals = network.loadPeers()
     local missingDevices = {}
@@ -2774,17 +2782,23 @@ function mainframe.run(config)
         local function alarmName(name)
             return (config.deviceAliases and config.deviceAliases[name]) or name
         end
-        local function add(level, key, message)
+        local function add(level, key, message, metadata)
             activeKeys[key] = true
             conditionSamples[key] = (conditionSamples[key] or 0) + 1
             if conditionSamples[key] >= config.alarms.confirmSamples then
-                candidates[#candidates + 1] = { level = level, key = key, message = message }
+                candidates[#candidates + 1] = {
+                    level = level, key = key, message = message,
+                    facilityNodeId = metadata and metadata.facilityNodeId or nil,
+                }
             end
         end
-        local function addConfirmed(level, key, message)
+        local function addConfirmed(level, key, message, metadata)
             activeKeys[key] = true
             conditionSamples[key] = config.alarms.confirmSamples
-            candidates[#candidates + 1] = { level = level, key = key, message = message }
+            candidates[#candidates + 1] = {
+                level = level, key = key, message = message,
+                facilityNodeId = metadata and metadata.facilityNodeId or nil,
+            }
         end
 
         for _, reactor in ipairs(reactors) do
@@ -2829,6 +2843,20 @@ function mainframe.run(config)
         for _, storage in ipairs(storages) do
             if storage.error and not maintenance then
                 add(2, storage.name .. ":telemetry", alarmName(storage.name) .. " TELEMETRY LOST")
+            end
+        end
+        local facilityNow = network.now()
+        for nodeId, facility in pairs(facilities) do
+            local telemetry = facility.telemetry
+            local age = facilityNow - (tonumber(facility.lastSeen) or 0)
+            if type(telemetry) == "table" and age <= 7 and
+               tonumber(telemetry.alarmLevel) then
+                local level = math.max(1, math.min(3, tonumber(telemetry.alarmLevel)))
+                addConfirmed(level, nodeId .. ":" ..
+                    tostring(telemetry.alarmCode or "facility-alarm"),
+                    tostring(telemetry.alarmMessage or
+                        (alarmName(nodeId) .. " FACILITY ALARM")),
+                    { facilityNodeId = nodeId })
             end
         end
         if not maintenance then
@@ -3008,6 +3036,9 @@ function mainframe.run(config)
                     fieldGate = telemetry.fieldGate,
                     exportGate = telemetry.exportGate,
                     guardianMessage = telemetry.guardianMessage,
+                    alarmLevel = telemetry.alarmLevel,
+                    alarmCode = telemetry.alarmCode,
+                    alarmMessage = telemetry.alarmMessage,
                     localAuthority = telemetry.localAuthority,
                     commissioned = telemetry.commissioned,
                     ratedOutput = telemetry.ratedOutput,
@@ -3083,6 +3114,17 @@ function mainframe.run(config)
             return network.sendOn(facilityProtocol.rednetProtocol, target, outgoing)
         end
         return false
+    end
+
+    local function scramFacility(nodeId)
+        local facility = facilities[nodeId]
+        if not facility or not facility.id then return false end
+        return sendFacility("emergency_command", facility.id, {
+            siteId = facilitySiteId,
+            targetNodeId = nodeId,
+            action = "scram",
+            reason = "operator requested emergency shutdown from HELIOS",
+        })
     end
 
     local function handleFacility(sender, message)
@@ -3374,10 +3416,17 @@ function mainframe.run(config)
             alarmButton = ui.inlineButton("ALARM", alarmColour())
             write(" ")
             silenceButton = ui.inlineButton("SILENCE", colors.gray)
+            if currentAlarm.facilityNodeId then
+                write(" ")
+                scramButton = ui.inlineButton("SCRAM", colors.red)
+            else
+                scramButton = nil
+            end
             print("")
         else
             alarmButton = nil
             silenceButton = nil
+            scramButton = nil
             ui.status("Alarms", config.alarms.enabled and "CLEAR" or "DISABLED",
                 config.alarms.enabled and colors.lime or colors.gray)
         end
@@ -4886,6 +4935,10 @@ function mainframe.run(config)
                 page == "storage" and colors.gray or colors.black)
             buttons.advanced = gui.button(1, select(2, term.getSize()), "ADVANCED",
                 colors.white, colors.gray)
+            if currentAlarm and currentAlarm.facilityNodeId then
+                buttons.scram = gui.button(12, select(2, term.getSize()), "SCRAM",
+                    colors.white, colors.red)
+            end
         end
 
         local function overview()
@@ -5085,7 +5138,7 @@ function mainframe.run(config)
                 draw()
                 display.useMonitors()
                 local ok, rendered = pcall(customRenderer.render, snapshotFor("all"), customState, {
-                    gui = gui, powerFormat = powerFormat,
+                    gui = gui, powerFormat = powerFormat, allowEmergency = true,
                 })
                 if ok then customButtons = rendered or {} else customRenderer = nil end
                 display.useNative()
@@ -5101,6 +5154,9 @@ function mainframe.run(config)
                     event, value, message, protocol, { eventPoint = ui.eventPoint, hit = gui.hit })
                 if not handled then customRenderer = nil
                 elseif action == "advanced" then display.useMirrored(); return "advanced" end
+                if action == "scram" and currentAlarm and currentAlarm.facilityNodeId then
+                    scramFacility(currentAlarm.facilityNodeId)
+                end
                 if event == "monitor_touch" then touchX, touchY = nil, nil end
             end
             if event == "key" and value == keys.q then display.useMirrored(); return "quit"
@@ -5113,6 +5169,9 @@ function mainframe.run(config)
             elseif gui.hit(buttons.turbines, touchX, touchY) then page = "turbines"
             elseif gui.hit(buttons.storage, touchX, touchY) then page = "storage"
             elseif gui.hit(buttons.advanced, touchX, touchY) then display.useMirrored(); return "advanced"
+            elseif gui.hit(buttons.scram, touchX, touchY) and
+                   currentAlarm and currentAlarm.facilityNodeId then
+                scramFacility(currentAlarm.facilityNodeId)
             elseif gui.hit(buttons.keepControl, touchX, touchY) then
                 selectAuthority("control")
             elseif gui.hit(buttons.monitorOnly, touchX, touchY) then
@@ -5234,6 +5293,9 @@ function mainframe.run(config)
             local touchX, touchY = x, y
             if alarmButton and ui.hit(alarmButton, touchX, touchY) then
                 openAlarmLocation()
+            elseif scramButton and ui.hit(scramButton, touchX, touchY) and
+                   currentAlarm and currentAlarm.facilityNodeId then
+                scramFacility(currentAlarm.facilityNodeId)
             elseif silenceButton and ui.hit(silenceButton, touchX, touchY) then
                 silenceCurrentAlarm()
             elseif ui.hit(dashboardButtons.reactors, touchX, touchY) then openFacility("reactors")
@@ -8605,6 +8667,23 @@ local function ensureStarted(b,c,status,reason,fieldTarget)
   return true
 end
 local function pct(a,b) if tonumber(a) and tonumber(b) and tonumber(b)>0 then return tonumber(a)/tonumber(b)*100 end end
+local function imminentMeltdown(r)
+  local status=string.lower(tostring(r and r.status or "unknown"))
+  local atRisk=status=="online" or status=="running" or status=="stopping" or status=="cooling"
+  if not atRisk then return false end
+  local field=pct(r.fieldStrength,r.maxFieldStrength)
+  local temperature=tonumber(r.temperature)
+  local fuelRemaining=pct((tonumber(r.maxFuelConversion) or 0)-
+    (tonumber(r.fuelConversion) or 0),r.maxFuelConversion)
+  local reasons={}
+  -- These are announcement thresholds only. They never alter gates, modes, or
+  -- reactor state. Unrestricted remains genuinely unrestricted.
+  if field and field<=25 then reasons[#reasons+1]=string.format("field %.1f%%",field) end
+  if temperature and temperature>=7000 then reasons[#reasons+1]=string.format("core %.0f C",temperature) end
+  if fuelRemaining and fuelRemaining<=12 then reasons[#reasons+1]=string.format("fuel %.1f%%",fuelRemaining) end
+  if #reasons==0 then return false end
+  return true,"IMMINENT DRACONIC REACTOR MELTDOWN: "..table.concat(reasons,", ")
+end
 local function clamp(x) return math.max(0,math.min(1,tonumber(x) or 0)) end
 local function fmt(n)
   n=tonumber(n);if not n then return "N/A" end;local u={"","k","M","B","T","Qa"};local i=1
@@ -8677,7 +8756,10 @@ local function supervise(b,d,c)
     -- Containment must win in every state, not only when DE calls it running.
     if field<=FIELD_EMERGENCY then return stop("field below "..FIELD_EMERGENCY.."%",true) end
     if temp>MAX_TEMPERATURE then return stop("temperature above "..MAX_TEMPERATURE.." C") end
-  elseif fuel<=MINIMUM_FUEL or field<=FIELD_EMERGENCY or temp>MAX_TEMPERATURE then c.message="UNRESTRICTED WARNING: a containment/fuel/temperature limit is exceeded" end
+  else
+    local imminent,warning=imminentMeltdown(r)
+    if imminent then c.message="UNRESTRICTED WARNING: "..warning end
+  end
   if status=="charging" then gate(b.input,injectorCap);c.message="Charging containment";return end
   if c.initialRequested then
     if status=="offline" or status=="stopping" then
@@ -9030,6 +9112,7 @@ local function facilityWorker()
   end
   local function snapshot()
     local r=data and data.reactor or {}
+    local imminent,alarmMessage=imminentMeltdown(r)
     return {
       siteId=facilitySiteId,facilityType="draconic_reactor",state=tostring(r.status or "unknown"),
       generationRate=tonumber(r.generationRate),temperature=tonumber(r.temperature),
@@ -9040,6 +9123,9 @@ local function facilityWorker()
       mode=controls.mode,request=controls.request,commissioned=controls.commissioned==true,
       ratedOutput=tonumber(controls.rated),localAuthority=true,remoteCommands=false,
       guardianMessage=tostring(controls.message or ""),telemetryStale=controls.telemetryStale==true,
+      alarmLevel=imminent and 3 or nil,
+      alarmCode=imminent and "draconic_meltdown_imminent" or nil,
+      alarmMessage=alarmMessage,
     }
   end
   local function hello(target)
@@ -9083,6 +9169,17 @@ local function facilityWorker()
         elseif message.kind=="acknowledgement" and a==facilityCollectorId then
           facilityCollectorLeaseUntil=facilityNetwork.now()+lease
           facilityConnected=true;facilityLastWelcome=facilityNetwork.now()
+        elseif message.kind=="emergency_command" and a==facilityCollectorId and
+               (role=="mainframe" or role=="overseer") and
+               message.payload.targetNodeId==facilityIdentity.nodeId and
+               message.payload.action=="scram" then
+          actions={"SAFE SHUTDOWN"}
+          controls.message="REMOTE SCRAM REQUEST ACCEPTED FROM "..string.upper(role)
+          send("status",{
+            siteId=facilitySiteId,commandMessageId=message.messageId,
+            action="scram",status="accepted",
+          },a)
+          requestDraw()
         end
       end
     elseif event=="peripheral" or event=="peripheral_detach" then facilityNetwork.openAll() end

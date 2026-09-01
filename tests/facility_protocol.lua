@@ -59,6 +59,14 @@ assert(unsafe and unsafe.payload.reactor == nil and unsafeReason == nil,
 local command, commandReason = protocol.make("command", mainframe, 2, {}, 1002)
 assert(command == nil and commandReason, "facility v1 must expose no remote command kind")
 
+local scram = assert(protocol.make("emergency_command", mainframe, 3, {
+    siteId = "default",
+    targetNodeId = guardian.nodeId,
+    action = "scram",
+}, 1002))
+assert(protocol.validate(scram, "emergency_command"),
+    "facility v1 must permit its narrowly scoped emergency command")
+
 local flood = {}
 for index = 1, 513 do flood[index] = index end
 local flooded, floodReason = protocol.make("telemetry", guardian, 2, flood, 1002)
@@ -76,7 +84,8 @@ forged.messageId = "forged"
 assert(protocol.validate(forged) == nil, "forged message IDs must be rejected")
 
 local description = protocol.describe()
-assert(description.remoteCommands == false and description.rednetProtocol == "helios.facility.v1",
-    "contract must advertise a read-only first release")
+assert(description.remoteCommands == false and description.emergencyCommands == true and
+    description.rednetProtocol == "helios.facility.v1",
+    "contract must advertise emergency commands without general remote control")
 
 print("facility protocol tests passed")
