@@ -8742,6 +8742,7 @@ end
 local function supervise(b,d,c)
   local r=d.reactor;local status=string.lower(tostring(r.status or "unknown"));local field=pct(r.fieldStrength,r.maxFieldStrength) or 0
   local live=status=="online" or status=="running"
+  local containmentRequired=live or status=="stopping" or status=="cooling"
   local fuel=pct((tonumber(r.maxFuelConversion) or 0)-(tonumber(r.fuelConversion) or 0),r.maxFuelConversion) or 0;local temp=tonumber(r.temperature) or math.huge;local free=c.mode=="UNRESTRICTED"
   local injectorCap=positive(c.injectorBaseline) or 0
   local function stop(reason,charge) gate(b.output,0);reactor(b.reactor,"stopReactor");if charge then reactor(b.reactor,"chargeReactor");gate(b.input,injectorCap) end;c.message="SAFETY INTERLOCK: "..reason;return true end
@@ -8752,9 +8753,13 @@ local function supervise(b,d,c)
   end
   if not free then
     if fuel<=MINIMUM_FUEL then return stop("fuel reserve below "..MINIMUM_FUEL.."%") end
-    -- A reactor can still be draining its field while reporting "cooling".
-    -- Containment must win in every state, not only when DE calls it running.
-    if field<=FIELD_EMERGENCY then return stop("field below "..FIELD_EMERGENCY.."%",true) end
+    -- WARMING_UP legitimately reports zero containment before activation has
+    -- completed. Applying the live-reactor interlock there creates a loop of
+    -- stop -> charge -> activate -> stop. Once the reactor is live (or is
+    -- stopping/cooling after being live), containment must still win.
+    if containmentRequired and field<=FIELD_EMERGENCY then
+      return stop("field below "..FIELD_EMERGENCY.."%",true)
+    end
     if temp>MAX_TEMPERATURE then return stop("temperature above "..MAX_TEMPERATURE.." C") end
   else
     local imminent,warning=imminentMeltdown(r)
