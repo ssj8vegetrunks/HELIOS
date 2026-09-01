@@ -8471,7 +8471,7 @@ end
 ]=],
 
     ["draconic/controller.lua"] = [=[
--- HELIOS Draconic Guardian v1.1.0-alpha.1
+-- HELIOS Draconic Guardian v1.1.0-alpha.2
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -8491,7 +8491,7 @@ local COMMISSION_SHORTFALL_SAMPLES = 20
 local COMMISSION_SETTLE_SAMPLES = 120
 local FRACTION = { OFF = 0, MIN = .25, MED = .50, MAX = 1 }
 local PRESET_RAMP_STEP, MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 50000, 100000, 1000000
-local GUARDIAN_VERSION = "1.1.0-alpha.1"
+local GUARDIAN_VERSION = "1.1.0-alpha.2"
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
 local facilityNetwork,facilityProtocol,facilityIdentity,facilitySequence
@@ -8751,6 +8751,14 @@ local function supervise(b,d,c)
     reactor(b.reactor,"stopReactor")
     return
   end
+  -- A pending start owns every pre-online transition. In particular, STOPPING
+  -- may be the tail of an earlier shutdown and WARMING_UP has no containment
+  -- yet. Let the shared charge/activate state machine finish before applying
+  -- interlocks which are intended for a reactor that has already been live.
+  if c.initialRequested and not live then
+    ensureStarted(b,c,status,"Initial start",injectorCap)
+    return
+  end
   if not free then
     if fuel<=MINIMUM_FUEL then return stop("fuel reserve below "..MINIMUM_FUEL.."%") end
     -- WARMING_UP legitimately reports zero containment before activation has
@@ -8767,19 +8775,6 @@ local function supervise(b,d,c)
   end
   if status=="charging" then gate(b.input,injectorCap);c.message="Charging containment";return end
   if c.initialRequested then
-    if status=="offline" or status=="stopping" then
-      reactor(b.reactor,"chargeReactor");gate(b.input,injectorCap);c.message="Initial start: charging containment"
-      return
-    end
-    if not c.startActivated and (status=="charged" or status=="warming_up" or status=="warning_up") then
-      -- A warming-up reactor commonly reports zero field drain.  Never use
-      -- that transient value to reduce its stabilizer supply: doing so leaves
-      -- the reactor at 1 RF/t and prevents it from ever reaching ONLINE.
-      -- Keep containment fully supplied until live telemetry is available.
-      reactor(b.reactor,"activateReactor");gate(b.input,injectorCap)
-      c.startActivated=true;c.message="Initial start: activation sent; waiting for ONLINE"
-      return
-    end
     if live then c.initialRequested=false;c.startActivated=false;c.message="Initial start complete; reactor is live" end
   end
   if c.recovery then
