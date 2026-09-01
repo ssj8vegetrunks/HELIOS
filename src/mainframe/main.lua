@@ -1701,6 +1701,13 @@ function mainframe.run(config)
         local notice
         local navigationButtons = {}
 
+        local function displayedReactors()
+            local result = {}
+            for _, reactor in ipairs(reactors) do result[#result + 1] = reactor end
+            for _, reactor in ipairs(facilityReactorViews()) do result[#result + 1] = reactor end
+            return result
+        end
+
         local function formatValue(value, suffix)
             if value == nil then return "N/A" end
             return ("%.1f%s"):format(value, suffix or "")
@@ -1950,16 +1957,56 @@ function mainframe.run(config)
 
         local function draw()
             navigationButtons = facilityHeader("REACTORS", "Live telemetry and steam governor")
-            if #reactors == 0 then
+            local reactorList = displayedReactors()
+            if #reactorList == 0 then
                 ui.status("Status", "NO REACTORS FOUND", colors.orange)
                 print("")
                 previousButton, nextButton, viewSilenceButton, calibrationButton = nil, nil, nil, nil
                 backButton = ui.button("BACK", colors.cyan)
                 return
             end
-            if selected > #reactors then selected = #reactors end
-            local reactor = reactors[selected]
-            ui.status("Reactor", ("%d/%d %s"):format(selected, #reactors, deviceName(reactor.name)), colors.cyan)
+            if selected > #reactorList then selected = #reactorList end
+            local reactor = reactorList[selected]
+            ui.status("Reactor", ("%d/%d %s"):format(selected, #reactorList, deviceName(reactor.name)), colors.cyan)
+            if reactor.facility then
+                local function ratio(value, maximum)
+                    value, maximum = tonumber(value), tonumber(maximum)
+                    if not value or not maximum or maximum <= 0 then return nil end
+                    return math.max(0, math.min(100, value / maximum * 100))
+                end
+                ui.status("Type", "DRACONIC / REMOTE GUARDIAN", colors.magenta)
+                ui.status("Authority", "READ-ONLY / LOCAL GUARDIAN", colors.lightGray)
+                ui.status("Link", reactor.online and "ONLINE" or "STALE",
+                    reactor.online and colors.lime or colors.orange)
+                ui.status("State", string.upper(tostring(reactor.state or "UNKNOWN")), colors.white)
+                ui.status("Generation", powerFormat.power(reactor.generationRate,
+                    config.power, true), colors.cyan)
+                ui.status("Core", formatValue(reactor.temperature, " C"), colors.orange)
+                ui.status("Field", formatValue(ratio(reactor.fieldStrength,
+                    reactor.maxFieldStrength), "%"))
+                ui.status("Saturation", formatValue(ratio(reactor.energySaturation,
+                    reactor.maxEnergySaturation), "%"))
+                ui.status("Fuel conversion", formatValue(ratio(reactor.fuelConversion,
+                    reactor.maxFuelConversion), "%"))
+                ui.status("Field gate", powerFormat.power(reactor.fieldGate,
+                    config.power, true), colors.lime)
+                ui.status("Export gate", powerFormat.power(reactor.exportGate,
+                    config.power, true), colors.lime)
+                ui.status("Guardian", tostring(reactor.mode or "UNKNOWN") .. " / " ..
+                    tostring(reactor.request or "UNKNOWN"), colors.orange)
+                ui.status("Version", tostring(reactor.softwareVersion or "UNKNOWN"), colors.lightGray)
+                print("")
+                previousButton = ui.inlineButton("< PREVIOUS", colors.cyan)
+                write(" ")
+                nextButton = ui.inlineButton("NEXT >", colors.cyan)
+                write(" ")
+                backButton = ui.inlineButton("BACK", colors.cyan)
+                print("")
+                calibrationButton = nil
+                viewSilenceButton = nil
+                if notice then ui.status("Result", notice, colors.orange) end
+                return
+            end
             ui.status("Mode", string.upper(reactor.mode or "unknown"), reactor.mode == "unknown" and colors.orange or colors.lime)
             if reactor.error then
                 ui.status("Telemetry", reactor.error, colors.red)
@@ -2011,7 +2058,7 @@ function mainframe.run(config)
             write(" ")
             backButton = ui.inlineButton("BACK", colors.cyan)
             print("")
-            local selectedReactor = reactors[selected]
+            local selectedReactor = reactorList[selected]
             calibrationButton = selectedReactor and ui.button("CALIBRATION STATUS",
                 selectedReactor.mode == "steam" and colors.lime or colors.gray) or nil
             if notice then ui.status("Result", notice, colors.orange) end
@@ -2028,10 +2075,10 @@ function mainframe.run(config)
                 return "turbines"
             elseif event == "key" and value == keys.e then
                 return "storage"
-            elseif event == "key" and value == keys.left and #reactors > 0 then
-                selected = ((selected - 2) % #reactors) + 1
-            elseif event == "key" and value == keys.right and #reactors > 0 then
-                selected = (selected % #reactors) + 1
+            elseif event == "key" and value == keys.left and #displayedReactors() > 0 then
+                selected = ((selected - 2) % #displayedReactors()) + 1
+            elseif event == "key" and value == keys.right and #displayedReactors() > 0 then
+                selected = (selected % #displayedReactors()) + 1
             elseif (event == "mouse_click" or event == "monitor_touch") and ui.hit(viewSilenceButton, x, y) then
                 silenceCurrentAlarm()
             elseif (event == "mouse_click" or event == "monitor_touch") and
@@ -2043,14 +2090,14 @@ function mainframe.run(config)
             elseif (event == "mouse_click" or event == "monitor_touch") and
                    ui.hit(navigationButtons.storage, x, y) then
                 return "storage"
-            elseif (event == "mouse_click" or event == "monitor_touch") and ui.hit(previousButton, x, y) and #reactors > 0 then
-                selected = ((selected - 2) % #reactors) + 1
-            elseif (event == "mouse_click" or event == "monitor_touch") and ui.hit(nextButton, x, y) and #reactors > 0 then
-                selected = (selected % #reactors) + 1
+            elseif (event == "mouse_click" or event == "monitor_touch") and ui.hit(previousButton, x, y) and #displayedReactors() > 0 then
+                selected = ((selected - 2) % #displayedReactors()) + 1
+            elseif (event == "mouse_click" or event == "monitor_touch") and ui.hit(nextButton, x, y) and #displayedReactors() > 0 then
+                selected = (selected % #displayedReactors()) + 1
             elseif (event == "mouse_click" or event == "monitor_touch") and ui.hit(backButton, x, y) then
                 return "dashboard"
             elseif (event == "mouse_click" or event == "monitor_touch") and
-                   ui.hit(calibrationButton, x, y) and #reactors > 0 then
+                   ui.hit(calibrationButton, x, y) and selected <= #reactors then
                 local reactor = reactors[selected]
                 local enabledHere = false
                 if reactor.mode == "steam" and not maintenance then
