@@ -8471,7 +8471,7 @@ end
 ]=],
 
     ["draconic/controller.lua"] = [=[
--- HELIOS Draconic Guardian v1.1.0-alpha.2
+-- HELIOS Draconic Guardian v1.1.0-alpha.3
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -8491,7 +8491,7 @@ local COMMISSION_SHORTFALL_SAMPLES = 20
 local COMMISSION_SETTLE_SAMPLES = 120
 local FRACTION = { OFF = 0, MIN = .25, MED = .50, MAX = 1 }
 local PRESET_RAMP_STEP, MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 50000, 100000, 1000000
-local GUARDIAN_VERSION = "1.1.0-alpha.2"
+local GUARDIAN_VERSION = "1.1.0-alpha.3"
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
 local facilityNetwork,facilityProtocol,facilityIdentity,facilitySequence
@@ -8645,12 +8645,12 @@ local function ensureStarted(b,c,status,reason,fieldTarget)
     c.message=reason..": charging containment"
     return true
   end
-  if status=="charging" then
+  if status=="charging" or status=="warming_up" or status=="warning_up" then
     c.startActivated=false
-    c.message=reason..": charging containment"
+    c.message=reason..": charging reactor; waiting for CHARGED"
     return true
   end
-  if status=="charged" or status=="warming_up" or status=="warning_up" then
+  if status=="charged" then
     if not c.startActivated then
       reactor(b.reactor,"activateReactor")
       c.startActivated=true
