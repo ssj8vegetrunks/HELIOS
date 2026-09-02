@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.1.0-alpha.8
+-- HELIOS Draconic Guardian v1.1.0-alpha.9
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -20,7 +20,7 @@ local FRACTION = { OFF = 0, MIN = .25, MED = .50, MAX = 1 }
 local PRESET_RAMP_STEP = 50000
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.1.0-alpha.8"
+local GUARDIAN_VERSION = "1.1.0-alpha.9"
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
 local facilityNetwork,facilityProtocol,facilityIdentity,facilitySequence
@@ -452,19 +452,19 @@ local function draw(t,b,d,page,c,bs)
     text(t,1,7,"FIELD GATE (injector): "..fmt(c.manualField or d.inputSet).." RF/t",colors.cyan)
     local twoColumn=w>=78 and h>=27
     if twoColumn then
-      local fieldSteps={{"FIELD -1M",1},{"FIELD -100k",9},{"FIELD -10k",19},{"FIELD -1k",28},{"FIELD +1k",1},{"FIELD +10k",9},{"FIELD +100k",18},{"FIELD +1M",28}}
+      local fieldSteps={{"FIELD -1k",1},{"FIELD -10k",9},{"FIELD -100k",18},{"FIELD -1M",28},{"FIELD +1k",1},{"FIELD +10k",9},{"FIELD +100k",18},{"FIELD +1M",28}}
       for index,item in ipairs(fieldSteps) do bs[#bs+1]=button(t,item[2],index<=4 and 9 or 11,string.sub(item[1],7),colors.cyan,1);bs[#bs].label=item[1] end
       text(t,1,14,"EXPORT GATE: "..fmt(exportTarget).." RF/t  "..(exportApplied and "APPLIED" or "PENDING"),exportApplied and colors.lime or colors.orange)
-      local exportSteps={{"EXPORT -1M",1},{"EXPORT -100k",9},{"EXPORT -10k",19},{"EXPORT -1k",28},{"EXPORT +1k",1},{"EXPORT +10k",9},{"EXPORT +100k",18},{"EXPORT +1M",28}}
+      local exportSteps={{"EXPORT -1k",1},{"EXPORT -10k",9},{"EXPORT -100k",18},{"EXPORT -1M",28},{"EXPORT +1k",1},{"EXPORT +10k",9},{"EXPORT +100k",18},{"EXPORT +1M",28}}
       for index,item in ipairs(exportSteps) do bs[#bs+1]=button(t,item[2],index<=4 and 16 or 18,string.sub(item[1],8),colors.cyan,1);bs[#bs].label=item[1] end
       bs[#bs+1]=button(t,1,20,"USE LIVE GATES",liveGatesSelected and colors.lime or colors.lightGray,1);bs[#bs+1]=button(t,24,20,"APPLY MANUAL",manualApplied and colors.lime or colors.orange,1)
       bs[#bs+1]=button(t,1,23,"SAVE AS OVERDRIVE PRESET",presetSaved and colors.lime or colors.red,1);bs[#bs+1]=button(t,40,23,"BACK",colors.lightGray,1)
       text(t,1,26,"Overdrive keeps this field setting and ramps only export to the saved target.",colors.lightGray)
     else
-      bs[#bs+1]=button(t,1,9,"FIELD -1M",colors.cyan,1);bs[#bs+1]=button(t,16,9,"FIELD -100k",colors.cyan,1);bs[#bs+1]=button(t,34,9,"FIELD -10k",colors.cyan,1);bs[#bs+1]=button(t,51,9,"FIELD -1k",colors.cyan,1)
+      bs[#bs+1]=button(t,1,9,"FIELD -1k",colors.cyan,1);bs[#bs+1]=button(t,16,9,"FIELD -10k",colors.cyan,1);bs[#bs+1]=button(t,33,9,"FIELD -100k",colors.cyan,1);bs[#bs+1]=button(t,51,9,"FIELD -1M",colors.cyan,1)
       bs[#bs+1]=button(t,1,11,"FIELD +1k",colors.cyan,1);bs[#bs+1]=button(t,16,11,"FIELD +10k",colors.cyan,1);bs[#bs+1]=button(t,33,11,"FIELD +100k",colors.cyan,1);bs[#bs+1]=button(t,51,11,"FIELD +1M",colors.cyan,1)
       text(t,1,12,"EXPORT GATE: "..fmt(exportTarget).." RF/t"..(exportApplied and "  APPLIED" or "  PENDING"),exportApplied and colors.lime or colors.orange)
-      bs[#bs+1]=button(t,1,14,"EXPORT -1M",colors.cyan,1);bs[#bs+1]=button(t,16,14,"EXPORT -100k",colors.cyan,1);bs[#bs+1]=button(t,34,14,"EXPORT -10k",colors.cyan,1);bs[#bs+1]=button(t,51,14,"EXPORT -1k",colors.cyan,1)
+      bs[#bs+1]=button(t,1,14,"EXPORT -1k",colors.cyan,1);bs[#bs+1]=button(t,16,14,"EXPORT -10k",colors.cyan,1);bs[#bs+1]=button(t,33,14,"EXPORT -100k",colors.cyan,1);bs[#bs+1]=button(t,51,14,"EXPORT -1M",colors.cyan,1)
       bs[#bs+1]=button(t,1,16,"EXPORT +1k",colors.cyan,1);bs[#bs+1]=button(t,16,16,"EXPORT +10k",colors.cyan,1);bs[#bs+1]=button(t,33,16,"EXPORT +100k",colors.cyan,1);bs[#bs+1]=button(t,51,16,"EXPORT +1M",colors.cyan,1)
       bs[#bs+1]=button(t,1,19,"USE LIVE GATES",liveGatesSelected and colors.lime or colors.lightGray,1);bs[#bs+1]=button(t,22,19,"APPLY MANUAL",manualApplied and colors.lime or colors.orange,1)
       bs[#bs+1]=button(t,1,22,"SAVE AS OVERDRIVE PRESET",presetSaved and colors.lime or colors.red,1);bs[#bs+1]=button(t,35,22,"BACK",colors.lightGray,1)
