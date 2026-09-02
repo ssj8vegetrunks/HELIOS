@@ -3451,10 +3451,12 @@ function mainframe.run(config)
         dashboardButtons.control = ui.inlineButton("CONTROL", colors.lime)
         write(" ")
         dashboardButtons.settings = ui.inlineButton("SETTINGS", colors.cyan)
+        write(" ")
+        dashboardButtons.graphical = ui.inlineButton("GUI", colors.lightGray)
         print("")
         term.setTextColor(colors.gray)
         term.setCursorPos(1, height)
-        write(string.sub("Keyboard: V/G/E/C/A/R/S | Q exit", 1, width))
+        write(string.sub("Keyboard: B GUI | V/G/E/C/A/R/S | Q exit", 1, width))
         term.setTextColor(colors.white)
     end
 
@@ -5303,6 +5305,7 @@ function mainframe.run(config)
             elseif ui.hit(dashboardButtons.storage, touchX, touchY) then openFacility("storage")
             elseif ui.hit(dashboardButtons.control, touchX, touchY) then controlView()
             elseif ui.hit(dashboardButtons.settings, touchX, touchY) then settings()
+            elseif ui.hit(dashboardButtons.graphical, touchX, touchY) then return "graphical"
             end
             render()
         elseif event == "rednet_message" then
