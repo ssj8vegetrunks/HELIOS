@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.1.0-alpha.7
+-- HELIOS Draconic Guardian v1.1.0-alpha.8
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -17,8 +17,10 @@ local COMMISSION_SHORTFALL_SAMPLES = 20
 -- ceiling, so do not score it as a failed sample.
 local COMMISSION_SETTLE_SAMPLES = 120
 local FRACTION = { OFF = 0, MIN = .25, MED = .50, MAX = 1 }
-local PRESET_RAMP_STEP, MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 50000, 100000, 1000000
-local GUARDIAN_VERSION = "1.1.0-alpha.7"
+local PRESET_RAMP_STEP = 50000
+local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
+local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
+local GUARDIAN_VERSION = "1.1.0-alpha.8"
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
 local facilityNetwork,facilityProtocol,facilityIdentity,facilitySequence
@@ -450,21 +452,23 @@ local function draw(t,b,d,page,c,bs)
     text(t,1,7,"FIELD GATE (injector): "..fmt(c.manualField or d.inputSet).." RF/t",colors.cyan)
     local twoColumn=w>=78 and h>=27
     if twoColumn then
-      bs[#bs+1]=button(t,1,9,"FIELD -1M",colors.cyan,1);bs[#bs+1]=button(t,20,9,"FIELD -100k",colors.cyan,1)
-      bs[#bs+1]=button(t,1,11,"FIELD +100k",colors.cyan,1);bs[#bs+1]=button(t,23,11,"FIELD +1M",colors.cyan,1)
+      local fieldSteps={{"FIELD -1M",1},{"FIELD -100k",9},{"FIELD -10k",19},{"FIELD -1k",28},{"FIELD +1k",1},{"FIELD +10k",9},{"FIELD +100k",18},{"FIELD +1M",28}}
+      for index,item in ipairs(fieldSteps) do bs[#bs+1]=button(t,item[2],index<=4 and 9 or 11,string.sub(item[1],7),colors.cyan,1);bs[#bs].label=item[1] end
       text(t,1,14,"EXPORT GATE: "..fmt(exportTarget).." RF/t  "..(exportApplied and "APPLIED" or "PENDING"),exportApplied and colors.lime or colors.orange)
-      bs[#bs+1]=button(t,1,16,"EXPORT -1M",colors.cyan,1);bs[#bs+1]=button(t,20,16,"EXPORT -100k",colors.cyan,1)
-      bs[#bs+1]=button(t,1,18,"EXPORT +100k",colors.cyan,1);bs[#bs+1]=button(t,23,18,"EXPORT +1M",colors.cyan,1)
+      local exportSteps={{"EXPORT -1M",1},{"EXPORT -100k",9},{"EXPORT -10k",19},{"EXPORT -1k",28},{"EXPORT +1k",1},{"EXPORT +10k",9},{"EXPORT +100k",18},{"EXPORT +1M",28}}
+      for index,item in ipairs(exportSteps) do bs[#bs+1]=button(t,item[2],index<=4 and 16 or 18,string.sub(item[1],8),colors.cyan,1);bs[#bs].label=item[1] end
       bs[#bs+1]=button(t,1,20,"USE LIVE GATES",liveGatesSelected and colors.lime or colors.lightGray,1);bs[#bs+1]=button(t,24,20,"APPLY MANUAL",manualApplied and colors.lime or colors.orange,1)
       bs[#bs+1]=button(t,1,23,"SAVE AS OVERDRIVE PRESET",presetSaved and colors.lime or colors.red,1);bs[#bs+1]=button(t,40,23,"BACK",colors.lightGray,1)
       text(t,1,26,"Overdrive keeps this field setting and ramps only export to the saved target.",colors.lightGray)
     else
-      bs[#bs+1]=button(t,1,9,"FIELD -1M",colors.cyan,1);bs[#bs+1]=button(t,16,9,"FIELD -100k",colors.cyan,1);bs[#bs+1]=button(t,34,9,"FIELD +100k",colors.cyan,1);bs[#bs+1]=button(t,53,9,"FIELD +1M",colors.cyan,1)
+      bs[#bs+1]=button(t,1,9,"FIELD -1M",colors.cyan,1);bs[#bs+1]=button(t,16,9,"FIELD -100k",colors.cyan,1);bs[#bs+1]=button(t,34,9,"FIELD -10k",colors.cyan,1);bs[#bs+1]=button(t,51,9,"FIELD -1k",colors.cyan,1)
+      bs[#bs+1]=button(t,1,11,"FIELD +1k",colors.cyan,1);bs[#bs+1]=button(t,16,11,"FIELD +10k",colors.cyan,1);bs[#bs+1]=button(t,33,11,"FIELD +100k",colors.cyan,1);bs[#bs+1]=button(t,51,11,"FIELD +1M",colors.cyan,1)
       text(t,1,12,"EXPORT GATE: "..fmt(exportTarget).." RF/t"..(exportApplied and "  APPLIED" or "  PENDING"),exportApplied and colors.lime or colors.orange)
-      bs[#bs+1]=button(t,1,14,"EXPORT -1M",colors.cyan,1);bs[#bs+1]=button(t,16,14,"EXPORT -100k",colors.cyan,1);bs[#bs+1]=button(t,34,14,"EXPORT +100k",colors.cyan,1);bs[#bs+1]=button(t,53,14,"EXPORT +1M",colors.cyan,1)
-      bs[#bs+1]=button(t,1,17,"USE LIVE GATES",liveGatesSelected and colors.lime or colors.lightGray,1);bs[#bs+1]=button(t,22,17,"APPLY MANUAL",manualApplied and colors.lime or colors.orange,1)
-      bs[#bs+1]=button(t,1,20,"SAVE AS OVERDRIVE PRESET",presetSaved and colors.lime or colors.red,1);bs[#bs+1]=button(t,35,20,"BACK",colors.lightGray,1)
-      text(t,1,23,"Overdrive keeps this field setting and ramps only export to the saved target.",colors.lightGray)
+      bs[#bs+1]=button(t,1,14,"EXPORT -1M",colors.cyan,1);bs[#bs+1]=button(t,16,14,"EXPORT -100k",colors.cyan,1);bs[#bs+1]=button(t,34,14,"EXPORT -10k",colors.cyan,1);bs[#bs+1]=button(t,51,14,"EXPORT -1k",colors.cyan,1)
+      bs[#bs+1]=button(t,1,16,"EXPORT +1k",colors.cyan,1);bs[#bs+1]=button(t,16,16,"EXPORT +10k",colors.cyan,1);bs[#bs+1]=button(t,33,16,"EXPORT +100k",colors.cyan,1);bs[#bs+1]=button(t,51,16,"EXPORT +1M",colors.cyan,1)
+      bs[#bs+1]=button(t,1,19,"USE LIVE GATES",liveGatesSelected and colors.lime or colors.lightGray,1);bs[#bs+1]=button(t,22,19,"APPLY MANUAL",manualApplied and colors.lime or colors.orange,1)
+      bs[#bs+1]=button(t,1,22,"SAVE AS OVERDRIVE PRESET",presetSaved and colors.lime or colors.red,1);bs[#bs+1]=button(t,35,22,"BACK",colors.lightGray,1)
+      text(t,1,25,"Overdrive keeps this field setting and ramps only export to the saved target.",colors.lightGray)
     end
     local tx,ty=1,25
     if twoColumn then tx,ty=49,6 end
@@ -548,12 +552,13 @@ local function drawComputer(t,d,c)
   line(9,"a start | s stop | c calibrate | r automatic")
   line(10,"m assisted | u arm/confirm unrestricted")
   line(11,"0 OFF | 1 MIN | 2 MED | 3 MAX | 4 OVERDRIVE")
-  line(12,"Field: f/F -/+100k | v/V -/+1M")
-  line(13,"Export: e/E -/+100k | x/X -/+1M")
-  line(14,"p apply manual | o save Overdrive | q quit")
-  line(16,"Manual field "..fmt(c.manualField or 0).."  export "..fmt(c.manualExport or 0),colors.cyan)
-  line(17,"Guardian: "..tostring(c.message),colors.lightGray)
-  line(18,"HELIOS link: "..(facilityConnected and "ONLINE" or (facilityNetwork and "WAITING" or "LOCAL ONLY")),facilityConnected and colors.lime or colors.gray)
+  line(12,"Field: j/J 1k | k/K 10k | f/F 100k | v/V 1M")
+  line(13,"Export: n/N 1k | h/H 10k | e/E 100k | x/X 1M")
+  line(14,"Lowercase - | uppercase +")
+  line(15,"p apply manual | o save Overdrive | q quit")
+  line(17,"Manual field "..fmt(c.manualField or 0).."  export "..fmt(c.manualExport or 0),colors.cyan)
+  line(18,"Guardian: "..tostring(c.message),colors.lightGray)
+  line(19,"HELIOS link: "..(facilityConnected and "ONLINE" or (facilityNetwork and "WAITING" or "LOCAL ONLY")),facilityConnected and colors.lime or colors.gray)
 end
 local binding,page,controls,buttons=inspect(),"overview",load(),{}
 controls.inputControlVerified=false;controls.outputControlVerified=false;controls.gatesOwned=false;controls.telemetryStale=false
@@ -575,10 +580,18 @@ local function act(choice,d)
   elseif controls.arm and controls.arm>0 and choice then controls.arm=controls.arm+1;if controls.arm>4 then controls.arm=0;controls.mode="UNRESTRICTED";controls.request="OFF";controls.message="UNRESTRICTED CONTROL ARMED: operator commands are not overridden" end
   elseif choice=="RESTORE AUTOMATIC" then controls.mode="AUTO";controls.request="OFF";controls.arm=0;controls.message="Automatic safety restored"
   elseif choice=="USE LIVE GATES" then controls.manualField=positive(d.inputSet) or positive(d.inputFlow) or controls.injectorBaseline;controls.manualExport=positive(d.outputSet) or positive(d.outputFlow) or 0;controls.liveGatesSelected=true;controls.message="Copied live gate limits into manual controls"
+  elseif choice=="FIELD -1k" then controls.manualField=math.max(0,(tonumber(controls.manualField) or positive(d.inputSet) or controls.injectorBaseline or 0)-MANUAL_GATE_FINE_STEP)
+  elseif choice=="FIELD +1k" then controls.manualField=(tonumber(controls.manualField) or positive(d.inputSet) or controls.injectorBaseline or 0)+MANUAL_GATE_FINE_STEP
+  elseif choice=="FIELD -10k" then controls.manualField=math.max(0,(tonumber(controls.manualField) or positive(d.inputSet) or controls.injectorBaseline or 0)-MANUAL_GATE_SMALL_STEP)
+  elseif choice=="FIELD +10k" then controls.manualField=(tonumber(controls.manualField) or positive(d.inputSet) or controls.injectorBaseline or 0)+MANUAL_GATE_SMALL_STEP
   elseif choice=="FIELD -100k" then controls.manualField=math.max(0,(tonumber(controls.manualField) or positive(d.inputSet) or controls.injectorBaseline or 0)-MANUAL_GATE_STEP)
   elseif choice=="FIELD +100k" then controls.manualField=(tonumber(controls.manualField) or positive(d.inputSet) or controls.injectorBaseline or 0)+MANUAL_GATE_STEP
   elseif choice=="FIELD -1M" then controls.manualField=math.max(0,(tonumber(controls.manualField) or positive(d.inputSet) or controls.injectorBaseline or 0)-MANUAL_GATE_LARGE_STEP)
   elseif choice=="FIELD +1M" then controls.manualField=(tonumber(controls.manualField) or positive(d.inputSet) or controls.injectorBaseline or 0)+MANUAL_GATE_LARGE_STEP
+  elseif choice=="EXPORT -1k" then controls.manualExport=math.max(0,(tonumber(controls.manualExport) or positive(d.outputSet) or 0)-MANUAL_GATE_FINE_STEP)
+  elseif choice=="EXPORT +1k" then controls.manualExport=(tonumber(controls.manualExport) or positive(d.outputSet) or 0)+MANUAL_GATE_FINE_STEP
+  elseif choice=="EXPORT -10k" then controls.manualExport=math.max(0,(tonumber(controls.manualExport) or positive(d.outputSet) or 0)-MANUAL_GATE_SMALL_STEP)
+  elseif choice=="EXPORT +10k" then controls.manualExport=(tonumber(controls.manualExport) or positive(d.outputSet) or 0)+MANUAL_GATE_SMALL_STEP
   elseif choice=="EXPORT -100k" then controls.manualExport=math.max(0,(tonumber(controls.manualExport) or positive(d.outputSet) or 0)-MANUAL_GATE_STEP)
   elseif choice=="EXPORT +100k" then controls.manualExport=(tonumber(controls.manualExport) or positive(d.outputSet) or 0)+MANUAL_GATE_STEP
   elseif choice=="EXPORT -1M" then controls.manualExport=math.max(0,(tonumber(controls.manualExport) or positive(d.outputSet) or 0)-MANUAL_GATE_LARGE_STEP)
@@ -593,8 +606,8 @@ local function act(choice,d)
   elseif FRACTION[choice] then controls.request=choice;controls.startActivated=false;controls.message="Output request: "..choice end
 end
 local function keyboardChoice(ch)
-  local commands={a="INITIALIZE & ACTIVATE",s="SAFE SHUTDOWN",c="RECALIBRATE CEILING",r="RESTORE AUTOMATIC",m="ENABLE ASSISTED MANUAL",["0"]="OFF",["1"]="MIN",["2"]="MED",["3"]="MAX",["4"]="OVERDRIVE",f="FIELD -100k",F="FIELD +100k",v="FIELD -1M",V="FIELD +1M",e="EXPORT -100k",E="EXPORT +100k",x="EXPORT -1M",X="EXPORT +1M",p="APPLY MANUAL",o="SAVE AS OVERDRIVE PRESET"}
-  local manualKey={f=true,F=true,v=true,V=true,e=true,E=true,x=true,X=true,p=true,o=true,["4"]=true}
+  local commands={a="INITIALIZE & ACTIVATE",s="SAFE SHUTDOWN",c="RECALIBRATE CEILING",r="RESTORE AUTOMATIC",m="ENABLE ASSISTED MANUAL",["0"]="OFF",["1"]="MIN",["2"]="MED",["3"]="MAX",["4"]="OVERDRIVE",j="FIELD -1k",J="FIELD +1k",k="FIELD -10k",K="FIELD +10k",f="FIELD -100k",F="FIELD +100k",v="FIELD -1M",V="FIELD +1M",n="EXPORT -1k",N="EXPORT +1k",h="EXPORT -10k",H="EXPORT +10k",e="EXPORT -100k",E="EXPORT +100k",x="EXPORT -1M",X="EXPORT +1M",p="APPLY MANUAL",o="SAVE AS OVERDRIVE PRESET"}
+  local manualKey={j=true,J=true,k=true,K=true,f=true,F=true,v=true,V=true,n=true,N=true,h=true,H=true,e=true,E=true,x=true,X=true,p=true,o=true,["4"]=true}
   if manualKey[ch] and controls.mode~="UNRESTRICTED" then controls.message="Keyboard manual gates require Unrestricted mode";return nil end
   if ch=="u" then return (controls.arm or 0)>0 and "KEYBOARD CONFIRM" or "ARM UNRESTRICTED" end
   return commands[ch]
