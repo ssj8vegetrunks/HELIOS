@@ -8471,7 +8471,7 @@ end
 ]=],
 
     ["draconic/controller.lua"] = [=[
--- HELIOS Draconic Guardian v1.1.0-alpha.3
+-- HELIOS Draconic Guardian v1.1.0-alpha.4
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -8491,7 +8491,7 @@ local COMMISSION_SHORTFALL_SAMPLES = 20
 local COMMISSION_SETTLE_SAMPLES = 120
 local FRACTION = { OFF = 0, MIN = .25, MED = .50, MAX = 1 }
 local PRESET_RAMP_STEP, MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 50000, 100000, 1000000
-local GUARDIAN_VERSION = "1.1.0-alpha.3"
+local GUARDIAN_VERSION = "1.1.0-alpha.4"
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
 local facilityNetwork,facilityProtocol,facilityIdentity,facilitySequence
@@ -8635,8 +8635,12 @@ end
 -- A requested export is only meaningful once the core is actually online.
 -- Keep the entire charge -> activate sequence in one place so the manual
 -- selector, commissioning, and the explicit activation control behave alike.
-local function ensureStarted(b,c,status,reason,fieldTarget)
+local function ensureStarted(b,c,status,reason,fieldTarget,telemetry)
   local fieldSupply=positive(fieldTarget) or positive(c.injectorBaseline) or 0
+  local function percent(value,maximum)
+    value,maximum=tonumber(value),tonumber(maximum)
+    return value and maximum and maximum>0 and value/maximum*100 or nil
+  end
   gate(b.output,0)
   gate(b.input,fieldSupply)
   if status=="offline" or status=="stopping" or status=="cooling" then
@@ -8645,17 +8649,31 @@ local function ensureStarted(b,c,status,reason,fieldTarget)
     c.message=reason..": charging containment"
     return true
   end
-  if status=="charging" or status=="warming_up" or status=="warning_up" then
+  if status=="charging" then
     c.startActivated=false
     c.message=reason..": charging reactor; waiting for CHARGED"
     return true
   end
-  if status=="charged" then
+  local field=percent(telemetry and telemetry.fieldStrength,
+    telemetry and telemetry.maxFieldStrength)
+  local saturation=percent(telemetry and telemetry.energySaturation,
+    telemetry and telemetry.maxEnergySaturation)
+  local temperature=tonumber(telemetry and telemetry.temperature)
+  local warmReady=(status=="warming_up" or status=="warning_up") and
+    field and field>=49.5 and saturation and saturation>=49.5 and
+    temperature and temperature>=1990
+  if status=="charged" or warmReady then
     if not c.startActivated then
       reactor(b.reactor,"activateReactor")
       c.startActivated=true
     end
     c.message=reason..": activation sent; waiting for ONLINE"
+    return true
+  end
+  if status=="warming_up" or status=="warning_up" then
+    c.startActivated=false
+    c.message=string.format("%s: charging (core %.0f/2000 C, field %.1f%%, saturation %.1f%%)",
+      reason,temperature or 0,field or 0,saturation or 0)
     return true
   end
   if status=="online" or status=="running" then
@@ -8756,7 +8774,7 @@ local function supervise(b,d,c)
   -- yet. Let the shared charge/activate state machine finish before applying
   -- interlocks which are intended for a reactor that has already been live.
   if c.initialRequested and not live then
-    ensureStarted(b,c,status,"Initial start",injectorCap)
+    ensureStarted(b,c,status,"Initial start",injectorCap,r)
     return
   end
   if not free then
@@ -8843,7 +8861,7 @@ local function supervise(b,d,c)
   if c.request=="MANUAL" or c.request=="OVERDRIVE" then
     local fieldTarget=positive(c.request=="OVERDRIVE" and c.overdriveField or c.manualField) or injectorCap
     local exportTarget=positive(c.request=="OVERDRIVE" and c.overdriveExport or c.manualExport) or 0
-    if not live then ensureStarted(b,c,status,"Manual power demand",fieldTarget);return end
+    if not live then ensureStarted(b,c,status,"Manual power demand",fieldTarget,r);return end
     if live then
       gate(b.input,fieldTarget)
       local applied=exportTarget
@@ -8860,7 +8878,7 @@ local function supervise(b,d,c)
     end
   end
   if c.request=="OFF" then gate(b.output,0);reactor(b.reactor,"stopReactor");c.message="Manual OFF: export closed";return end
-  if not live then ensureStarted(b,c,status,"Requested "..tostring(c.request).." output",injectorCap);return end
+  if not live then ensureStarted(b,c,status,"Requested "..tostring(c.request).." output",injectorCap,r);return end
   if live then gate(b.input,injectorCap);gate(b.output,c.rated*(FRACTION[c.request] or 0));c.message=(free and "UNRESTRICTED" or "ASSISTED").." "..c.request.." output applied" end
 end
 local function draw(t,b,d,page,c,bs)
