@@ -8474,7 +8474,7 @@ end
 ]=],
 
     ["draconic/controller.lua"] = [=[
--- HELIOS Draconic Guardian v1.1.0-alpha.5
+-- HELIOS Draconic Guardian v1.1.0-alpha.6
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -8494,7 +8494,7 @@ local COMMISSION_SHORTFALL_SAMPLES = 20
 local COMMISSION_SETTLE_SAMPLES = 120
 local FRACTION = { OFF = 0, MIN = .25, MED = .50, MAX = 1 }
 local PRESET_RAMP_STEP, MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 50000, 100000, 1000000
-local GUARDIAN_VERSION = "1.1.0-alpha.5"
+local GUARDIAN_VERSION = "1.1.0-alpha.6"
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
 local facilityNetwork,facilityProtocol,facilityIdentity,facilitySequence
@@ -8721,6 +8721,12 @@ local function fmt(n)
   return string.format(math.abs(n)>=100 and "%.0f%s" or "%.2f%s",n,u[i])
 end
 local function text(t,x,y,s,c) local w=select(1,t.getSize());if y>=1 then t.setCursorPos(x,y);t.setTextColor(c or colors.white);t.write(string.sub(tostring(s),1,math.max(0,w-x+1))) end end
+local function replaceLine(t,y,s,c)
+  local w=select(1,t.getSize())
+  if y<1 then return end
+  t.setCursorPos(1,y);t.setBackgroundColor(colors.black);t.write(string.rep(" ",w))
+  text(t,1,y,s,c)
+end
 local function compactMonitor(t,isMonitor) if isMonitor and t and type(t.setTextScale)=="function" then pcall(t.setTextScale,.5) end end
 -- Monitor touches report character coordinates. Keep every target on its
 -- rendered row so vertically adjacent controls can never steal a press.
@@ -8900,7 +8906,7 @@ local function draw(t,b,d,page,c,bs)
   if not b.ready then text(t,1,5,"SETUP INVALID",colors.red);for i,v in ipairs(b.reasons) do text(t,1,5+i,"- "..v) end;return end
   if not d then text(t,1,5,"TELEMETRY LOST",colors.red);return end
   local critical,criticalMessage=imminentMeltdown(d.reactor)
-  if critical then text(t,1,2,criticalMessage,colors.red) end
+  if critical then replaceLine(t,2,criticalMessage,colors.red) end
   if page=="setup" then text(t,1,5,"FIXED GATE TOPOLOGY VALID",colors.lime);text(t,1,7,"Reactor component: "..b.reactor);text(t,1,8,"Export gate (LEFT/RIGHT): "..b.output);text(t,1,9,"Injector field gate (MODEM): "..b.input);text(t,1,10,"Wired modem: "..b.modem);text(t,1,12,"Export and containment roles are fixed; Guardian will not infer them.",colors.orange);return end
   if page=="raw" then text(t,1,5,"RAW DRACONIC TELEMETRY",colors.cyan);local ks={};for k in pairs(d.reactor) do ks[#ks+1]=tostring(k) end;sort(ks);for i,k in ipairs(ks) do if i+6<h then text(t,1,i+6,k..": "..tostring(d.reactor[k])) end end;return end
   if page=="gates" then
