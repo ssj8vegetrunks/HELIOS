@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.1.0-alpha.4
+-- HELIOS Draconic Guardian v1.1.0-alpha.5
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -18,7 +18,7 @@ local COMMISSION_SHORTFALL_SAMPLES = 20
 local COMMISSION_SETTLE_SAMPLES = 120
 local FRACTION = { OFF = 0, MIN = .25, MED = .50, MAX = 1 }
 local PRESET_RAMP_STEP, MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 50000, 100000, 1000000
-local GUARDIAN_VERSION = "1.1.0-alpha.4"
+local GUARDIAN_VERSION = "1.1.0-alpha.5"
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
 local facilityNetwork,facilityProtocol,facilityIdentity,facilitySequence
@@ -214,6 +214,15 @@ end
 local function pct(a,b) if tonumber(a) and tonumber(b) and tonumber(b)>0 then return tonumber(a)/tonumber(b)*100 end end
 local function imminentMeltdown(r)
   local status=string.lower(tostring(r and r.status or "unknown"))
+  local normalized=status:gsub("[^%w]","")
+  -- Draconic Evolution reports its irreversible terminal state as
+  -- `beyond_hope`. It must alarm unconditionally: waiting for a secondary
+  -- field/temperature threshold can suppress the only warning that matters.
+  if normalized=="beyondhope" or normalized=="exploding" or
+     normalized=="meltdown" or normalized=="explosionimminent" then
+    return true,"IMMINENT DRACONIC REACTOR EXPLOSION: reactor state "..
+      string.upper(status)
+  end
   local atRisk=status=="online" or status=="running" or status=="stopping" or status=="cooling"
   if not atRisk then return false end
   local field=pct(r.fieldStrength,r.maxFieldStrength)
@@ -414,6 +423,8 @@ local function draw(t,b,d,page,c,bs)
   text(t,1,2,banner,c.mode=="UNRESTRICTED" and colors.red or colors.lime);text(t,1,3,"[OVERVIEW] [RAW DATA] [SETUP] [MANUAL GATES]",colors.cyan)
   if not b.ready then text(t,1,5,"SETUP INVALID",colors.red);for i,v in ipairs(b.reasons) do text(t,1,5+i,"- "..v) end;return end
   if not d then text(t,1,5,"TELEMETRY LOST",colors.red);return end
+  local critical,criticalMessage=imminentMeltdown(d.reactor)
+  if critical then text(t,1,2,criticalMessage,colors.red) end
   if page=="setup" then text(t,1,5,"FIXED GATE TOPOLOGY VALID",colors.lime);text(t,1,7,"Reactor component: "..b.reactor);text(t,1,8,"Export gate (LEFT/RIGHT): "..b.output);text(t,1,9,"Injector field gate (MODEM): "..b.input);text(t,1,10,"Wired modem: "..b.modem);text(t,1,12,"Export and containment roles are fixed; Guardian will not infer them.",colors.orange);return end
   if page=="raw" then text(t,1,5,"RAW DRACONIC TELEMETRY",colors.cyan);local ks={};for k in pairs(d.reactor) do ks[#ks+1]=tostring(k) end;sort(ks);for i,k in ipairs(ks) do if i+6<h then text(t,1,i+6,k..": "..tostring(d.reactor[k])) end end;return end
   if page=="gates" then
@@ -508,6 +519,8 @@ local function drawComputer(t,d,c)
   line(2,"Mode: "..tostring(c.mode).."  Request: "..tostring(c.request),c.mode=="UNRESTRICTED" and colors.red or colors.lime)
   if d and d.reactor then
     local r=d.reactor
+    local critical,criticalMessage=imminentMeltdown(r)
+    if critical then line(3,criticalMessage,colors.red) end
     line(4,"State "..tostring(r.status).."  Gen "..fmt(r.generationRate).." RF/t",colors.cyan)
     line(5,"Core "..fmt(r.temperature).." C  Field "..string.format("%.1f%%",pct(r.fieldStrength,r.maxFieldStrength) or 0),colors.orange)
     line(6,"Saturation "..string.format("%.1f%%",pct(r.energySaturation,r.maxEnergySaturation) or 0).."  Fuel conversion "..string.format("%.1f%%",pct(r.fuelConversion,r.maxFuelConversion) or 0))
