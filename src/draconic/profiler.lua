@@ -1,5 +1,7 @@
 local config = dofile("/helios/config.lua")
 local engine = dofile("/helios/draconic/profiler_engine.lua")
+local language = dofile("/helios/core/i18n.lua").new(config)
+local function tr(key, values, fallback) return language.get(key, values, fallback) end
 
 local VERSION = "0.1.0-alpha.1"
 local REQUEST_CHANNEL, TELEMETRY_CHANNEL = 43120, 43121
@@ -87,39 +89,53 @@ local function render(target)
         target.setCursorPos(1, row);target.setTextColor(colour or colors.white)
         target.write(string.sub(tostring(value or ""), 1, width))
     end
-    line(1, "HELIOS // DRACONIC PROFILER  " .. VERSION, colors.yellow)
+    line(1, tr("profiler.title", { version = VERSION }), colors.yellow)
     line(2, classification, colourFor(classification))
     line(3, explanation, colors.lightGray)
     local connected = latestAt and os.epoch("utc") / 1000 - latestAt <= 5
-    line(5, "Guardian " .. guardianId .. "  " .. (connected and "ONLINE" or "WAITING"), connected and colors.lime or colors.orange)
-    line(6, "Wireless modem: " .. tostring(modemName), colors.cyan)
+    line(5, tr("profiler.guardian_status", { id = guardianId,
+        status = tr(connected and "common.online" or "common.waiting") }), connected and colors.lime or colors.orange)
+    line(6, tr("profiler.wireless_modem", { name = modemName }), colors.cyan)
     if not latest then
-        line(8, "Read-only subscription requests are being sent.", colors.lightGray)
-        line(9, "Confirm the Guardian also has a wireless modem.", colors.lightGray)
+        line(8, tr("profiler.subscription_wait"), colors.lightGray)
+        line(9, tr("profiler.confirm_wireless"), colors.lightGray)
         return
     end
     local sample = trend.samples[#trend.samples]
     local short = engine.metrics(trend, 30, latestAt)
     local medium = engine.metrics(trend, 300, latestAt)
-    line(8, "LIVE OPERATING POINT", colors.cyan)
-    line(9, "Generation: " .. fmt(sample.generation) .. " RF/t   Export: " .. fmt(sample.export) .. " RF/t")
-    line(10, "Core: " .. fmt(sample.temperature) .. " C   Field: " .. pct(sample.field), colors.orange)
-    line(11, "Saturation: " .. pct(sample.saturation) .. "   Fuel conversion: " .. pct(sample.fuel))
-    line(12, "Field input/drain: " .. fmt(sample.fieldInput) .. " / " .. fmt(sample.fieldDrain) .. " RF/t")
-    line(14, "TREND                         30 SEC       5 MIN", colors.cyan)
+    line(8, tr("profiler.operating_point"), colors.cyan)
+    line(9, tr("common.generation") .. ": " .. fmt(sample.generation) .. " RF/t   Export: " .. fmt(sample.export) .. " RF/t")
+    line(10, tr("common.core_temperature") .. ": " .. fmt(sample.temperature) .. " C   " .. tr("common.field_strength") .. ": " .. pct(sample.field), colors.orange)
+    line(11, tr("common.saturation") .. ": " .. pct(sample.saturation) .. "   " .. tr("common.fuel_conversion") .. ": " .. pct(sample.fuel))
+    line(12, tr("profiler.field_input_drain") .. ": " .. fmt(sample.fieldInput) .. " / " .. fmt(sample.fieldDrain) .. " RF/t")
+    line(14, tr("profiler.trend") .. "                         30 SEC       5 MIN", colors.cyan)
     line(15, string.format("Field %%/min             %10s  %10s", fmt(short and short.fieldSlope), fmt(medium and medium.fieldSlope)))
     line(16, string.format("Core C/min               %10s  %10s", fmt(short and short.temperatureSlope), fmt(medium and medium.temperatureSlope)))
     line(17, string.format("Saturation %%/min        %10s  %10s", fmt(short and short.saturationSlope), fmt(medium and medium.saturationSlope)))
     local key = tostring(math.floor(sample.bracket or 0))
     local profile = profiles[key]
-    line(19, "OUTPUT BRACKET: " .. fmt(sample.bracket) .. " RF/t", colors.cyan)
+    line(19, tr("profiler.output_bracket", { output = fmt(sample.bracket) }), colors.cyan)
     if profile then
-        line(20, "Observed: " .. math.floor(profile.seconds or 0) .. "s   Stable: " .. math.floor(profile.stableSeconds or 0) .. "s")
-        line(21, "Field range: " .. pct(profile.fieldMin) .. " - " .. pct(profile.fieldMax))
-        line(22, "Core range: " .. fmt(profile.temperatureMin) .. " - " .. fmt(profile.temperatureMax) .. " C")
-        line(23, "Fuel range: " .. pct(profile.fuelMin) .. " - " .. pct(profile.fuelMax))
+        line(20, tr("profiler.observed_stable", { observed = math.floor(profile.seconds or 0), stable = math.floor(profile.stableSeconds or 0) }))
+        line(21, tr("profiler.field_range", { minimum = pct(profile.fieldMin), maximum = pct(profile.fieldMax) }))
+        line(22, tr("profiler.core_range", { minimum = fmt(profile.temperatureMin), maximum = fmt(profile.temperatureMax) }))
+        line(23, tr("profiler.fuel_range", { minimum = pct(profile.fuelMin), maximum = pct(profile.fuelMax) }))
     end
-    line(height, "READ ONLY | Guardian " .. tostring(guardianVersion or "unknown") .. " | Q quit", colors.gray)
+    line(height, tr("profiler.footer", { version = guardianVersion or tr("common.unknown") }), colors.gray)
+end
+
+local explanationKeys = {
+    WAITING = "profiler.waiting", ["LINK STALE"] = "profiler.link_stale",
+    CRITICAL = "alarm.guardian_critical", SETTLING = "profiler.settling",
+    OBSERVING = "profiler.observing", DETERIORATING = "profiler.deteriorating",
+    STABLE = "profiler.stable", IMPROVING = "profiler.improving",
+}
+
+local function localizeClassification(state, reason)
+    local key = explanationKeys[state]
+    if not key and string.sub(state, 1, 8) == "REACTOR " then key = "profiler.reactor_wait" end
+    return state, key and tr(key) or reason
 end
 
 local function redraw()
@@ -154,7 +170,7 @@ while true do
         local now = os.epoch("utc") / 1000
         latest, latestAt, guardianVersion = message.payload, now, message.guardianVersion
         local sample = engine.add(trend, latest, now)
-        classification, explanation = engine.classify(trend, now)
+        classification, explanation = localizeClassification(engine.classify(trend, now))
         if now - lastProfileAt >= 5 then
             local profileElapsed = lastProfileAt > 0 and math.max(0, math.min(10, now - lastProfileAt)) or 0
             profiles = engine.updateProfile(profiles, trend, sample, classification, profileElapsed)
@@ -164,7 +180,7 @@ while true do
     elseif event == "timer" and a == timer then
         local now = os.epoch("utc") / 1000
         if now - lastSubscribeAt >= 3 then subscribe() end
-        classification, explanation = engine.classify(trend, now)
+        classification, explanation = localizeClassification(engine.classify(trend, now))
         if now - lastSaveAt >= 60 then
             saveTable(PROFILE_FILE, profiles)
             saveTable(SESSION_FILE, { guardianId = guardianId, lastTelemetry = latest, lastSeen = latestAt })

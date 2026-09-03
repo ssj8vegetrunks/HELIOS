@@ -6,6 +6,8 @@ function mainframe.run(config)
     display.start(config)
     local ui = dofile("/helios/core/ui.lua")
     ui.setVersion(config.version)
+    local language = dofile("/helios/core/i18n.lua").new(config)
+    local function tr(key, values, fallback) return language.get(key, values, fallback) end
     local gui = dofile("/helios/core/gui.lua")
     local guiLoader = dofile("/helios/core/gui_loader.lua")
     local uiContract = dofile("/helios/core/ui_contract.lua")
@@ -932,11 +934,11 @@ function mainframe.run(config)
         ui.setIdConflicts(idConflicts)
         dashboardButtons = {}
         ui.header("HELIOS", "Central power management", function()
-            dashboardButtons.reactors = ui.inlineButton("REACTORS", colors.red)
+            dashboardButtons.reactors = ui.inlineButton(tr("nav.reactors"), colors.red)
             write(" ")
-            dashboardButtons.turbines = ui.inlineButton("TURBINES", colors.blue)
+            dashboardButtons.turbines = ui.inlineButton(tr("nav.turbines"), colors.blue)
             write(" ")
-            dashboardButtons.storage = ui.inlineButton("POWER", colors.yellow)
+            dashboardButtons.storage = ui.inlineButton(tr("nav.power"), colors.yellow)
             print("")
         end)
         ui.status("System", "ONLINE", colors.lime)
@@ -2694,7 +2696,7 @@ function mainframe.run(config)
                 draw()
                 display.useMonitors()
                 local ok, rendered = pcall(customRenderer.render, snapshotFor("all"), customState, {
-                    gui = gui, powerFormat = powerFormat, allowEmergency = true,
+                    gui = gui, powerFormat = powerFormat, allowEmergency = true, i18n = language,
                 })
                 if ok then customButtons = rendered or {} else customRenderer = nil end
                 display.useNative()

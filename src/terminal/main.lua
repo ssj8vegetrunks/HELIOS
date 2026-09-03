@@ -6,6 +6,8 @@ function terminal.run(config)
     display.start(config)
     local ui = dofile("/helios/core/ui.lua")
     ui.setVersion(config.version)
+    local language = dofile("/helios/core/i18n.lua").new(config)
+    local function tr(key, values, fallback) return language.get(key, values, fallback) end
     local gui = dofile("/helios/core/gui.lua")
     local guiLoader = dofile("/helios/core/gui_loader.lua")
     local configStore = dofile("/helios/core/config.lua")
@@ -300,18 +302,18 @@ function terminal.run(config)
             math.max(0, width - #state - 3))
         graphicalButtons = {}
         local x = 1
-        graphicalButtons.overview = gui.button(x, 4, "HOME", colors.white,
+        graphicalButtons.overview = gui.button(x, 4, tr("nav.home"), colors.white,
             graphicalPage == "overview" and colors.gray or colors.black)
         x = graphicalButtons.overview.x2 + 2
-        graphicalButtons.reactors = gui.button(x, 4, "REACTORS", colors.red,
+        graphicalButtons.reactors = gui.button(x, 4, tr("nav.reactors"), colors.red,
             graphicalPage == "reactors" and colors.gray or colors.black)
         x = graphicalButtons.reactors.x2 + 2
-        graphicalButtons.turbines = gui.button(x, 4, "TURBINES", colors.cyan,
+        graphicalButtons.turbines = gui.button(x, 4, tr("nav.turbines"), colors.cyan,
             graphicalPage == "turbines" and colors.gray or colors.black)
         x = graphicalButtons.turbines.x2 + 2
-        graphicalButtons.storage = gui.button(x, 4, "POWER", colors.yellow,
+        graphicalButtons.storage = gui.button(x, 4, tr("nav.power"), colors.yellow,
             graphicalPage == "storage" and colors.gray or colors.black)
-        graphicalButtons.advanced = gui.button(1, height, "ADVANCED", colors.white, colors.gray)
+        graphicalButtons.advanced = gui.button(1, height, tr("nav.advanced"), colors.white, colors.gray)
     end
 
     local function graphicalOverview()
@@ -486,7 +488,7 @@ function terminal.run(config)
             renderAdvanced()
         elseif customRenderer and snapshot then
             local ok, result = pcall(customRenderer.render, snapshot, customState, {
-                gui = gui, powerFormat = powerFormat,
+                gui = gui, powerFormat = powerFormat, i18n = language,
             })
             if ok then customButtons = result or {} else customRenderer = nil; renderGraphical() end
         else

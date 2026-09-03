@@ -42,13 +42,14 @@ computer ID when prompted and attach a wireless modem to both computers. The
 Profiler stores output-bracket observations locally and never sends commands.
 
 Start with the [tester guide](docs/TESTING.md), [site map](docs/SITE_MAP.md),
-[dependency map](docs/DEPENDENCY_MAP.md), or [module template](module-template/README.md).
+[dependency map](docs/DEPENDENCY_MAP.md), [language-pack contract](docs/LANGUAGE_PACKS.md),
+or [module template](module-template/README.md).
 
 > Public Alpha means the interfaces are testable, not yet final. Please include
 > HELIOS/Core version, computer role, peripheral names, reproduction steps, and
 > the exact error when reporting a defect.
 
-# HELIOS - v1.6.0 Alpha 4 Graphical UI Contract
+# HELIOS - v1.6.0 Alpha 5 Localization Contract
 
 Industrial power management for **CC:Tweaked** and **Extreme Reactors**.
 

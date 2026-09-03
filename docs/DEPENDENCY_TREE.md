@@ -26,6 +26,10 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 
 - No HELIOS module dependencies detected.
 
+### `core/i18n.lua`
+
+- No HELIOS module dependencies detected.
+
 ### `core/mainframe_authority.lua`
 
 - No HELIOS module dependencies detected.
@@ -60,6 +64,7 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 
 ### `draconic/profiler.lua`
 
+- depends on → `core/i18n.lua`
 - depends on → `draconic/profiler_engine.lua`
 
 ### `draconic/profiler_engine.lua`
@@ -78,6 +83,7 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 
 - depends on → `core/config.lua`
 - depends on → `core/gui_loader.lua`
+- depends on → `core/i18n.lua`
 - depends on → `core/module_loader.lua`
 - depends on → `core/module_manager.lua`
 - depends on → `core/power_format.lua`
@@ -92,6 +98,10 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 - depends on → `terminal/main.lua`
 - depends on → `tools/discovery_probe.lua`
 
+### `lang/en_us.lua`
+
+- No HELIOS module dependencies detected.
+
 ### `mainframe/device_registry.lua`
 
 - No HELIOS module dependencies detected.
@@ -103,6 +113,7 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 - depends on → `core/facility_protocol.lua`
 - depends on → `core/gui.lua`
 - depends on → `core/gui_loader.lua`
+- depends on → `core/i18n.lua`
 - depends on → `core/mainframe_authority.lua`
 - depends on → `core/module_loader.lua`
 - depends on → `core/network.lua`
@@ -135,6 +146,7 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 - depends on → `core/display.lua`
 - depends on → `core/gui.lua`
 - depends on → `core/gui_loader.lua`
+- depends on → `core/i18n.lua`
 - depends on → `core/network.lua`
 - depends on → `core/power_format.lua`
 - depends on → `core/ui.lua`
@@ -145,7 +157,7 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 
 ### `draconic/controller.lua`
 
-- No HELIOS module dependencies detected.
+- depends on → `core/i18n.lua`
 
 ### `modules/extreme_reactors/reactor_adapter.lua`
 
@@ -183,6 +195,14 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 
 ### `core/gui_loader.lua`
 
+- used by ← `helios.lua`
+- used by ← `mainframe/main.lua`
+- used by ← `terminal/main.lua`
+
+### `core/i18n.lua`
+
+- used by ← `draconic/controller.lua`
+- used by ← `draconic/profiler.lua`
 - used by ← `helios.lua`
 - used by ← `mainframe/main.lua`
 - used by ← `terminal/main.lua`
@@ -241,6 +261,10 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 - No HELIOS modules directly depend on this module.
 
 ### `helios.lua`
+
+- No HELIOS modules directly depend on this module.
+
+### `lang/en_us.lua`
 
 - No HELIOS modules directly depend on this module.
 

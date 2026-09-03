@@ -2,6 +2,27 @@
 local args = { ... }
 local config = dofile("/helios/core/config.lua").load()
 
+if args[1] == "language" then
+    local i18n = dofile("/helios/core/i18n.lua")
+    local action = args[2] or "list"
+    if action == "list" then
+        for _, pack in ipairs(i18n.available()) do
+            print((pack.id == config.ui.language and "* " or "  ") .. pack.id .. " - " .. pack.name)
+        end
+    elseif action == "set" then
+        local wanted, found = tostring(args[3] or ""), false
+        for _, pack in ipairs(i18n.available()) do if pack.id == wanted then found = true break end end
+        if not found then error("Language pack is not installed: " .. wanted, 0) end
+        config.ui.language = wanted
+        local ok, reason = dofile("/helios/core/config.lua").save(config)
+        if not ok then error("Could not save HELIOS configuration: " .. tostring(reason), 0) end
+        print("HELIOS language set to " .. wanted .. ". Restart HELIOS to apply it.")
+    else
+        error("Usage: helios language [list|set <language_id>]", 0)
+    end
+    return
+end
+
 if config.role == "guardian" then
     dofile("/helios/draconic/controller.lua")
     return

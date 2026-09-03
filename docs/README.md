@@ -15,6 +15,7 @@
 - [GUI behavior](GUI.md)
 - [UI command boundary](UI_API.md)
 - [Networking contracts](NETWORKING.md)
+- [Language packs](LANGUAGE_PACKS.md)
 - [Generated source map](SOURCE_MAP.md)
 - [Generated dependency tree](DEPENDENCY_TREE.md)
 

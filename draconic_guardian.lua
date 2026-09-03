@@ -24,6 +24,12 @@ local GUARDIAN_VERSION = "1.1.0-alpha.10"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
+local language
+if fs.exists("/helios/core/i18n.lua") and fs.exists("/helios/config.lua") then
+  local ok,service=pcall(function() return dofile("/helios/core/i18n.lua").new(dofile("/helios/config.lua")) end)
+  if ok then language=service end
+end
+local function tr(key,values,fallback) return language and language.get(key,values,fallback) or fallback end
 local facilityNetwork,facilityProtocol,facilityIdentity,facilitySequence
 local facilityConnected,facilityLastWelcome=false,nil
 local facilityCollectorId,facilityCollectorRole,facilityCollectorPriority=nil,nil,-1
@@ -427,9 +433,9 @@ local function supervise(b,d,c)
   if live then gate(b.input,injectorCap);gate(b.output,c.rated*(FRACTION[c.request] or 0));c.message=(free and "UNRESTRICTED" or "ASSISTED").." "..c.request.." output applied" end
 end
 local function draw(t,b,d,page,c,bs)
-  local w,h=t.getSize();t.setBackgroundColor(colors.black);t.setTextColor(colors.white);t.clear();text(t,1,1,"HELIOS // DRACONIC GUARDIAN  "..GUARDIAN_VERSION,colors.yellow)
-  local banner=c.mode=="UNRESTRICTED" and "UNRESTRICTED CONTROL - AUTOMATIC INTERVENTION DISABLED" or c.mode=="ASSISTED" and "ASSISTED MANUAL - HARD SAFETY INTERLOCKS ACTIVE" or "AUTOMATIC SAFE SUPERVISION"
-  text(t,1,2,banner,c.mode=="UNRESTRICTED" and colors.red or colors.lime);text(t,1,3,"[OVERVIEW] [RAW DATA] [SETUP] [MANUAL GATES]",colors.cyan)
+  local w,h=t.getSize();t.setBackgroundColor(colors.black);t.setTextColor(colors.white);t.clear();text(t,1,1,tr("guardian.title",{version=GUARDIAN_VERSION},"HELIOS // DRACONIC GUARDIAN  "..GUARDIAN_VERSION),colors.yellow)
+  local banner=c.mode=="UNRESTRICTED" and tr("guardian.unrestricted",nil,"UNRESTRICTED CONTROL - AUTOMATIC INTERVENTION DISABLED") or c.mode=="ASSISTED" and tr("guardian.assisted",nil,"ASSISTED MANUAL - HARD SAFETY INTERLOCKS ACTIVE") or tr("guardian.automatic",nil,"AUTOMATIC SAFE SUPERVISION")
+  text(t,1,2,banner,c.mode=="UNRESTRICTED" and colors.red or colors.lime);text(t,1,3,"["..tr("nav.overview",nil,"OVERVIEW").."] ["..tr("nav.raw_data",nil,"RAW DATA").."] ["..tr("nav.setup",nil,"SETUP").."] ["..tr("nav.manual_gates",nil,"MANUAL GATES").."]",colors.cyan)
   if not b.ready then text(t,1,5,"SETUP INVALID",colors.red);for i,v in ipairs(b.reasons) do text(t,1,5+i,"- "..v) end;return end
   if not d then text(t,1,5,"TELEMETRY LOST",colors.red);return end
   local critical,criticalMessage=imminentMeltdown(d.reactor)

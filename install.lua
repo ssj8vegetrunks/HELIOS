@@ -1,10 +1,10 @@
 -- HELIOS single-file installer
 -- Manual-control alpha: guarded direct plant authority.
 
-local VERSION = "1.6.0-alpha.4"
+local VERSION = "1.6.0-alpha.5"
 local INSTALL_DIR = "/helios"
 local STAGE_DIR = "/.helios-install"
-local MODULE_PACK_BASE_URL = "https://raw.githubusercontent.com/ssj8vegetrunks/HELIOS/testing/public-alpha/module-pack"
+local MODULE_PACK_BASE_URL = "https://raw.githubusercontent.com/ssj8vegetrunks/HELIOS/agent/facility-network-alpha1/module-pack"
 
 local function clear()
     term.setBackgroundColor(colors.black)
@@ -260,6 +260,8 @@ function config.load()
     loaded.ui.showPeripheralNames = loaded.ui.showPeripheralNames == true
     loaded.ui.monitorTextScale = tonumber(loaded.ui.monitorTextScale) or 0.5
     loaded.ui.renderer = type(loaded.ui.renderer) == "string" and loaded.ui.renderer or "default"
+    loaded.ui.language = type(loaded.ui.language) == "string" and
+        loaded.ui.language:match("^[a-z][a-z]_[a-z][a-z]$") and loaded.ui.language or "en_us"
     loaded.control = loaded.control or {}
     -- Manual authority is deliberately never restored after a reboot.
     loaded.control.mode = "automatic"
@@ -1021,6 +1023,82 @@ end
 return loader
 ]=],
 
+    ["core/i18n.lua"] = [=[
+local i18n = {}
+
+local DEFAULT_LANGUAGE = "en_us"
+local PACK_DIR = "/helios/lang"
+
+local function validId(value)
+    return type(value) == "string" and value:match("^[a-z][a-z]_[a-z][a-z]$") ~= nil
+end
+
+local function loadPack(id)
+    if not validId(id) then return nil, "invalid language id" end
+    local path = PACK_DIR .. "/" .. id .. ".lua"
+    if not fs.exists(path) then return nil, "language pack is not installed" end
+    local ok, pack = pcall(dofile, path)
+    if not ok or type(pack) ~= "table" or pack.id ~= id or
+       type(pack.name) ~= "string" or type(pack.strings) ~= "table" then
+        return nil, "language pack is invalid"
+    end
+    for key, value in pairs(pack.strings) do
+        if type(key) ~= "string" or type(value) ~= "string" then
+            return nil, "language pack contains a non-text entry"
+        end
+    end
+    return pack
+end
+
+local function replace(template, values)
+    values = type(values) == "table" and values or {}
+    return (tostring(template):gsub("{([%w_]+)}", function(key)
+        local value = values[key]
+        return value == nil and "{" .. key .. "}" or tostring(value)
+    end))
+end
+
+function i18n.available()
+    local result = {}
+    if fs.exists(PACK_DIR) and fs.isDir(PACK_DIR) then
+        for _, file in ipairs(fs.list(PACK_DIR)) do
+            local id = file:match("^([a-z][a-z]_[a-z][a-z])%.lua$")
+            if id then
+                local pack = loadPack(id)
+                if pack then result[#result + 1] = { id = id, name = pack.name or id } end
+            end
+        end
+    end
+    table.sort(result, function(a, b) return a.id < b.id end)
+    return result
+end
+
+function i18n.new(config)
+    config = type(config) == "table" and config or {}
+    local wanted = config.ui and config.ui.language or DEFAULT_LANGUAGE
+    if not validId(wanted) then wanted = DEFAULT_LANGUAGE end
+    local fallback = loadPack(DEFAULT_LANGUAGE)
+    if not fallback then error("HELIOS English language pack is missing", 0) end
+    local selected, reason = wanted == DEFAULT_LANGUAGE and fallback or loadPack(wanted)
+    if not selected then selected, wanted = fallback, DEFAULT_LANGUAGE end
+    local service = { id = wanted, name = selected.name or wanted, loadError = reason }
+    function service.get(key, values, explicitFallback)
+        local value = selected.strings[key] or fallback.strings[key] or explicitFallback or key
+        return replace(value, values)
+    end
+    function service.fit(key, width, values, explicitFallback)
+        local value = service.get(key, values, explicitFallback)
+        width = math.max(0, math.floor(tonumber(width) or #value))
+        if #value <= width then return value end
+        if width <= 3 then return value:sub(1, width) end
+        return value:sub(1, width - 3) .. "..."
+    end
+    return service
+end
+
+return i18n
+]=],
+
     ["core/mainframe_authority.lua"] = [=[
 local authority = {}
 
@@ -1241,7 +1319,7 @@ return loader
     ["core/module_manager.lua"] = [=[
 -- @section MODULE PACK DOWNLOAD AND VALIDATION
 local manager = {}
-local BASE_URL = "https://raw.githubusercontent.com/ssj8vegetrunks/HELIOS/agent/ui-module-contract-alpha4/module-pack"
+local BASE_URL = "https://raw.githubusercontent.com/ssj8vegetrunks/HELIOS/agent/facility-network-alpha1/module-pack"
 local MODULE_DIR = "/helios/modules"
 local STAGE_DIR = "/.helios-module-update"
 local BACKUP_DIR = "/helios/modules.previous"
@@ -1929,6 +2007,8 @@ return guardian
     ["draconic/profiler.lua"] = [=[
 local config = dofile("/helios/config.lua")
 local engine = dofile("/helios/draconic/profiler_engine.lua")
+local language = dofile("/helios/core/i18n.lua").new(config)
+local function tr(key, values, fallback) return language.get(key, values, fallback) end
 
 local VERSION = "0.1.0-alpha.1"
 local REQUEST_CHANNEL, TELEMETRY_CHANNEL = 43120, 43121
@@ -2016,39 +2096,53 @@ local function render(target)
         target.setCursorPos(1, row);target.setTextColor(colour or colors.white)
         target.write(string.sub(tostring(value or ""), 1, width))
     end
-    line(1, "HELIOS // DRACONIC PROFILER  " .. VERSION, colors.yellow)
+    line(1, tr("profiler.title", { version = VERSION }), colors.yellow)
     line(2, classification, colourFor(classification))
     line(3, explanation, colors.lightGray)
     local connected = latestAt and os.epoch("utc") / 1000 - latestAt <= 5
-    line(5, "Guardian " .. guardianId .. "  " .. (connected and "ONLINE" or "WAITING"), connected and colors.lime or colors.orange)
-    line(6, "Wireless modem: " .. tostring(modemName), colors.cyan)
+    line(5, tr("profiler.guardian_status", { id = guardianId,
+        status = tr(connected and "common.online" or "common.waiting") }), connected and colors.lime or colors.orange)
+    line(6, tr("profiler.wireless_modem", { name = modemName }), colors.cyan)
     if not latest then
-        line(8, "Read-only subscription requests are being sent.", colors.lightGray)
-        line(9, "Confirm the Guardian also has a wireless modem.", colors.lightGray)
+        line(8, tr("profiler.subscription_wait"), colors.lightGray)
+        line(9, tr("profiler.confirm_wireless"), colors.lightGray)
         return
     end
     local sample = trend.samples[#trend.samples]
     local short = engine.metrics(trend, 30, latestAt)
     local medium = engine.metrics(trend, 300, latestAt)
-    line(8, "LIVE OPERATING POINT", colors.cyan)
-    line(9, "Generation: " .. fmt(sample.generation) .. " RF/t   Export: " .. fmt(sample.export) .. " RF/t")
-    line(10, "Core: " .. fmt(sample.temperature) .. " C   Field: " .. pct(sample.field), colors.orange)
-    line(11, "Saturation: " .. pct(sample.saturation) .. "   Fuel conversion: " .. pct(sample.fuel))
-    line(12, "Field input/drain: " .. fmt(sample.fieldInput) .. " / " .. fmt(sample.fieldDrain) .. " RF/t")
-    line(14, "TREND                         30 SEC       5 MIN", colors.cyan)
+    line(8, tr("profiler.operating_point"), colors.cyan)
+    line(9, tr("common.generation") .. ": " .. fmt(sample.generation) .. " RF/t   Export: " .. fmt(sample.export) .. " RF/t")
+    line(10, tr("common.core_temperature") .. ": " .. fmt(sample.temperature) .. " C   " .. tr("common.field_strength") .. ": " .. pct(sample.field), colors.orange)
+    line(11, tr("common.saturation") .. ": " .. pct(sample.saturation) .. "   " .. tr("common.fuel_conversion") .. ": " .. pct(sample.fuel))
+    line(12, tr("profiler.field_input_drain") .. ": " .. fmt(sample.fieldInput) .. " / " .. fmt(sample.fieldDrain) .. " RF/t")
+    line(14, tr("profiler.trend") .. "                         30 SEC       5 MIN", colors.cyan)
     line(15, string.format("Field %%/min             %10s  %10s", fmt(short and short.fieldSlope), fmt(medium and medium.fieldSlope)))
     line(16, string.format("Core C/min               %10s  %10s", fmt(short and short.temperatureSlope), fmt(medium and medium.temperatureSlope)))
     line(17, string.format("Saturation %%/min        %10s  %10s", fmt(short and short.saturationSlope), fmt(medium and medium.saturationSlope)))
     local key = tostring(math.floor(sample.bracket or 0))
     local profile = profiles[key]
-    line(19, "OUTPUT BRACKET: " .. fmt(sample.bracket) .. " RF/t", colors.cyan)
+    line(19, tr("profiler.output_bracket", { output = fmt(sample.bracket) }), colors.cyan)
     if profile then
-        line(20, "Observed: " .. math.floor(profile.seconds or 0) .. "s   Stable: " .. math.floor(profile.stableSeconds or 0) .. "s")
-        line(21, "Field range: " .. pct(profile.fieldMin) .. " - " .. pct(profile.fieldMax))
-        line(22, "Core range: " .. fmt(profile.temperatureMin) .. " - " .. fmt(profile.temperatureMax) .. " C")
-        line(23, "Fuel range: " .. pct(profile.fuelMin) .. " - " .. pct(profile.fuelMax))
+        line(20, tr("profiler.observed_stable", { observed = math.floor(profile.seconds or 0), stable = math.floor(profile.stableSeconds or 0) }))
+        line(21, tr("profiler.field_range", { minimum = pct(profile.fieldMin), maximum = pct(profile.fieldMax) }))
+        line(22, tr("profiler.core_range", { minimum = fmt(profile.temperatureMin), maximum = fmt(profile.temperatureMax) }))
+        line(23, tr("profiler.fuel_range", { minimum = pct(profile.fuelMin), maximum = pct(profile.fuelMax) }))
     end
-    line(height, "READ ONLY | Guardian " .. tostring(guardianVersion or "unknown") .. " | Q quit", colors.gray)
+    line(height, tr("profiler.footer", { version = guardianVersion or tr("common.unknown") }), colors.gray)
+end
+
+local explanationKeys = {
+    WAITING = "profiler.waiting", ["LINK STALE"] = "profiler.link_stale",
+    CRITICAL = "alarm.guardian_critical", SETTLING = "profiler.settling",
+    OBSERVING = "profiler.observing", DETERIORATING = "profiler.deteriorating",
+    STABLE = "profiler.stable", IMPROVING = "profiler.improving",
+}
+
+local function localizeClassification(state, reason)
+    local key = explanationKeys[state]
+    if not key and string.sub(state, 1, 8) == "REACTOR " then key = "profiler.reactor_wait" end
+    return state, key and tr(key) or reason
 end
 
 local function redraw()
@@ -2083,7 +2177,7 @@ while true do
         local now = os.epoch("utc") / 1000
         latest, latestAt, guardianVersion = message.payload, now, message.guardianVersion
         local sample = engine.add(trend, latest, now)
-        classification, explanation = engine.classify(trend, now)
+        classification, explanation = localizeClassification(engine.classify(trend, now))
         if now - lastProfileAt >= 5 then
             local profileElapsed = lastProfileAt > 0 and math.max(0, math.min(10, now - lastProfileAt)) or 0
             profiles = engine.updateProfile(profiles, trend, sample, classification, profileElapsed)
@@ -2093,7 +2187,7 @@ while true do
     elseif event == "timer" and a == timer then
         local now = os.epoch("utc") / 1000
         if now - lastSubscribeAt >= 3 then subscribe() end
-        classification, explanation = engine.classify(trend, now)
+        classification, explanation = localizeClassification(engine.classify(trend, now))
         if now - lastSaveAt >= 60 then
             saveTable(PROFILE_FILE, profiles)
             saveTable(SESSION_FILE, { guardianId = guardianId, lastTelemetry = latest, lastSeen = latestAt })
@@ -2287,7 +2381,7 @@ return {
     name = "HELIOS Control Room",
     version = "1.0.0",
     apiVersion = 1,
-    compatibleCoreVersions = { "1.6.0-alpha.4" },
+    compatibleCoreVersions = { "1.6.0-alpha.4", "1.6.0-alpha.5" },
     entry = "renderer.lua",
     minimumWidth = 50,
     minimumHeight = 31,
@@ -2341,6 +2435,9 @@ end
 
 function renderer.render(snapshot, state, services)
     local gui, formatter = services.gui, services.powerFormat
+    local function tr(key, fallback)
+        return services.i18n and services.i18n.get(key, nil, fallback) or fallback
+    end
     local width, height = term.getSize()
     state.page = state.page or "home"
     state.selected = state.selected or { reactors = 1, turbines = 1, power = 1 }
@@ -2353,14 +2450,14 @@ function renderer.render(snapshot, state, services)
     gui.text(1, 2, " " .. status .. " ", colors.black,
         alarm and (alarmLevel >= 3 and colors.red or colors.orange) or colors.lime)
     local buttons, x = {}, 1
-    buttons.home = gui.button(x, 4, "HOME", colors.white, state.page == "home" and colors.gray or colors.black)
+    buttons.home = gui.button(x, 4, tr("nav.home", "HOME"), colors.white, state.page == "home" and colors.gray or colors.black)
     x = buttons.home.x2 + 2
-    buttons.reactors = gui.button(x, 4, "REACTORS", colors.red, state.page == "reactors" and colors.gray or colors.black)
+    buttons.reactors = gui.button(x, 4, tr("nav.reactors", "REACTORS"), colors.red, state.page == "reactors" and colors.gray or colors.black)
     x = buttons.reactors.x2 + 2
-    buttons.turbines = gui.button(x, 4, "TURBINES", colors.cyan, state.page == "turbines" and colors.gray or colors.black)
+    buttons.turbines = gui.button(x, 4, tr("nav.turbines", "TURBINES"), colors.cyan, state.page == "turbines" and colors.gray or colors.black)
     x = buttons.turbines.x2 + 2
-    buttons.power = gui.button(x, 4, "POWER", colors.yellow, state.page == "power" and colors.gray or colors.black)
-    buttons.advanced = gui.button(1, height, "ADVANCED", colors.white, colors.gray)
+    buttons.power = gui.button(x, 4, tr("nav.power", "POWER"), colors.yellow, state.page == "power" and colors.gray or colors.black)
+    buttons.advanced = gui.button(1, height, tr("nav.advanced", "ADVANCED"), colors.white, colors.gray)
     if services.allowEmergency and alarm and alarm.facilityNodeId then
         buttons.scram = gui.button(math.max(12, width - 8), height,
             "SCRAM", colors.white, colors.red)
@@ -2511,6 +2608,27 @@ return renderer
 -- @section PROGRAM ENTRYPOINT
 local args = { ... }
 local config = dofile("/helios/core/config.lua").load()
+
+if args[1] == "language" then
+    local i18n = dofile("/helios/core/i18n.lua")
+    local action = args[2] or "list"
+    if action == "list" then
+        for _, pack in ipairs(i18n.available()) do
+            print((pack.id == config.ui.language and "* " or "  ") .. pack.id .. " - " .. pack.name)
+        end
+    elseif action == "set" then
+        local wanted, found = tostring(args[3] or ""), false
+        for _, pack in ipairs(i18n.available()) do if pack.id == wanted then found = true break end end
+        if not found then error("Language pack is not installed: " .. wanted, 0) end
+        config.ui.language = wanted
+        local ok, reason = dofile("/helios/core/config.lua").save(config)
+        if not ok then error("Could not save HELIOS configuration: " .. tostring(reason), 0) end
+        print("HELIOS language set to " .. wanted .. ". Restart HELIOS to apply it.")
+    else
+        error("Usage: helios language [list|set <language_id>]", 0)
+    end
+    return
+end
 
 if config.role == "guardian" then
     dofile("/helios/draconic/controller.lua")
@@ -2687,6 +2805,67 @@ else
 end
 ]=],
 
+    ["lang/en_us.lua"] = [=[
+return {
+    id = "en_us",
+    name = "English (US)",
+    strings = {
+        ["common.online"] = "ONLINE",
+        ["common.waiting"] = "WAITING",
+        ["common.unknown"] = "UNKNOWN",
+        ["common.read_only"] = "READ ONLY",
+        ["common.quit"] = "Q quit",
+        ["common.back"] = "BACK",
+        ["common.state"] = "State",
+        ["common.generation"] = "Generation",
+        ["common.core_temperature"] = "Core temperature",
+        ["common.field_strength"] = "Field strength",
+        ["common.saturation"] = "Saturation",
+        ["common.fuel_conversion"] = "Fuel conversion",
+        ["common.telemetry_lost"] = "TELEMETRY LOST",
+        ["nav.home"] = "HOME",
+        ["nav.overview"] = "OVERVIEW",
+        ["nav.reactors"] = "REACTORS",
+        ["nav.turbines"] = "TURBINES",
+        ["nav.power"] = "POWER",
+        ["nav.advanced"] = "ADVANCED",
+        ["nav.settings"] = "SETTINGS",
+        ["nav.raw_data"] = "RAW DATA",
+        ["nav.setup"] = "SETUP",
+        ["nav.manual_gates"] = "MANUAL GATES",
+        ["alarm.critical"] = "CRITICAL",
+        ["alarm.guardian_critical"] = "Guardian reports a critical alarm",
+        ["profiler.title"] = "HELIOS // DRACONIC PROFILER  {version}",
+        ["profiler.guardian_status"] = "Guardian {id}  {status}",
+        ["profiler.wireless_modem"] = "Wireless modem: {name}",
+        ["profiler.subscription_wait"] = "Read-only subscription requests are being sent.",
+        ["profiler.confirm_wireless"] = "Confirm the Guardian also has a wireless modem.",
+        ["profiler.operating_point"] = "LIVE OPERATING POINT",
+        ["profiler.field_input_drain"] = "Field input/drain",
+        ["profiler.trend"] = "TREND",
+        ["profiler.output_bracket"] = "OUTPUT BRACKET: {output} RF/t",
+        ["profiler.observed_stable"] = "Observed: {observed}s   Stable: {stable}s",
+        ["profiler.field_range"] = "Field range: {minimum} - {maximum}",
+        ["profiler.core_range"] = "Core range: {minimum} - {maximum} C",
+        ["profiler.fuel_range"] = "Fuel range: {minimum} - {maximum}",
+        ["profiler.footer"] = "READ ONLY | Guardian {version} | Q quit",
+        ["profiler.waiting"] = "Waiting for Guardian telemetry",
+        ["profiler.link_stale"] = "No recent Guardian telemetry",
+        ["profiler.reactor_wait"] = "Waiting for an online operating state",
+        ["profiler.settling"] = "Output bracket changed recently",
+        ["profiler.observing"] = "Building a warm-state trend",
+        ["profiler.deteriorating"] = "Field is falling or temperature is rising",
+        ["profiler.stable"] = "Warm-state output bracket is holding",
+        ["profiler.improving"] = "Containment or temperature is still improving",
+        ["profiler.unsettled"] = "Trend has not settled",
+        ["guardian.title"] = "HELIOS // DRACONIC GUARDIAN  {version}",
+        ["guardian.automatic"] = "AUTOMATIC SAFE SUPERVISION",
+        ["guardian.assisted"] = "ASSISTED MANUAL - HARD SAFETY INTERLOCKS ACTIVE",
+        ["guardian.unrestricted"] = "UNRESTRICTED CONTROL - AUTOMATIC INTERVENTION DISABLED",
+    },
+}
+]=],
+
     ["mainframe/device_registry.lua"] = [=[
 -- @section PERIPHERAL DISCOVERY AND REGISTRY
 local registry = {}
@@ -2812,6 +2991,8 @@ function mainframe.run(config)
     display.start(config)
     local ui = dofile("/helios/core/ui.lua")
     ui.setVersion(config.version)
+    local language = dofile("/helios/core/i18n.lua").new(config)
+    local function tr(key, values, fallback) return language.get(key, values, fallback) end
     local gui = dofile("/helios/core/gui.lua")
     local guiLoader = dofile("/helios/core/gui_loader.lua")
     local uiContract = dofile("/helios/core/ui_contract.lua")
@@ -3738,11 +3919,11 @@ function mainframe.run(config)
         ui.setIdConflicts(idConflicts)
         dashboardButtons = {}
         ui.header("HELIOS", "Central power management", function()
-            dashboardButtons.reactors = ui.inlineButton("REACTORS", colors.red)
+            dashboardButtons.reactors = ui.inlineButton(tr("nav.reactors"), colors.red)
             write(" ")
-            dashboardButtons.turbines = ui.inlineButton("TURBINES", colors.blue)
+            dashboardButtons.turbines = ui.inlineButton(tr("nav.turbines"), colors.blue)
             write(" ")
-            dashboardButtons.storage = ui.inlineButton("POWER", colors.yellow)
+            dashboardButtons.storage = ui.inlineButton(tr("nav.power"), colors.yellow)
             print("")
         end)
         ui.status("System", "ONLINE", colors.lime)
@@ -5500,7 +5681,7 @@ function mainframe.run(config)
                 draw()
                 display.useMonitors()
                 local ok, rendered = pcall(customRenderer.render, snapshotFor("all"), customState, {
-                    gui = gui, powerFormat = powerFormat, allowEmergency = true,
+                    gui = gui, powerFormat = powerFormat, allowEmergency = true, i18n = language,
                 })
                 if ok then customButtons = rendered or {} else customRenderer = nil end
                 display.useNative()
@@ -8092,6 +8273,8 @@ function terminal.run(config)
     display.start(config)
     local ui = dofile("/helios/core/ui.lua")
     ui.setVersion(config.version)
+    local language = dofile("/helios/core/i18n.lua").new(config)
+    local function tr(key, values, fallback) return language.get(key, values, fallback) end
     local gui = dofile("/helios/core/gui.lua")
     local guiLoader = dofile("/helios/core/gui_loader.lua")
     local configStore = dofile("/helios/core/config.lua")
@@ -8386,18 +8569,18 @@ function terminal.run(config)
             math.max(0, width - #state - 3))
         graphicalButtons = {}
         local x = 1
-        graphicalButtons.overview = gui.button(x, 4, "HOME", colors.white,
+        graphicalButtons.overview = gui.button(x, 4, tr("nav.home"), colors.white,
             graphicalPage == "overview" and colors.gray or colors.black)
         x = graphicalButtons.overview.x2 + 2
-        graphicalButtons.reactors = gui.button(x, 4, "REACTORS", colors.red,
+        graphicalButtons.reactors = gui.button(x, 4, tr("nav.reactors"), colors.red,
             graphicalPage == "reactors" and colors.gray or colors.black)
         x = graphicalButtons.reactors.x2 + 2
-        graphicalButtons.turbines = gui.button(x, 4, "TURBINES", colors.cyan,
+        graphicalButtons.turbines = gui.button(x, 4, tr("nav.turbines"), colors.cyan,
             graphicalPage == "turbines" and colors.gray or colors.black)
         x = graphicalButtons.turbines.x2 + 2
-        graphicalButtons.storage = gui.button(x, 4, "POWER", colors.yellow,
+        graphicalButtons.storage = gui.button(x, 4, tr("nav.power"), colors.yellow,
             graphicalPage == "storage" and colors.gray or colors.black)
-        graphicalButtons.advanced = gui.button(1, height, "ADVANCED", colors.white, colors.gray)
+        graphicalButtons.advanced = gui.button(1, height, tr("nav.advanced"), colors.white, colors.gray)
     end
 
     local function graphicalOverview()
@@ -8572,7 +8755,7 @@ function terminal.run(config)
             renderAdvanced()
         elseif customRenderer and snapshot then
             local ok, result = pcall(customRenderer.render, snapshot, customState, {
-                gui = gui, powerFormat = powerFormat,
+                gui = gui, powerFormat = powerFormat, i18n = language,
             })
             if ok then customButtons = result or {} else customRenderer = nil; renderGraphical() end
         else
@@ -8860,6 +9043,12 @@ local GUARDIAN_VERSION = "1.1.0-alpha.10"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
+local language
+if fs.exists("/helios/core/i18n.lua") and fs.exists("/helios/config.lua") then
+  local ok,service=pcall(function() return dofile("/helios/core/i18n.lua").new(dofile("/helios/config.lua")) end)
+  if ok then language=service end
+end
+local function tr(key,values,fallback) return language and language.get(key,values,fallback) or fallback end
 local facilityNetwork,facilityProtocol,facilityIdentity,facilitySequence
 local facilityConnected,facilityLastWelcome=false,nil
 local facilityCollectorId,facilityCollectorRole,facilityCollectorPriority=nil,nil,-1
@@ -9263,9 +9452,9 @@ local function supervise(b,d,c)
   if live then gate(b.input,injectorCap);gate(b.output,c.rated*(FRACTION[c.request] or 0));c.message=(free and "UNRESTRICTED" or "ASSISTED").." "..c.request.." output applied" end
 end
 local function draw(t,b,d,page,c,bs)
-  local w,h=t.getSize();t.setBackgroundColor(colors.black);t.setTextColor(colors.white);t.clear();text(t,1,1,"HELIOS // DRACONIC GUARDIAN  "..GUARDIAN_VERSION,colors.yellow)
-  local banner=c.mode=="UNRESTRICTED" and "UNRESTRICTED CONTROL - AUTOMATIC INTERVENTION DISABLED" or c.mode=="ASSISTED" and "ASSISTED MANUAL - HARD SAFETY INTERLOCKS ACTIVE" or "AUTOMATIC SAFE SUPERVISION"
-  text(t,1,2,banner,c.mode=="UNRESTRICTED" and colors.red or colors.lime);text(t,1,3,"[OVERVIEW] [RAW DATA] [SETUP] [MANUAL GATES]",colors.cyan)
+  local w,h=t.getSize();t.setBackgroundColor(colors.black);t.setTextColor(colors.white);t.clear();text(t,1,1,tr("guardian.title",{version=GUARDIAN_VERSION},"HELIOS // DRACONIC GUARDIAN  "..GUARDIAN_VERSION),colors.yellow)
+  local banner=c.mode=="UNRESTRICTED" and tr("guardian.unrestricted",nil,"UNRESTRICTED CONTROL - AUTOMATIC INTERVENTION DISABLED") or c.mode=="ASSISTED" and tr("guardian.assisted",nil,"ASSISTED MANUAL - HARD SAFETY INTERLOCKS ACTIVE") or tr("guardian.automatic",nil,"AUTOMATIC SAFE SUPERVISION")
+  text(t,1,2,banner,c.mode=="UNRESTRICTED" and colors.red or colors.lime);text(t,1,3,"["..tr("nav.overview",nil,"OVERVIEW").."] ["..tr("nav.raw_data",nil,"RAW DATA").."] ["..tr("nav.setup",nil,"SETUP").."] ["..tr("nav.manual_gates",nil,"MANUAL GATES").."]",colors.cyan)
   if not b.ready then text(t,1,5,"SETUP INVALID",colors.red);for i,v in ipairs(b.reasons) do text(t,1,5+i,"- "..v) end;return end
   if not d then text(t,1,5,"TELEMETRY LOST",colors.red);return end
   local critical,criticalMessage=imminentMeltdown(d.reactor)
@@ -9732,6 +9921,9 @@ local function buildConfig(role, display, existing, profilerGuardianId)
             showPeripheralNames = uiSettings.showPeripheralNames == true,
             monitorTextScale = tonumber(uiSettings.monitorTextScale) or 0.5,
             renderer = type(uiSettings.renderer) == "string" and uiSettings.renderer or "default",
+            language = type(uiSettings.language) == "string" and
+                uiSettings.language:match("^[a-z][a-z]_[a-z][a-z]$") and
+                uiSettings.language or "en_us",
         },
         power = {
             unit = ({ FE = true, RF = true, J = true, EU = true })[power.unit] and power.unit or "FE",
@@ -9982,6 +10174,20 @@ local function runInstaller()
     local stagedData = fs.combine(STAGE_DIR, "data")
     if fs.exists(existingData) and not fs.exists(stagedData) then
         fs.copy(existingData, stagedData)
+    end
+    -- Language packs are operator-installed content. Preserve every custom
+    -- pack while replacing the bundled English fallback with this release.
+    local existingLanguages = fs.combine(INSTALL_DIR, "lang")
+    local stagedLanguages = fs.combine(STAGE_DIR, "lang")
+    if fs.exists(existingLanguages) and fs.isDir(existingLanguages) then
+        if not fs.exists(stagedLanguages) then fs.makeDir(stagedLanguages) end
+        for _, file in ipairs(fs.list(existingLanguages)) do
+            local source = fs.combine(existingLanguages, file)
+            local destination = fs.combine(stagedLanguages, file)
+            if file ~= "en_us.lua" and not fs.exists(destination) and not fs.isDir(source) then
+                fs.copy(source, destination)
+            end
+        end
     end
     local legacyGuardianState = "/.helios-draconic-guardian.lua"
     local stagedGuardianState = fs.combine(stagedData, "draconic_guardian.lua")

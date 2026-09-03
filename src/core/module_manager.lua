@@ -1,6 +1,6 @@
 -- @section MODULE PACK DOWNLOAD AND VALIDATION
 local manager = {}
-local BASE_URL = "https://raw.githubusercontent.com/ssj8vegetrunks/HELIOS/agent/ui-module-contract-alpha4/module-pack"
+local BASE_URL = "https://raw.githubusercontent.com/ssj8vegetrunks/HELIOS/agent/facility-network-alpha1/module-pack"
 local MODULE_DIR = "/helios/modules"
 local STAGE_DIR = "/.helios-module-update"
 local BACKUP_DIR = "/helios/modules.previous"

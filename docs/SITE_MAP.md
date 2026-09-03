@@ -26,6 +26,7 @@ HELIOS/
 |   |-- TESTING.md
 |   |-- SITE_MAP.md
 |   |-- DEPENDENCY_MAP.md
+|   |-- LANGUAGE_PACKS.md
 |   `-- detailed design/API references
 |-- module-template/
 |   |-- README.md
@@ -41,6 +42,7 @@ HELIOS/
 |   |-- mainframe/
 |   |-- terminal/
 |   |-- gui/
+|   |-- lang/
 |   `-- helios.lua
 |-- scripts/
 `-- tests/
@@ -55,6 +57,7 @@ HELIOS/
 |-- data/            (persistent local state and facility registry)
 |-- draconic/        (Draconic Guardian and Profiler roles)
 |-- gui/
+|-- lang/            (English fallback and installed language packs)
 |-- mainframe/       (Mainframe role)
 |-- terminal/        (Remote role)
 |-- modules/         (Mainframe role; downloaded Module Pack)

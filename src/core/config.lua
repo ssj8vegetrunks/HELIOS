@@ -32,6 +32,8 @@ function config.load()
     loaded.ui.showPeripheralNames = loaded.ui.showPeripheralNames == true
     loaded.ui.monitorTextScale = tonumber(loaded.ui.monitorTextScale) or 0.5
     loaded.ui.renderer = type(loaded.ui.renderer) == "string" and loaded.ui.renderer or "default"
+    loaded.ui.language = type(loaded.ui.language) == "string" and
+        loaded.ui.language:match("^[a-z][a-z]_[a-z][a-z]$") and loaded.ui.language or "en_us"
     loaded.control = loaded.control or {}
     -- Manual authority is deliberately never restored after a reboot.
     loaded.control.mode = "automatic"

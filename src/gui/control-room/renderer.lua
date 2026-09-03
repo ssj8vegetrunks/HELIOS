@@ -43,6 +43,9 @@ end
 
 function renderer.render(snapshot, state, services)
     local gui, formatter = services.gui, services.powerFormat
+    local function tr(key, fallback)
+        return services.i18n and services.i18n.get(key, nil, fallback) or fallback
+    end
     local width, height = term.getSize()
     state.page = state.page or "home"
     state.selected = state.selected or { reactors = 1, turbines = 1, power = 1 }
@@ -55,14 +58,14 @@ function renderer.render(snapshot, state, services)
     gui.text(1, 2, " " .. status .. " ", colors.black,
         alarm and (alarmLevel >= 3 and colors.red or colors.orange) or colors.lime)
     local buttons, x = {}, 1
-    buttons.home = gui.button(x, 4, "HOME", colors.white, state.page == "home" and colors.gray or colors.black)
+    buttons.home = gui.button(x, 4, tr("nav.home", "HOME"), colors.white, state.page == "home" and colors.gray or colors.black)
     x = buttons.home.x2 + 2
-    buttons.reactors = gui.button(x, 4, "REACTORS", colors.red, state.page == "reactors" and colors.gray or colors.black)
+    buttons.reactors = gui.button(x, 4, tr("nav.reactors", "REACTORS"), colors.red, state.page == "reactors" and colors.gray or colors.black)
     x = buttons.reactors.x2 + 2
-    buttons.turbines = gui.button(x, 4, "TURBINES", colors.cyan, state.page == "turbines" and colors.gray or colors.black)
+    buttons.turbines = gui.button(x, 4, tr("nav.turbines", "TURBINES"), colors.cyan, state.page == "turbines" and colors.gray or colors.black)
     x = buttons.turbines.x2 + 2
-    buttons.power = gui.button(x, 4, "POWER", colors.yellow, state.page == "power" and colors.gray or colors.black)
-    buttons.advanced = gui.button(1, height, "ADVANCED", colors.white, colors.gray)
+    buttons.power = gui.button(x, 4, tr("nav.power", "POWER"), colors.yellow, state.page == "power" and colors.gray or colors.black)
+    buttons.advanced = gui.button(1, height, tr("nav.advanced", "ADVANCED"), colors.white, colors.gray)
     if services.allowEmergency and alarm and alarm.facilityNodeId then
         buttons.scram = gui.button(math.max(12, width - 8), height,
             "SCRAM", colors.white, colors.red)
