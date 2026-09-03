@@ -328,9 +328,10 @@ function terminal.run(config)
         gui.text(1, 6, "SYSTEM READINESS", colors.lightGray)
         gui.text(1, 7, state, colour)
         gui.text(1, 8, detail, colors.white, colors.black, width)
-        gui.text(1, 10, ("REACTORS  %d   TURBINES  %d   STORAGE  %d"):format(
-            #(snapshot.reactors or {}), #(snapshot.turbines or {}),
-            #(snapshot.storages or {})), colors.cyan)
+        gui.text(1, 10, tr("dashboard.device_counts", {
+            reactors = #(snapshot.reactors or {}), turbines = #(snapshot.turbines or {}),
+            storage = #(snapshot.storages or {}),
+        }, "REACTORS  {reactors}   TURBINES  {turbines}   STORAGE  {storage}"), colors.cyan)
         local stored, capacity = 0, 0
         for _, storage in ipairs(snapshot.storages or {}) do
             stored = stored + (tonumber(storage.stored) or 0)

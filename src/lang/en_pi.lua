@@ -56,6 +56,7 @@ return {
         ["dashboard.matrix_value"] = "{cells} cells / {providers} mates", ["dashboard.cyanite"] = "BLUE SPOILS",
         ["dashboard.more_devices"] = "+ {count} more below deck (run: helios scan)",
         ["dashboard.gui"] = "CHART", ["dashboard.keyboard_help"] = "Keys: B chart | V/G/E/C/A/R/S | Q abandon ship",
+        ["dashboard.device_counts"] = "HEARTS  {reactors}   SAILS  {turbines}   HOLDS  {storage}",
         ["value.active"] = "SAILIN'", ["value.offline"] = "MOORED",
         ["value.ready"] = "SHIPSHAPE", ["value.running"] = "SAILIN'",
         ["value.stable"] = "STEADY", ["value.hold"] = "HOLD FAST",

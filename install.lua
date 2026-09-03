@@ -1,7 +1,7 @@
 -- HELIOS single-file installer
 -- Manual-control alpha: guarded direct plant authority.
 
-local VERSION = "1.6.0-alpha.10"
+local VERSION = "1.6.0-alpha.11"
 local INSTALL_DIR = "/helios"
 local STAGE_DIR = "/.helios-install"
 local MODULE_PACK_BASE_URL = "https://raw.githubusercontent.com/ssj8vegetrunks/HELIOS/agent/facility-network-alpha1/module-pack"
@@ -2538,7 +2538,7 @@ return {
     name = "HELIOS Control Room",
     version = "1.0.0",
     apiVersion = 1,
-    compatibleCoreVersions = { "1.6.0-alpha.4", "1.6.0-alpha.5", "1.6.0-alpha.6", "1.6.0-alpha.7", "1.6.0-alpha.8", "1.6.0-alpha.9", "1.6.0-alpha.10" },
+    compatibleCoreVersions = { "1.6.0-alpha.4", "1.6.0-alpha.5", "1.6.0-alpha.6", "1.6.0-alpha.7", "1.6.0-alpha.8", "1.6.0-alpha.9", "1.6.0-alpha.10", "1.6.0-alpha.11" },
     entry = "renderer.lua",
     minimumWidth = 50,
     minimumHeight = 31,
@@ -3044,6 +3044,7 @@ return {
         ["dashboard.matrix_value"] = "{cells} cells / {providers} mates", ["dashboard.cyanite"] = "BLUE SPOILS",
         ["dashboard.more_devices"] = "+ {count} more below deck (run: helios scan)",
         ["dashboard.gui"] = "CHART", ["dashboard.keyboard_help"] = "Keys: B chart | V/G/E/C/A/R/S | Q abandon ship",
+        ["dashboard.device_counts"] = "HEARTS  {reactors}   SAILS  {turbines}   HOLDS  {storage}",
         ["value.active"] = "SAILIN'", ["value.offline"] = "MOORED",
         ["value.ready"] = "SHIPSHAPE", ["value.running"] = "SAILIN'",
         ["value.stable"] = "STEADY", ["value.hold"] = "HOLD FAST",
@@ -3176,6 +3177,7 @@ return {
         ["dashboard.matrix_value"] = "{cells} cells / {providers} providers", ["dashboard.cyanite"] = "CYANITE",
         ["dashboard.more_devices"] = "+ {count} more (run: helios scan)",
         ["dashboard.gui"] = "GUI", ["dashboard.keyboard_help"] = "Keyboard: B GUI | V/G/E/C/A/R/S | Q exit",
+        ["dashboard.device_counts"] = "REACTORS  {reactors}   TURBINES  {turbines}   STORAGE  {storage}",
         ["value.active"] = "ACTIVE", ["value.offline"] = "OFFLINE",
         ["value.ready"] = "READY", ["value.running"] = "RUNNING",
         ["value.stable"] = "STABLE", ["value.hold"] = "HOLD",
@@ -3308,6 +3310,7 @@ return {
         ["dashboard.matrix_value"] = "{cells} cellules / {providers} fournisseurs", ["dashboard.cyanite"] = "CYANITE",
         ["dashboard.more_devices"] = "+ {count} autres (commande : helios scan)",
         ["dashboard.gui"] = "INTERFACE", ["dashboard.keyboard_help"] = "Clavier : B interface | V/G/E/C/A/R/S | Q quitter",
+        ["dashboard.device_counts"] = "REACTEURS  {reactors}   TURBINES  {turbines}   STOCKAGE  {storage}",
         ["value.active"] = "ACTIF", ["value.offline"] = "HORS LIGNE",
         ["value.ready"] = "PRET", ["value.running"] = "EN MARCHE",
         ["value.stable"] = "STABLE", ["value.hold"] = "MAINTIEN",
@@ -6010,8 +6013,10 @@ function mainframe.run(config)
             state, detail = tv(state), tv(detail)
             gui.text(1, 7, state, colour)
             gui.text(1, 8, detail, colors.white, colors.black, width)
-            gui.text(1, 10, ("REACTORS  %d   TURBINES  %d   STORAGE  %d"):format(
-                #displayedReactors(), #turbines, #storages), colors.cyan)
+            gui.text(1, 10, tr("dashboard.device_counts", {
+                reactors = #displayedReactors(), turbines = #turbines,
+                storage = #storages,
+            }, "REACTORS  {reactors}   TURBINES  {turbines}   STORAGE  {storage}"), colors.cyan)
             local reserve = minimumPowerReserve()
             gui.text(1, 12, tr("dashboard.power_reserve"), colors.lightGray)
             gui.progress(1, 13, math.max(10, width - 8), reserve or 0,
@@ -9112,9 +9117,10 @@ function terminal.run(config)
         gui.text(1, 6, "SYSTEM READINESS", colors.lightGray)
         gui.text(1, 7, state, colour)
         gui.text(1, 8, detail, colors.white, colors.black, width)
-        gui.text(1, 10, ("REACTORS  %d   TURBINES  %d   STORAGE  %d"):format(
-            #(snapshot.reactors or {}), #(snapshot.turbines or {}),
-            #(snapshot.storages or {})), colors.cyan)
+        gui.text(1, 10, tr("dashboard.device_counts", {
+            reactors = #(snapshot.reactors or {}), turbines = #(snapshot.turbines or {}),
+            storage = #(snapshot.storages or {}),
+        }, "REACTORS  {reactors}   TURBINES  {turbines}   STORAGE  {storage}"), colors.cyan)
         local stored, capacity = 0, 0
         for _, storage in ipairs(snapshot.storages or {}) do
             stored = stored + (tonumber(storage.stored) or 0)

@@ -2510,8 +2510,10 @@ function mainframe.run(config)
             state, detail = tv(state), tv(detail)
             gui.text(1, 7, state, colour)
             gui.text(1, 8, detail, colors.white, colors.black, width)
-            gui.text(1, 10, ("REACTORS  %d   TURBINES  %d   STORAGE  %d"):format(
-                #displayedReactors(), #turbines, #storages), colors.cyan)
+            gui.text(1, 10, tr("dashboard.device_counts", {
+                reactors = #displayedReactors(), turbines = #turbines,
+                storage = #storages,
+            }, "REACTORS  {reactors}   TURBINES  {turbines}   STORAGE  {storage}"), colors.cyan)
             local reserve = minimumPowerReserve()
             gui.text(1, 12, tr("dashboard.power_reserve"), colors.lightGray)
             gui.progress(1, 13, math.max(10, width - 8), reserve or 0,

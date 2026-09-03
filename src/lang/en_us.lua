@@ -56,6 +56,7 @@ return {
         ["dashboard.matrix_value"] = "{cells} cells / {providers} providers", ["dashboard.cyanite"] = "CYANITE",
         ["dashboard.more_devices"] = "+ {count} more (run: helios scan)",
         ["dashboard.gui"] = "GUI", ["dashboard.keyboard_help"] = "Keyboard: B GUI | V/G/E/C/A/R/S | Q exit",
+        ["dashboard.device_counts"] = "REACTORS  {reactors}   TURBINES  {turbines}   STORAGE  {storage}",
         ["value.active"] = "ACTIVE", ["value.offline"] = "OFFLINE",
         ["value.ready"] = "READY", ["value.running"] = "RUNNING",
         ["value.stable"] = "STABLE", ["value.hold"] = "HOLD",
