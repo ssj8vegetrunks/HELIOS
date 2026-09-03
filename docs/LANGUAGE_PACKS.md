@@ -2,8 +2,10 @@
 
 HELIOS language packs are data-only Lua tables stored in `/helios/lang/`.
 English (`en_us`) is always installed and is the fallback for every missing
-translation. A damaged, incomplete, or absent selected pack therefore cannot
-produce blank labels or disable controls.
+translation. Canadian French (`fr_ca`) and Pirate English (`en_pi`) are bundled
+as live-test packs. Pirate intentionally uses longer labels to expose cramped
+monitor layouts. A damaged, incomplete, or absent selected pack therefore
+cannot produce blank labels or disable controls.
 
 ## Selecting a language
 

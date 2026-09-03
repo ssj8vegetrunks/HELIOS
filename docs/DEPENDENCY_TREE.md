@@ -98,7 +98,15 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 - depends on → `terminal/main.lua`
 - depends on → `tools/discovery_probe.lua`
 
+### `lang/en_pi.lua`
+
+- No HELIOS module dependencies detected.
+
 ### `lang/en_us.lua`
+
+- No HELIOS module dependencies detected.
+
+### `lang/fr_ca.lua`
 
 - No HELIOS module dependencies detected.
 
@@ -264,7 +272,15 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 
 - No HELIOS modules directly depend on this module.
 
+### `lang/en_pi.lua`
+
+- No HELIOS modules directly depend on this module.
+
 ### `lang/en_us.lua`
+
+- No HELIOS modules directly depend on this module.
+
+### `lang/fr_ca.lua`
 
 - No HELIOS modules directly depend on this module.
 
