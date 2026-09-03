@@ -8,6 +8,7 @@ function terminal.run(config)
     ui.setVersion(config.version)
     local language = dofile("/helios/core/i18n.lua").new(config)
     local function tr(key, values, fallback) return language.get(key, values, fallback) end
+    local function tv(value) return language.value(value) end
     local gui = dofile("/helios/core/gui.lua")
     local guiLoader = dofile("/helios/core/gui_loader.lua")
     local configStore = dofile("/helios/core/config.lua")
@@ -171,7 +172,7 @@ function terminal.run(config)
         renderList("REACTORS", state.reactors, state, function(item)
             ui.status("Mode", string.upper(item.mode or "unknown"))
             if item.error then ui.status("Telemetry", item.error, colors.red) return end
-            ui.status("State", item.active == true and "ACTIVE" or item.active == false and "OFFLINE" or "UNKNOWN")
+            ui.status(tr("common.state"), tv(item.active == true and "ACTIVE" or item.active == false and "OFFLINE" or "UNKNOWN"))
             ui.status("Fuel / use", ("%s / %s"):format(
                 formatValue(item.fuelPercent, "%"),
                 formatValue(item.fuelUse, " mB/t")))
@@ -189,15 +190,15 @@ function terminal.run(config)
                     formatValue(item.hotFluidPercent, "%")))
                 ui.status("Rods range / exposed",
                     formatRodLayout(item, plan.currentRodExposure))
-                ui.status("Governor", (plan.state or "WAITING") .. " / " ..
-                    (plan.actuatorState or "WAITING"),
+                ui.status(tr("common.governor"), tv(plan.state or "WAITING") .. " / " ..
+                    tv(plan.actuatorState or "WAITING"),
                     (plan.trusted == false or plan.actuatorState == "FAULT") and
                         colors.red or
                     ((plan.state == "STEAM DEFICIT" or
                       plan.state == "STEAM SURPLUS") and colors.orange or colors.lime))
             else
-                ui.status("Power output", powerFormat.power(item.energyProduction, state.power, true), colors.cyan)
-                ui.status("Energy buffer", formatValue(item.energyPercent, "%"))
+                ui.status(tr("common.power_output"), powerFormat.power(item.energyProduction, state.power, true), colors.cyan)
+                ui.status(tr("common.energy_buffer"), formatValue(item.energyPercent, "%"))
             end
         end)
     end
@@ -205,14 +206,14 @@ function terminal.run(config)
     local function renderTurbines(state)
         renderList("TURBINES", state.turbines, state, function(item)
             if item.error then ui.status("Telemetry", item.error, colors.red) return end
-            ui.status("State", item.active == true and "ACTIVE" or item.active == false and "OFFLINE" or "UNKNOWN")
-            ui.status("Rotor speed", formatValue(item.rotorSpeed, " RPM"), colors.cyan)
+            ui.status(tr("common.state"), tv(item.active == true and "ACTIVE" or item.active == false and "OFFLINE" or "UNKNOWN"))
+            ui.status(tr("common.rotor_speed"), formatValue(item.rotorSpeed, " RPM"), colors.cyan)
             local plan = item.governor or {}
-            ui.status("Governor", (plan.state or "WAITING") .. " / " ..
-                (plan.actuatorState or "WAITING"),
+            ui.status(tr("common.governor"), tv(plan.state or "WAITING") .. " / " ..
+                tv(plan.actuatorState or "WAITING"),
                 (plan.trusted == false or plan.actuatorState == "FAULT") and colors.red or colors.lime)
-            ui.status("Power output", powerFormat.power(item.energyProduction, state.power, true), colors.cyan)
-            ui.status("Energy buffer", formatValue(item.energyPercent, "%"))
+            ui.status(tr("common.power_output"), powerFormat.power(item.energyProduction, state.power, true), colors.cyan)
+            ui.status(tr("common.energy_buffer"), formatValue(item.energyPercent, "%"))
             if plan.currentFlow ~= nil and plan.recommendedFlow ~= nil then
                 ui.status("Flow actual/set/plan", ("%s / %.0f -> %.0f"):format(
                     plan.actualFlow and ("%.0f"):format(plan.actualFlow) or "N/A",
@@ -220,20 +221,20 @@ function terminal.run(config)
             else
                 ui.status("Flow actual/set/plan", "N/A / HOLD", colors.gray)
             end
-            ui.status("Inductor", item.inductorEngaged == true and "ENGAGED" or item.inductorEngaged == false and "DISENGAGED" or "N/A")
+            ui.status(tr("common.inductor"), tv(item.inductorEngaged == true and "ENGAGED" or item.inductorEngaged == false and "DISENGAGED" or "N/A"))
         end)
     end
 
     local function renderStorage(state)
         renderList("STORAGE", state.storages, state, function(item)
-            ui.status("Driver", item.adapterName or "UNKNOWN", item.fallback and colors.orange or colors.lime)
+            ui.status(tr("common.driver"), item.adapterName or tv("UNKNOWN"), item.fallback and colors.orange or colors.lime)
             if item.error then ui.status("Telemetry", item.error, colors.red) return end
-            ui.status("Charge", formatValue(item.percent, "%"), colors.cyan)
-            ui.status("Stored", powerFormat.power(item.stored, state.power, false) .. " / " .. powerFormat.power(item.capacity, state.power, false))
-            ui.status("Input", powerFormat.power(item.input, state.power, true))
-            ui.status("Output", powerFormat.power(item.output, state.power, true))
-            ui.status("Net", powerFormat.power(item.net, state.power, true))
-            ui.status("State", item.state or "UNKNOWN")
+            ui.status(tr("common.charge"), formatValue(item.percent, "%"), colors.cyan)
+            ui.status(tr("common.stored"), powerFormat.power(item.stored, state.power, false) .. " / " .. powerFormat.power(item.capacity, state.power, false))
+            ui.status(tr("common.input"), powerFormat.power(item.input, state.power, true))
+            ui.status(tr("common.output"), powerFormat.power(item.output, state.power, true))
+            ui.status(tr("common.net"), powerFormat.power(item.net, state.power, true))
+            ui.status(tr("common.state"), tv(item.state or "UNKNOWN"))
         end)
     end
 

@@ -32,6 +32,10 @@ local function replace(template, values)
     end))
 end
 
+local function valueKey(value)
+    return "value." .. tostring(value):lower():gsub("[^%w]+", "_"):gsub("^_+", ""):gsub("_+$", "")
+end
+
 function i18n.available()
     local result = {}
     if fs.exists(PACK_DIR) and fs.isDir(PACK_DIR) then
@@ -66,6 +70,13 @@ function i18n.new(config)
         if #value <= width then return value end
         if width <= 3 then return value:sub(1, width) end
         return value:sub(1, width - 3) .. "..."
+    end
+    -- Translate API/governor enum values only when a language pack explicitly
+    -- provides a mapping. Unknown device text is deliberately preserved.
+    function service.value(value)
+        if value == nil then return service.get("common.unknown") end
+        local key = valueKey(value)
+        return replace(selected.strings[key] or fallback.strings[key] or tostring(value))
     end
     return service
 end

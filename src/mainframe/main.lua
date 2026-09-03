@@ -8,6 +8,7 @@ function mainframe.run(config)
     ui.setVersion(config.version)
     local language = dofile("/helios/core/i18n.lua").new(config)
     local function tr(key, values, fallback) return language.get(key, values, fallback) end
+    local function tv(value) return language.value(value) end
     local gui = dofile("/helios/core/gui.lua")
     local guiLoader = dofile("/helios/core/gui_loader.lua")
     local uiContract = dofile("/helios/core/ui_contract.lua")
@@ -2480,42 +2481,42 @@ function mainframe.run(config)
                 math.max(0, width - #state - 3))
             buttons = {}
             local x = 1
-            buttons.overview = gui.button(x, 4, "HOME", colors.white,
+            buttons.overview = gui.button(x, 4, tr("nav.home"), colors.white,
                 page == "overview" and colors.gray or colors.black)
             x = buttons.overview.x2 + 2
-            buttons.reactors = gui.button(x, 4, "REACTORS", colors.red,
+            buttons.reactors = gui.button(x, 4, tr("nav.reactors"), colors.red,
                 page == "reactors" and colors.gray or colors.black)
             x = buttons.reactors.x2 + 2
-            buttons.turbines = gui.button(x, 4, "TURBINES", colors.cyan,
+            buttons.turbines = gui.button(x, 4, tr("nav.turbines"), colors.cyan,
                 page == "turbines" and colors.gray or colors.black)
             x = buttons.turbines.x2 + 2
-            buttons.storage = gui.button(x, 4, "POWER", colors.yellow,
+            buttons.storage = gui.button(x, 4, tr("nav.power"), colors.yellow,
                 page == "storage" and colors.gray or colors.black)
-            buttons.advanced = gui.button(1, select(2, term.getSize()), "ADVANCED",
+            buttons.advanced = gui.button(1, select(2, term.getSize()), tr("nav.advanced"),
                 colors.white, colors.gray)
             if currentAlarm and currentAlarm.facilityNodeId then
-                buttons.scram = gui.button(12, select(2, term.getSize()), "SCRAM",
+                buttons.scram = gui.button(12, select(2, term.getSize()), tr("alarm.scram", nil, "SCRAM"),
                     colors.white, colors.red)
             end
         end
 
         local function overview()
-            header("PLANT OVERVIEW")
+            header(tr("dashboard.plant_overview", nil, "PLANT OVERVIEW"))
             local width = select(1, term.getSize())
-            gui.text(1, 6, "SYSTEM READINESS", colors.lightGray)
+            gui.text(1, 6, tr("dashboard.system_readiness"), colors.lightGray)
             local state, detail, colour = readiness()
             gui.text(1, 7, state, colour)
             gui.text(1, 8, detail, colors.white, colors.black, width)
             gui.text(1, 10, ("REACTORS  %d   TURBINES  %d   STORAGE  %d"):format(
                 #displayedReactors(), #turbines, #storages), colors.cyan)
             local reserve = minimumPowerReserve()
-            gui.text(1, 12, "POWER RESERVE", colors.lightGray)
+            gui.text(1, 12, tr("dashboard.power_reserve"), colors.lightGray)
             gui.progress(1, 13, math.max(10, width - 8), reserve or 0,
                 reserve and reserve > 20 and colors.lime or colors.orange, colors.gray)
             gui.text(math.max(1, width - 6), 13,
                 reserve and ("%5.1f%%"):format(reserve) or "  N/A", colors.white)
-            gui.text(1, 15, "Graphical monitoring only", colors.gray)
-            gui.text(1, 16, "Manual control: ADVANCED text interface", colors.gray)
+            gui.text(1, 15, tr("dashboard.graphical_only"), colors.gray)
+            gui.text(1, 16, tr("dashboard.manual_advanced"), colors.gray)
             local height = select(2, term.getSize())
             if authority.needsSelection(authorityState) then
                 local row = math.max(17, height - 2)
@@ -2530,7 +2531,7 @@ function mainframe.run(config)
         end
 
         local function reactorPage()
-            header("REACTORS")
+            header(tr("nav.reactors"))
             local width = select(1, term.getSize())
             local reactorList = displayedReactors()
             if #reactorList == 0 then
@@ -2551,24 +2552,22 @@ function mainframe.run(config)
                 gui.text(1, 6, ("%d/%d  %s"):format(selected.reactors, #reactorList,
                     deviceName(reactor.name)), colors.cyan, colors.black, width)
                 gui.text(1, 7, "TYPE DRACONIC / REMOTE GUARDIAN", colors.magenta)
-                gui.text(1, 8, "LINK " .. (reactor.online and "ONLINE" or "STALE"),
+                gui.text(1, 8, tr("common.link") .. " " .. tv(reactor.online and "ONLINE" or "STALE"),
                     reactor.online and colors.lime or colors.orange)
-                gui.text(1, 9, "STATE " .. string.upper(tostring(reactor.state or "UNKNOWN")), colors.white)
-                gui.text(1, 10, "GENERATION " .. powerFormat.power(reactor.generationRate,
+                gui.text(1, 9, tr("common.state") .. " " .. tv(reactor.state or "UNKNOWN"), colors.white)
+                gui.text(1, 10, tr("common.generation") .. " " .. powerFormat.power(reactor.generationRate,
                     config.power, true), colors.cyan)
                 gui.text(1, 11, reactor.temperature and
                     ("CORE %.2f C"):format(reactor.temperature) or "CORE N/A", colors.orange)
-                gui.text(1, 12, field and ("FIELD %.1f%%"):format(field) or "FIELD N/A", colors.white)
-                gui.text(1, 13, saturation and
-                    ("SATURATION %.1f%%"):format(saturation) or "SATURATION N/A", colors.white)
-                gui.text(1, 14, fuel and
-                    ("FUEL CONVERSION %.1f%%"):format(fuel) or "FUEL CONVERSION N/A", colors.white)
-                gui.text(1, 15, "FIELD GATE " .. powerFormat.power(reactor.fieldGate,
+                gui.text(1, 12, tr("common.field_strength") .. " " .. (field and ("%.1f%%"):format(field) or "N/A"), colors.white)
+                gui.text(1, 13, tr("common.saturation") .. " " .. (saturation and ("%.1f%%"):format(saturation) or "N/A"), colors.white)
+                gui.text(1, 14, tr("common.fuel_conversion") .. " " .. (fuel and ("%.1f%%"):format(fuel) or "N/A"), colors.white)
+                gui.text(1, 15, tr("common.field_gate") .. " " .. powerFormat.power(reactor.fieldGate,
                     config.power, true), colors.lime)
-                gui.text(1, 16, "EXPORT GATE " .. powerFormat.power(reactor.exportGate,
+                gui.text(1, 16, tr("common.export_gate") .. " " .. powerFormat.power(reactor.exportGate,
                     config.power, true), colors.lime)
-                gui.text(1, 17, "GUARDIAN " .. tostring(reactor.mode or "UNKNOWN") .. " / " ..
-                    tostring(reactor.request or "UNKNOWN"), colors.orange)
+                gui.text(1, 17, tr("common.guardian") .. " " .. tv(reactor.mode or "UNKNOWN") .. " / " ..
+                    tv(reactor.request or "UNKNOWN"), colors.orange)
                 gui.text(1, 19, "[<] PREVIOUS     NEXT [>]", colors.cyan)
                 return
             end
@@ -2625,7 +2624,7 @@ function mainframe.run(config)
         end
 
         local function turbinePage()
-            header("TURBINES")
+            header(tr("nav.turbines"))
             local width = select(1, term.getSize())
             if #turbines == 0 then
                 gui.text(1, 7, "NO TURBINES FOUND", colors.orange)
@@ -2636,7 +2635,7 @@ function mainframe.run(config)
             local rpm = tonumber(turbine.rotorSpeed) or 0
             gui.text(1, 6, ("%d/%d  %s"):format(selected.turbines, #turbines,
                 deviceName(turbine.name)), colors.cyan, colors.black, width)
-            gui.text(1, 7, turbine.active == true and "ACTIVE" or "OFFLINE",
+            gui.text(1, 7, tv(turbine.active == true and "ACTIVE" or "OFFLINE"),
                 turbine.active == true and colors.lime or colors.orange)
             gui.text(1, 9, ("ROTOR %.1f RPM"):format(rpm), rpm >= 1900 and colors.red or colors.white)
             local gaugeWidth = math.max(20, width - 1)
@@ -2651,14 +2650,14 @@ function mainframe.run(config)
             gui.text(lowX, 11, lowLabel, colors.lime)
             gui.text(highX, 11, highLabel, colors.lime)
             local plan = turbine.governor or {}
-            gui.text(1, 13, "STATE " .. tostring(plan.state or "WAITING"), colors.white)
-            gui.text(1, 14, "OUTPUT " .. powerFormat.power(turbine.energyProduction,
+            gui.text(1, 13, tr("common.state") .. " " .. tv(plan.state or "WAITING"), colors.white)
+            gui.text(1, 14, tr("common.output") .. " " .. powerFormat.power(turbine.energyProduction,
                 config.power, true), colors.cyan)
             gui.text(1, 16, "[<] PREVIOUS     NEXT [>]", colors.cyan)
         end
 
         local function storagePage()
-            header("POWER STORAGE")
+            header(tr("dashboard.power_storage"))
             local width = select(1, term.getSize())
             if #storages == 0 then
                 gui.text(1, 7, "NO SUPPORTED STORAGE FOUND", colors.orange)
@@ -2668,18 +2667,18 @@ function mainframe.run(config)
             local storage = storages[selected.storage]
             gui.text(1, 6, ("%d/%d  %s"):format(selected.storage, #storages,
                 deviceName(storage.name)), colors.cyan, colors.black, width)
-            gui.text(1, 8, "CAPACITY", colors.lightGray)
+            gui.text(1, 8, tr("common.capacity"), colors.lightGray)
             gui.progress(1, 9, math.max(10, width - 10), storage.percent or 0,
                 (storage.percent or 0) < 20 and colors.orange or colors.lime, colors.gray)
             gui.text(math.max(1, width - 8), 9,
                 storage.percent and ("%6.1f%%"):format(storage.percent) or "   N/A", colors.white)
-            gui.text(1, 11, "STORED  " .. powerFormat.power(storage.stored,
+            gui.text(1, 11, tr("common.stored") .. "  " .. powerFormat.power(storage.stored,
                 config.power, false), colors.white)
             gui.text(1, 12, "FILL    " .. powerFormat.power(storage.input,
                 config.power, true), colors.lime)
             gui.text(1, 13, "DRAW    " .. powerFormat.power(storage.output,
                 config.power, true), colors.orange)
-            gui.text(1, 14, "STATE   " .. tostring(storage.state or "UNKNOWN"), colors.cyan)
+            gui.text(1, 14, tr("common.state") .. "   " .. tv(storage.state or "UNKNOWN"), colors.cyan)
             gui.text(1, 16, "[<] PREVIOUS     NEXT [>]", colors.cyan)
         end
 
