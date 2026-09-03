@@ -998,22 +998,22 @@ function mainframe.run(config)
         end
         for index = 1, math.min(#devices, availableRows) do
             local device = devices[index]
-            local line = ("%-7s %s"):format(string.upper(device.category), deviceName(device.name))
+            local line = ("%-7s %s"):format(tv(device.category), deviceName(device.name))
             print(string.sub(line, 1, width))
         end
         if #devices > availableRows then
-            print(("+ %d more (run: helios scan)"):format(#devices - availableRows))
+            print(tr("dashboard.more_devices", { count = #devices - availableRows }, "+ {count} more (run: helios scan)"))
         end
         term.setCursorPos(1, footerRow)
         dashboardButtons.control = ui.inlineButton(tr("dashboard.control", nil, "CONTROL"), colors.lime)
         write(" ")
         dashboardButtons.settings = ui.inlineButton(tr("nav.settings"), colors.cyan)
         write(" ")
-        dashboardButtons.graphical = ui.inlineButton("GUI", colors.lightGray)
+        dashboardButtons.graphical = ui.inlineButton(tr("dashboard.gui", nil, "GUI"), colors.lightGray)
         print("")
         term.setTextColor(colors.gray)
         term.setCursorPos(1, height)
-        write(string.sub("Keyboard: B GUI | V/G/E/C/A/R/S | Q exit", 1, width))
+        write(string.sub(tr("dashboard.keyboard_help", nil, "Keyboard: B GUI | V/G/E/C/A/R/S | Q exit"), 1, width))
         term.setTextColor(colors.white)
     end
 

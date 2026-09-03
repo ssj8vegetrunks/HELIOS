@@ -182,11 +182,21 @@ function renderer.render(snapshot, state, services)
                     active = "common.state", state = "common.state", rotorSpeed = "common.rotor_speed",
                     energyProduction = "common.generation", input = "common.input", output = "common.output",
                     stored = "common.stored", capacity = "common.capacity", percent = "common.charge",
-                    fuelPercent = "common.fuel",
+                    fuelPercent = "common.fuel", steamProduction = "common.steam_production",
+                    waste = "common.waste", dispatchMode = "common.dispatch_mode",
+                    powerDispatchRequested = "common.power_dispatch_requested",
                 }
                 for _, field in ipairs({"active", "state", "dispatchMode", "powerDispatchRequested", "rotorSpeed", "steamProduction", "energyProduction", "fuelPercent", "waste", "percent", "input", "output", "stored", "capacity"}) do
                     if item[field] ~= nil then
-                        local value = (field == "active" or field == "state" or field == "dispatchMode") and tv(item[field]) or tostring(item[field])
+                        local value
+                        if field == "active" then
+                            value = tv(item[field] and "ACTIVE" or "OFFLINE")
+                        elseif field == "state" or field == "dispatchMode" or
+                               field == "powerDispatchRequested" then
+                            value = tv(item[field])
+                        else
+                            value = tostring(item[field])
+                        end
                         gui.text(1, row, tr(labels[field] or ("telemetry." .. field), string.upper(field)) .. ": " .. value, colors.white)
                         row = row + 1
                     end

@@ -1,7 +1,7 @@
 -- HELIOS single-file installer
 -- Manual-control alpha: guarded direct plant authority.
 
-local VERSION = "1.6.0-alpha.8"
+local VERSION = "1.6.0-alpha.9"
 local INSTALL_DIR = "/helios"
 local STAGE_DIR = "/.helios-install"
 local MODULE_PACK_BASE_URL = "https://raw.githubusercontent.com/ssj8vegetrunks/HELIOS/agent/facility-network-alpha1/module-pack"
@@ -2538,7 +2538,7 @@ return {
     name = "HELIOS Control Room",
     version = "1.0.0",
     apiVersion = 1,
-    compatibleCoreVersions = { "1.6.0-alpha.4", "1.6.0-alpha.5", "1.6.0-alpha.6", "1.6.0-alpha.7", "1.6.0-alpha.8" },
+    compatibleCoreVersions = { "1.6.0-alpha.4", "1.6.0-alpha.5", "1.6.0-alpha.6", "1.6.0-alpha.7", "1.6.0-alpha.8", "1.6.0-alpha.9" },
     entry = "renderer.lua",
     minimumWidth = 50,
     minimumHeight = 31,
@@ -2731,11 +2731,21 @@ function renderer.render(snapshot, state, services)
                     active = "common.state", state = "common.state", rotorSpeed = "common.rotor_speed",
                     energyProduction = "common.generation", input = "common.input", output = "common.output",
                     stored = "common.stored", capacity = "common.capacity", percent = "common.charge",
-                    fuelPercent = "common.fuel",
+                    fuelPercent = "common.fuel", steamProduction = "common.steam_production",
+                    waste = "common.waste", dispatchMode = "common.dispatch_mode",
+                    powerDispatchRequested = "common.power_dispatch_requested",
                 }
                 for _, field in ipairs({"active", "state", "dispatchMode", "powerDispatchRequested", "rotorSpeed", "steamProduction", "energyProduction", "fuelPercent", "waste", "percent", "input", "output", "stored", "capacity"}) do
                     if item[field] ~= nil then
-                        local value = (field == "active" or field == "state" or field == "dispatchMode") and tv(item[field]) or tostring(item[field])
+                        local value
+                        if field == "active" then
+                            value = tv(item[field] and "ACTIVE" or "OFFLINE")
+                        elseif field == "state" or field == "dispatchMode" or
+                               field == "powerDispatchRequested" then
+                            value = tv(item[field])
+                        else
+                            value = tostring(item[field])
+                        end
                         gui.text(1, row, tr(labels[field] or ("telemetry." .. field), string.upper(field)) .. ": " .. value, colors.white)
                         row = row + 1
                     end
@@ -3005,6 +3015,8 @@ return {
         ["common.version"] = "Chart", ["common.fuel"] = "Provisions",
         ["common.buffer"] = "Hold", ["common.demand"] = "Orders",
         ["common.inductor"] = "Power rig", ["common.net"] = "Net haul",
+        ["common.steam_production"] = "Steam raised", ["common.waste"] = "Bilge",
+        ["common.dispatch_mode"] = "Orders", ["common.power_dispatch_requested"] = "Power ordered",
         ["common.previous"] = "PORT", ["common.next"] = "STARBOARD",
         ["dashboard.control_room"] = "HELIOS // CAPTAIN'S BRIDGE",
         ["dashboard.system_ready"] = "SHIPSHAPE", ["dashboard.fault"] = "DIRE TROUBLE",
@@ -3030,6 +3042,8 @@ return {
         ["dashboard.flow_plan"] = "Flow seen/set/course", ["dashboard.tanks_in_out"] = "Ballast in / out",
         ["dashboard.full_in"] = "Hold full in", ["dashboard.max_io"] = "Max cargo flow", ["dashboard.matrix"] = "Hold grid",
         ["dashboard.matrix_value"] = "{cells} cells / {providers} mates", ["dashboard.cyanite"] = "BLUE SPOILS",
+        ["dashboard.more_devices"] = "+ {count} more below deck (run: helios scan)",
+        ["dashboard.gui"] = "CHART", ["dashboard.keyboard_help"] = "Keys: B chart | V/G/E/C/A/R/S | Q abandon ship",
         ["value.active"] = "SAILIN'", ["value.offline"] = "MOORED",
         ["value.ready"] = "SHIPSHAPE", ["value.running"] = "SAILIN'",
         ["value.stable"] = "STEADY", ["value.hold"] = "HOLD FAST",
@@ -3055,6 +3069,9 @@ return {
         ["value.steam"] = "STEAM", ["value.mirrored"] = "MIRRORED", ["value.none"] = "NARY ONE",
         ["value.known"] = "CHARTED", ["value.clear"] = "ALL QUIET", ["value.disabled"] = "STRUCK",
         ["value.ready_standby"] = "READY / AT ANCHOR",
+        ["value.true"] = "AYE", ["value.false"] = "NAY",
+        ["value.reactor"] = "HEART", ["value.turbine"] = "SAIL",
+        ["value.battery"] = "HOLD", ["value.monitor"] = "LOOKOUT",
         ["nav.home"] = "MAIN DECK",
         ["nav.overview"] = "SHIP'S LOG",
         ["nav.reactors"] = "HEARTS",
@@ -3130,6 +3147,8 @@ return {
         ["common.version"] = "Version", ["common.fuel"] = "Fuel",
         ["common.buffer"] = "Buffer", ["common.demand"] = "Demand",
         ["common.inductor"] = "Inductor", ["common.net"] = "Net",
+        ["common.steam_production"] = "Steam production", ["common.waste"] = "Waste",
+        ["common.dispatch_mode"] = "Dispatch mode", ["common.power_dispatch_requested"] = "Power dispatch requested",
         ["common.previous"] = "PREVIOUS", ["common.next"] = "NEXT",
         ["dashboard.control_room"] = "HELIOS // CONTROL ROOM",
         ["dashboard.system_ready"] = "SYSTEM READY", ["dashboard.fault"] = "FAULT",
@@ -3155,6 +3174,8 @@ return {
         ["dashboard.flow_plan"] = "Flow actual/set/plan", ["dashboard.tanks_in_out"] = "Tanks in / out",
         ["dashboard.full_in"] = "Full in", ["dashboard.max_io"] = "Max I/O", ["dashboard.matrix"] = "Matrix",
         ["dashboard.matrix_value"] = "{cells} cells / {providers} providers", ["dashboard.cyanite"] = "CYANITE",
+        ["dashboard.more_devices"] = "+ {count} more (run: helios scan)",
+        ["dashboard.gui"] = "GUI", ["dashboard.keyboard_help"] = "Keyboard: B GUI | V/G/E/C/A/R/S | Q exit",
         ["value.active"] = "ACTIVE", ["value.offline"] = "OFFLINE",
         ["value.ready"] = "READY", ["value.running"] = "RUNNING",
         ["value.stable"] = "STABLE", ["value.hold"] = "HOLD",
@@ -3180,6 +3201,9 @@ return {
         ["value.steam"] = "STEAM", ["value.mirrored"] = "MIRRORED", ["value.none"] = "NONE",
         ["value.known"] = "KNOWN", ["value.clear"] = "CLEAR", ["value.disabled"] = "DISABLED",
         ["value.ready_standby"] = "READY / STANDBY",
+        ["value.true"] = "YES", ["value.false"] = "NO",
+        ["value.reactor"] = "REACTOR", ["value.turbine"] = "TURBINE",
+        ["value.battery"] = "STORAGE", ["value.monitor"] = "MONITOR",
         ["nav.home"] = "HOME",
         ["nav.overview"] = "OVERVIEW",
         ["nav.reactors"] = "REACTORS",
@@ -3255,6 +3279,8 @@ return {
         ["common.version"] = "Version", ["common.fuel"] = "Carburant",
         ["common.buffer"] = "Tampon", ["common.demand"] = "Demande",
         ["common.inductor"] = "Inducteur", ["common.net"] = "Net",
+        ["common.steam_production"] = "Production vapeur", ["common.waste"] = "Dechets",
+        ["common.dispatch_mode"] = "Mode d'affectation", ["common.power_dispatch_requested"] = "Puissance demandee",
         ["common.previous"] = "PRECEDENT", ["common.next"] = "SUIVANT",
         ["dashboard.control_room"] = "HELIOS // SALLE DE CONTROLE",
         ["dashboard.system_ready"] = "SYSTEME PRET", ["dashboard.fault"] = "PANNE",
@@ -3280,6 +3306,8 @@ return {
         ["dashboard.flow_plan"] = "Debit reel/regle/prevu", ["dashboard.tanks_in_out"] = "Reservoirs entree / sortie",
         ["dashboard.full_in"] = "Plein dans", ["dashboard.max_io"] = "E/S max", ["dashboard.matrix"] = "Matrice",
         ["dashboard.matrix_value"] = "{cells} cellules / {providers} fournisseurs", ["dashboard.cyanite"] = "CYANITE",
+        ["dashboard.more_devices"] = "+ {count} autres (commande : helios scan)",
+        ["dashboard.gui"] = "INTERFACE", ["dashboard.keyboard_help"] = "Clavier : B interface | V/G/E/C/A/R/S | Q quitter",
         ["value.active"] = "ACTIF", ["value.offline"] = "HORS LIGNE",
         ["value.ready"] = "PRET", ["value.running"] = "EN MARCHE",
         ["value.stable"] = "STABLE", ["value.hold"] = "MAINTIEN",
@@ -3305,6 +3333,9 @@ return {
         ["value.steam"] = "VAPEUR", ["value.mirrored"] = "REPLIQUE", ["value.none"] = "AUCUN",
         ["value.known"] = "CONNUS", ["value.clear"] = "AUCUNE", ["value.disabled"] = "DESACTIVEES",
         ["value.ready_standby"] = "PRET / EN VEILLE",
+        ["value.true"] = "OUI", ["value.false"] = "NON",
+        ["value.reactor"] = "REACTEUR", ["value.turbine"] = "TURBINE",
+        ["value.battery"] = "STOCKAGE", ["value.monitor"] = "MONITEUR",
         ["nav.home"] = "ACCUEIL",
         ["nav.overview"] = "SOMMAIRE",
         ["nav.reactors"] = "REACTEURS",
@@ -4467,22 +4498,22 @@ function mainframe.run(config)
         end
         for index = 1, math.min(#devices, availableRows) do
             local device = devices[index]
-            local line = ("%-7s %s"):format(string.upper(device.category), deviceName(device.name))
+            local line = ("%-7s %s"):format(tv(device.category), deviceName(device.name))
             print(string.sub(line, 1, width))
         end
         if #devices > availableRows then
-            print(("+ %d more (run: helios scan)"):format(#devices - availableRows))
+            print(tr("dashboard.more_devices", { count = #devices - availableRows }, "+ {count} more (run: helios scan)"))
         end
         term.setCursorPos(1, footerRow)
         dashboardButtons.control = ui.inlineButton(tr("dashboard.control", nil, "CONTROL"), colors.lime)
         write(" ")
         dashboardButtons.settings = ui.inlineButton(tr("nav.settings"), colors.cyan)
         write(" ")
-        dashboardButtons.graphical = ui.inlineButton("GUI", colors.lightGray)
+        dashboardButtons.graphical = ui.inlineButton(tr("dashboard.gui", nil, "GUI"), colors.lightGray)
         print("")
         term.setTextColor(colors.gray)
         term.setCursorPos(1, height)
-        write(string.sub("Keyboard: B GUI | V/G/E/C/A/R/S | Q exit", 1, width))
+        write(string.sub(tr("dashboard.keyboard_help", nil, "Keyboard: B GUI | V/G/E/C/A/R/S | Q exit"), 1, width))
         term.setTextColor(colors.white)
     end
 
