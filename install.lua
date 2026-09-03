@@ -238,7 +238,7 @@ function config.load()
         error("HELIOS configuration is invalid.", 0)
     end
     if loaded.role ~= "mainframe" and loaded.role ~= "terminal" and
-       loaded.role ~= "guardian" then
+       loaded.role ~= "guardian" and loaded.role ~= "profiler" then
         error("HELIOS configuration contains an invalid role.", 0)
     end
     loaded.discovery = loaded.discovery or {}
@@ -1926,6 +1926,361 @@ end
 return guardian
 ]=],
 
+    ["draconic/profiler.lua"] = [=[
+local config = dofile("/helios/config.lua")
+local engine = dofile("/helios/draconic/profiler_engine.lua")
+
+local VERSION = "0.1.0-alpha.1"
+local REQUEST_CHANNEL, TELEMETRY_CHANNEL = 43120, 43121
+local DATA_DIR = "/helios/data/draconic-profiler"
+local PROFILE_FILE = DATA_DIR .. "/operating_profiles.lua"
+local SESSION_FILE = DATA_DIR .. "/current_session.lua"
+local guardianId = tonumber((config.network or {}).guardianId)
+if not guardianId then error("Profiler Guardian computer ID is not configured", 0) end
+
+local function wirelessModem()
+    local names = peripheral.getNames()
+    table.sort(names)
+    for _, name in ipairs(names) do
+        local modem = peripheral.wrap(name)
+        if modem and type(modem.isWireless) == "function" then
+            local ok, wireless = pcall(modem.isWireless)
+            if ok and wireless then return name, modem end
+        end
+    end
+end
+
+local modemName, modem = wirelessModem()
+if not modem then error("Attach a wireless modem to the Draconic Profiler", 0) end
+modem.open(TELEMETRY_CHANNEL)
+
+local function loadTable(path)
+    if not fs.exists(path) then return {} end
+    local ok, value = pcall(dofile, path)
+    return ok and type(value) == "table" and value or {}
+end
+
+local function saveTable(path, value)
+    if not fs.exists(DATA_DIR) then fs.makeDir(DATA_DIR) end
+    local temporary = path .. ".new"
+    local handle = fs.open(temporary, "w")
+    if not handle then return false end
+    handle.write("return " .. textutils.serialize(value));handle.close()
+    if fs.exists(path) then fs.delete(path) end
+    fs.move(temporary, path)
+    return true
+end
+
+local profiles = loadTable(PROFILE_FILE)
+local trend = engine.new({ maxAge = 1800, maxSamples = 400, bracketSize = 250000 })
+local latest, latestAt, guardianVersion
+local classification, explanation = "WAITING", "Waiting for Guardian telemetry"
+local lastProfileAt, lastSaveAt, lastSubscribeAt = 0, 0, 0
+
+local computer = term.current()
+local monitorName, monitor
+for _, name in ipairs(peripheral.getNames()) do
+    local types = { peripheral.getType(name) }
+    for _, peripheralType in ipairs(types) do
+        if peripheralType == "monitor" then monitorName, monitor = name, peripheral.wrap(name);break end
+    end
+    if monitor then break end
+end
+if monitor and type(monitor.setTextScale) == "function" then pcall(monitor.setTextScale, 0.5) end
+
+local function fmt(value)
+    value = tonumber(value)
+    if not value then return "N/A" end
+    local units, index = { "", "k", "M", "B", "T" }, 1
+    while math.abs(value) >= 1000 and index < #units do value, index = value / 1000, index + 1 end
+    return string.format(math.abs(value) >= 100 and "%.0f%s" or "%.2f%s", value, units[index])
+end
+
+local function pct(value)
+    return value and string.format("%.1f%%", value) or "N/A"
+end
+
+local function colourFor(state)
+    if state == "STABLE" then return colors.lime end
+    if state == "IMPROVING" then return colors.green end
+    if state == "DETERIORATING" or state == "CRITICAL" then return colors.red end
+    if state == "LINK STALE" then return colors.orange end
+    return colors.yellow
+end
+
+local function render(target)
+    local width, height = target.getSize()
+    target.setBackgroundColor(colors.black);target.setTextColor(colors.white);target.clear()
+    local function line(row, value, colour)
+        if row < 1 or row > height then return end
+        target.setCursorPos(1, row);target.setTextColor(colour or colors.white)
+        target.write(string.sub(tostring(value or ""), 1, width))
+    end
+    line(1, "HELIOS // DRACONIC PROFILER  " .. VERSION, colors.yellow)
+    line(2, classification, colourFor(classification))
+    line(3, explanation, colors.lightGray)
+    local connected = latestAt and os.epoch("utc") / 1000 - latestAt <= 5
+    line(5, "Guardian " .. guardianId .. "  " .. (connected and "ONLINE" or "WAITING"), connected and colors.lime or colors.orange)
+    line(6, "Wireless modem: " .. tostring(modemName), colors.cyan)
+    if not latest then
+        line(8, "Read-only subscription requests are being sent.", colors.lightGray)
+        line(9, "Confirm the Guardian also has a wireless modem.", colors.lightGray)
+        return
+    end
+    local sample = trend.samples[#trend.samples]
+    local short = engine.metrics(trend, 30, latestAt)
+    local medium = engine.metrics(trend, 300, latestAt)
+    line(8, "LIVE OPERATING POINT", colors.cyan)
+    line(9, "Generation: " .. fmt(sample.generation) .. " RF/t   Export: " .. fmt(sample.export) .. " RF/t")
+    line(10, "Core: " .. fmt(sample.temperature) .. " C   Field: " .. pct(sample.field), colors.orange)
+    line(11, "Saturation: " .. pct(sample.saturation) .. "   Fuel conversion: " .. pct(sample.fuel))
+    line(12, "Field input/drain: " .. fmt(sample.fieldInput) .. " / " .. fmt(sample.fieldDrain) .. " RF/t")
+    line(14, "TREND                         30 SEC       5 MIN", colors.cyan)
+    line(15, string.format("Field %%/min             %10s  %10s", fmt(short and short.fieldSlope), fmt(medium and medium.fieldSlope)))
+    line(16, string.format("Core C/min               %10s  %10s", fmt(short and short.temperatureSlope), fmt(medium and medium.temperatureSlope)))
+    line(17, string.format("Saturation %%/min        %10s  %10s", fmt(short and short.saturationSlope), fmt(medium and medium.saturationSlope)))
+    local key = tostring(math.floor(sample.bracket or 0))
+    local profile = profiles[key]
+    line(19, "OUTPUT BRACKET: " .. fmt(sample.bracket) .. " RF/t", colors.cyan)
+    if profile then
+        line(20, "Observed: " .. math.floor(profile.seconds or 0) .. "s   Stable: " .. math.floor(profile.stableSeconds or 0) .. "s")
+        line(21, "Field range: " .. pct(profile.fieldMin) .. " - " .. pct(profile.fieldMax))
+        line(22, "Core range: " .. fmt(profile.temperatureMin) .. " - " .. fmt(profile.temperatureMax) .. " C")
+        line(23, "Fuel range: " .. pct(profile.fuelMin) .. " - " .. pct(profile.fuelMax))
+    end
+    line(height, "READ ONLY | Guardian " .. tostring(guardianVersion or "unknown") .. " | Q quit", colors.gray)
+end
+
+local function redraw()
+    if monitor then render(monitor) end
+    render(computer)
+end
+
+local function subscribe()
+    modem.transmit(REQUEST_CHANNEL, TELEMETRY_CHANNEL, {
+        heliosProfiler = true,
+        version = 1,
+        kind = "subscribe",
+        profilerId = os.getComputerID(),
+        targetGuardianId = guardianId,
+        sentAt = os.epoch("utc") / 1000,
+    })
+    lastSubscribeAt = os.epoch("utc") / 1000
+end
+
+subscribe();redraw()
+local timer = os.startTimer(1)
+while true do
+    local event, a, channel, replyChannel, message = os.pullEvent()
+    if event == "char" and a == "q" then
+        saveTable(PROFILE_FILE, profiles)
+        saveTable(SESSION_FILE, { guardianId = guardianId, lastTelemetry = latest, lastSeen = latestAt })
+        return
+    elseif event == "modem_message" and a == modemName and channel == TELEMETRY_CHANNEL and
+           type(message) == "table" and message.heliosProfiler == true and
+           message.kind == "telemetry" and tonumber(message.guardianId) == guardianId and
+           tonumber(message.targetProfilerId) == os.getComputerID() and type(message.payload) == "table" then
+        local now = os.epoch("utc") / 1000
+        latest, latestAt, guardianVersion = message.payload, now, message.guardianVersion
+        local sample = engine.add(trend, latest, now)
+        classification, explanation = engine.classify(trend, now)
+        if now - lastProfileAt >= 5 then
+            local profileElapsed = lastProfileAt > 0 and math.max(0, math.min(10, now - lastProfileAt)) or 0
+            profiles = engine.updateProfile(profiles, trend, sample, classification, profileElapsed)
+            lastProfileAt = now
+        end
+        redraw()
+    elseif event == "timer" and a == timer then
+        local now = os.epoch("utc") / 1000
+        if now - lastSubscribeAt >= 3 then subscribe() end
+        classification, explanation = engine.classify(trend, now)
+        if now - lastSaveAt >= 60 then
+            saveTable(PROFILE_FILE, profiles)
+            saveTable(SESSION_FILE, { guardianId = guardianId, lastTelemetry = latest, lastSeen = latestAt })
+            lastSaveAt = now
+        end
+        redraw();timer = os.startTimer(1)
+    elseif event == "peripheral" or event == "peripheral_detach" or event == "monitor_resize" or event == "term_resize" then
+        redraw()
+    end
+end
+]=],
+
+    ["draconic/profiler_engine.lua"] = [=[
+local engine = {}
+
+local function number(value)
+    value = tonumber(value)
+    return value and value == value and value ~= math.huge and value ~= -math.huge and value or nil
+end
+
+local function percent(value, maximum)
+    value, maximum = number(value), number(maximum)
+    return value and maximum and maximum > 0 and value / maximum * 100 or nil
+end
+
+local function minimum(a, b)
+    if a == nil then return b end
+    if b == nil then return a end
+    return math.min(a, b)
+end
+
+local function maximum(a, b)
+    if a == nil then return b end
+    if b == nil then return a end
+    return math.max(a, b)
+end
+
+function engine.new(options)
+    options = options or {}
+    return {
+        samples = {},
+        maxAge = math.max(300, number(options.maxAge) or 1800),
+        maxSamples = math.max(60, math.floor(number(options.maxSamples) or 400)),
+        bracketSize = math.max(1000, number(options.bracketSize) or 250000),
+        lastBracket = nil,
+        bracketChangedAt = nil,
+    }
+end
+
+function engine.normalize(payload, receivedAt)
+    payload = type(payload) == "table" and payload or {}
+    return {
+        at = number(receivedAt) or 0,
+        state = string.lower(tostring(payload.state or "unknown")),
+        generation = number(payload.generationRate),
+        temperature = number(payload.temperature),
+        field = percent(payload.fieldStrength, payload.maxFieldStrength),
+        saturation = percent(payload.energySaturation, payload.maxEnergySaturation),
+        fuel = percent(payload.fuelConversion, payload.maxFuelConversion),
+        fieldInput = number(payload.fieldInput or payload.fieldGate),
+        fieldDrain = number(payload.fieldDrainRate),
+        export = number(payload.exportFlow or payload.exportGate),
+        exportTarget = number(payload.exportGate),
+        alarmLevel = number(payload.alarmLevel),
+        mode = tostring(payload.mode or "unknown"),
+        request = tostring(payload.request or "unknown"),
+    }
+end
+
+function engine.bracket(state, sample)
+    local output = sample and (sample.export or sample.generation) or 0
+    return math.floor(math.max(0, number(output) or 0) / state.bracketSize + 0.5) * state.bracketSize
+end
+
+function engine.add(state, payload, receivedAt)
+    local sample = engine.normalize(payload, receivedAt)
+    local bracket = engine.bracket(state, sample)
+    sample.bracket = bracket
+    if state.lastBracket ~= bracket then
+        state.lastBracket = bracket
+        state.bracketChangedAt = sample.at
+    end
+    state.samples[#state.samples + 1] = sample
+    local cutoff = sample.at - state.maxAge
+    while #state.samples > state.maxSamples or
+          (#state.samples > 1 and state.samples[1].at < cutoff) do
+        table.remove(state.samples, 1)
+    end
+    return sample
+end
+
+local function slope(first, last, key)
+    local a, b = first and first[key], last and last[key]
+    local seconds = first and last and last.at - first.at or 0
+    if a == nil or b == nil or seconds <= 0 then return nil end
+    return (b - a) / seconds * 60
+end
+
+function engine.metrics(state, seconds, now)
+    local samples = state.samples
+    local last = samples[#samples]
+    if not last then return nil end
+    now = number(now) or last.at
+    local cutoff = now - math.max(1, number(seconds) or 30)
+    local first, count
+    local fieldMin, fieldMax, temperatureMin, temperatureMax
+    local saturationMin, saturationMax
+    for _, sample in ipairs(samples) do
+        if sample.at >= cutoff then
+            first = first or sample
+            count = (count or 0) + 1
+            fieldMin, fieldMax = minimum(fieldMin, sample.field), maximum(fieldMax, sample.field)
+            temperatureMin, temperatureMax = minimum(temperatureMin, sample.temperature), maximum(temperatureMax, sample.temperature)
+            saturationMin, saturationMax = minimum(saturationMin, sample.saturation), maximum(saturationMax, sample.saturation)
+        end
+    end
+    if not first then first, count = last, 1 end
+    return {
+        seconds = math.max(0, last.at - first.at),
+        count = count,
+        fieldSlope = slope(first, last, "field"),
+        temperatureSlope = slope(first, last, "temperature"),
+        saturationSlope = slope(first, last, "saturation"),
+        fieldMin = fieldMin, fieldMax = fieldMax,
+        temperatureMin = temperatureMin, temperatureMax = temperatureMax,
+        saturationMin = saturationMin, saturationMax = saturationMax,
+    }
+end
+
+function engine.classify(state, now)
+    local last = state.samples[#state.samples]
+    if not last then return "WAITING", "Waiting for Guardian telemetry" end
+    now = number(now) or last.at
+    if now - last.at > 5 then return "LINK STALE", "No recent Guardian telemetry" end
+    if last.alarmLevel and last.alarmLevel >= 3 then return "CRITICAL", "Guardian reports a critical alarm" end
+    if last.state ~= "running" and last.state ~= "online" then
+        return "REACTOR " .. string.upper(last.state), "Waiting for an online operating state"
+    end
+    local sinceChange = now - (state.bracketChangedAt or last.at)
+    if sinceChange < 30 then return "SETTLING", "Output bracket changed recently" end
+    local short = engine.metrics(state, 300, now)
+    if not short or short.seconds < 60 then return "OBSERVING", "Building a warm-state trend" end
+    local fieldSlope = short.fieldSlope or 0
+    local temperatureSlope = short.temperatureSlope or 0
+    if fieldSlope < -0.5 or temperatureSlope > 30 then
+        return "DETERIORATING", "Field is falling or temperature is rising"
+    end
+    if math.abs(fieldSlope) <= 0.25 and math.abs(temperatureSlope) <= 15 then
+        return "STABLE", "Warm-state output bracket is holding"
+    end
+    if fieldSlope > 0.25 or temperatureSlope < -15 then
+        return "IMPROVING", "Containment or temperature is still improving"
+    end
+    return "OBSERVING", "Trend has not settled"
+end
+
+function engine.updateProfile(profiles, state, sample, classification, elapsed)
+    profiles = type(profiles) == "table" and profiles or {}
+    if not sample then return profiles end
+    local key = tostring(math.floor(sample.bracket or 0))
+    local profile = profiles[key] or { bracket = sample.bracket, samples = 0, seconds = 0, stableSeconds = 0 }
+    profile.samples = (number(profile.samples) or 0) + 1
+    profile.seconds = (number(profile.seconds) or 0) + math.max(0, number(elapsed) or 0)
+    if classification == "STABLE" then
+        profile.stableSeconds = (number(profile.stableSeconds) or 0) + math.max(0, number(elapsed) or 0)
+    end
+    profile.fieldMin = minimum(number(profile.fieldMin), sample.field)
+    profile.fieldMax = maximum(number(profile.fieldMax), sample.field)
+    profile.temperatureMin = minimum(number(profile.temperatureMin), sample.temperature)
+    profile.temperatureMax = maximum(number(profile.temperatureMax), sample.temperature)
+    profile.saturationMin = minimum(number(profile.saturationMin), sample.saturation)
+    profile.saturationMax = maximum(number(profile.saturationMax), sample.saturation)
+    profile.fuelMin = minimum(number(profile.fuelMin), sample.fuel)
+    profile.fuelMax = maximum(number(profile.fuelMax), sample.fuel)
+    profile.lastGeneration = sample.generation
+    profile.lastExport = sample.export
+    profile.lastFieldInput = sample.fieldInput
+    profile.lastFieldDrain = sample.fieldDrain
+    profile.lastClassification = classification
+    profile.lastSeen = sample.at
+    profiles[key] = profile
+    return profiles
+end
+
+return engine
+]=],
+
     ["gui/control-room/manifest.lua"] = [=[
 return {
     id = "control-room",
@@ -2159,6 +2514,11 @@ local config = dofile("/helios/core/config.lua").load()
 
 if config.role == "guardian" then
     dofile("/helios/draconic/controller.lua")
+    return
+end
+
+if config.role == "profiler" then
+    dofile("/helios/draconic/profiler.lua")
     return
 end
 
@@ -8474,7 +8834,7 @@ end
 ]=],
 
     ["draconic/controller.lua"] = [=[
--- HELIOS Draconic Guardian v1.1.0-alpha.9
+-- HELIOS Draconic Guardian v1.1.0-alpha.10
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -8496,7 +8856,8 @@ local FRACTION = { OFF = 0, MIN = .25, MED = .50, MAX = 1 }
 local PRESET_RAMP_STEP = 50000
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.1.0-alpha.9"
+local GUARDIAN_VERSION = "1.1.0-alpha.10"
+local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
 local facilityNetwork,facilityProtocol,facilityIdentity,facilitySequence
@@ -9186,9 +9547,11 @@ local function facilityWorker()
       siteId=facilitySiteId,facilityType="draconic_reactor",state=tostring(r.status or "unknown"),
       generationRate=tonumber(r.generationRate),temperature=tonumber(r.temperature),
       fieldStrength=tonumber(r.fieldStrength),maxFieldStrength=tonumber(r.maxFieldStrength),
+      fieldDrainRate=tonumber(r.fieldDrainRate),
       energySaturation=tonumber(r.energySaturation),maxEnergySaturation=tonumber(r.maxEnergySaturation),
       fuelConversion=tonumber(r.fuelConversion),maxFuelConversion=tonumber(r.maxFuelConversion),
       fieldGate=tonumber(data and data.inputSet),exportGate=tonumber(data and data.outputSet),
+      fieldInput=tonumber(data and data.inputFlow),exportFlow=tonumber(data and data.outputFlow),
       mode=controls.mode,request=controls.request,commissioned=controls.commissioned==true,
       ratedOutput=tonumber(controls.rated),localAuthority=true,remoteCommands=false,
       guardianMessage=tostring(controls.message or ""),telemetryStale=controls.telemetryStale==true,
@@ -9254,7 +9617,60 @@ local function facilityWorker()
     elseif event=="peripheral" or event=="peripheral_detach" then facilityNetwork.openAll() end
   end
 end
-parallel.waitForAny(inputWorker,controlWorker,displayWorker,facilityWorker)
+local function profilerWorker()
+  local modemName,modem
+  local names=peripheral.getNames();sort(names)
+  for _,name in ipairs(names) do
+    local candidate=peripheral.wrap(name)
+    if candidate and type(candidate.isWireless)=="function" then
+      local ok,wireless=pcall(candidate.isWireless)
+      if ok and wireless then modemName,modem=name,candidate;break end
+    end
+  end
+  if not modem then while true do os.pullEvent("guardian_profiler_wireless_disabled") end end
+  modem.open(PROFILER_REQUEST_CHANNEL)
+  local profilerId,leaseUntil
+  local timer=os.startTimer(1)
+  local function snapshot()
+    local r=data and data.reactor or {}
+    local imminent,alarmMessage=imminentMeltdown(r)
+    return {
+      state=tostring(r.status or "unknown"),generationRate=tonumber(r.generationRate),
+      temperature=tonumber(r.temperature),fieldStrength=tonumber(r.fieldStrength),
+      maxFieldStrength=tonumber(r.maxFieldStrength),fieldDrainRate=tonumber(r.fieldDrainRate),
+      energySaturation=tonumber(r.energySaturation),maxEnergySaturation=tonumber(r.maxEnergySaturation),
+      fuelConversion=tonumber(r.fuelConversion),maxFuelConversion=tonumber(r.maxFuelConversion),
+      fieldInput=tonumber(data and data.inputFlow),fieldGate=tonumber(data and data.inputSet),
+      exportFlow=tonumber(data and data.outputFlow),exportGate=tonumber(data and data.outputSet),
+      mode=controls.mode,request=controls.request,commissioned=controls.commissioned==true,
+      ratedOutput=tonumber(controls.rated),guardianMessage=tostring(controls.message or ""),
+      telemetryStale=controls.telemetryStale==true,alarmLevel=imminent and 3 or nil,
+      alarmMessage=alarmMessage,
+    }
+  end
+  while true do
+    local event,a,channel,replyChannel,message=os.pullEvent()
+    if event=="modem_message" and a==modemName and channel==PROFILER_REQUEST_CHANNEL and
+       type(message)=="table" and message.heliosProfiler==true and message.version==1 and
+       message.kind=="subscribe" and tonumber(message.targetGuardianId)==os.getComputerID() and
+       tonumber(message.profilerId) then
+      profilerId=tonumber(message.profilerId);leaseUntil=os.epoch("utc")/1000+10
+    elseif event=="timer" and a==timer then
+      local now=os.epoch("utc")/1000
+      if profilerId and leaseUntil and now<leaseUntil then
+        modem.transmit(PROFILER_TELEMETRY_CHANNEL,PROFILER_REQUEST_CHANNEL,{
+          heliosProfiler=true,version=1,kind="telemetry",guardianId=os.getComputerID(),
+          guardianVersion=GUARDIAN_VERSION,targetProfilerId=profilerId,sentAt=now,payload=snapshot(),
+        })
+      elseif leaseUntil and now>=leaseUntil then profilerId,leaseUntil=nil,nil end
+      timer=os.startTimer(1)
+    elseif event=="peripheral_detach" and a==modemName then
+      -- Losing this optional read-only link must never stop the Guardian.
+      while true do os.pullEvent("guardian_profiler_wireless_disabled") end
+    end
+  end
+end
+parallel.waitForAny(inputWorker,controlWorker,displayWorker,facilityWorker,profilerWorker)
 save(controls)
 ]=],
 }
@@ -9283,7 +9699,7 @@ end
     return true
 end
 
-local function buildConfig(role, display, existing)
+local function buildConfig(role, display, existing, profilerGuardianId)
     existing = type(existing) == "table" and existing or {}
     local discovery = type(existing.discovery) == "table" and existing.discovery or {}
     local alarms = type(existing.alarms) == "table" and existing.alarms or {}
@@ -9441,6 +9857,8 @@ local function buildConfig(role, display, existing)
         network = {
             siteId = type(networkSettings.siteId) == "string" and
                 networkSettings.siteId ~= "" and networkSettings.siteId or "default",
+            guardianId = role == "profiler" and tonumber(profilerGuardianId) or
+                tonumber(networkSettings.guardianId),
         },
     }
     return "return " .. textutils.serialize(merged)
@@ -9465,6 +9883,7 @@ local function runInstaller()
         local module = choose("Select a module:", {
             { label = "Hardware Probe (run once, read-only)", value = "probe" },
             { label = "Draconic Reactor Guardian", value = "guardian" },
+            { label = "Draconic Reactor Profiler (read-only)", value = "profiler" },
         })
         if module == "probe" then
             local temporaryProbe = "/.helios-probe-run.lua"
@@ -9475,8 +9894,9 @@ local function runInstaller()
             if not ran then error("Probe failed: " .. tostring(reason), 0) end
             return
         end
-        role = "guardian"
-        installLabel = "Module: Draconic Reactor Guardian"
+        role = module
+        installLabel = module == "guardian" and "Module: Draconic Reactor Guardian" or
+            "Module: Draconic Reactor Profiler (read-only)"
     end
 
     if role == "mainframe" and not (existingConfig and existingConfig.role == "mainframe") then
@@ -9494,6 +9914,7 @@ local function runInstaller()
     end
 
     local display
+    local profilerGuardianId
     if role == "terminal" then
         title("Remote Terminal Configuration")
         display = choose("Select the information this terminal will request:", {
@@ -9504,9 +9925,20 @@ local function runInstaller()
         })
     end
 
+    if role == "profiler" then
+        title("Profiler Pairing")
+        print("Enter the computer ID shown by the Draconic Guardian:")
+        profilerGuardianId = tonumber(read())
+        if not profilerGuardianId or profilerGuardianId < 0 or
+           profilerGuardianId ~= math.floor(profilerGuardianId) then
+            error("Guardian computer ID must be a whole number.", 0)
+        end
+    end
+
     title("Ready to Install")
     print(installLabel or ("Role: " .. role))
     if display then print("Display: " .. display) end
+    if profilerGuardianId then print("Guardian computer ID: " .. profilerGuardianId) end
     print("Location: " .. INSTALL_DIR)
     print("")
     if not confirm("Install HELIOS?") then
@@ -9514,7 +9946,7 @@ local function runInstaller()
         return
     end
 
-    local configText = buildConfig(role, display, existingConfig)
+    local configText = buildConfig(role, display, existingConfig, profilerGuardianId)
     local requiredBytes = embeddedInstallBytes(configText, role)
     local freeSpace = fs.getFreeSpace("/")
     local lowSpaceUpgrade = type(freeSpace) == "number" and freeSpace < requiredBytes
@@ -9606,6 +10038,7 @@ shell.run("/helios/helios.lua", ...)
     print(installLabel or ("Role: " .. role))
     if modulePackVersion then print("Module Pack: " .. tostring(modulePackVersion)) end
     if display then print("Display: " .. display) end
+    if profilerGuardianId then print("Guardian computer ID: " .. profilerGuardianId) end
     if previousInstall then print("Previous version: " .. previousInstall) end
     if lowSpaceUpgrade then print("Upgrade mode: low-space (configuration/data preserved)") end
     if autoStarted then

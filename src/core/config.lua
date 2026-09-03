@@ -10,7 +10,7 @@ function config.load()
         error("HELIOS configuration is invalid.", 0)
     end
     if loaded.role ~= "mainframe" and loaded.role ~= "terminal" and
-       loaded.role ~= "guardian" then
+       loaded.role ~= "guardian" and loaded.role ~= "profiler" then
         error("HELIOS configuration contains an invalid role.", 0)
     end
     loaded.discovery = loaded.discovery or {}

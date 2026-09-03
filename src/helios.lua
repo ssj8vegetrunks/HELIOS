@@ -7,6 +7,11 @@ if config.role == "guardian" then
     return
 end
 
+if config.role == "profiler" then
+    dofile("/helios/draconic/profiler.lua")
+    return
+end
+
 if args[1] == "probe" then
     dofile("/helios/tools/discovery_probe.lua")
     return

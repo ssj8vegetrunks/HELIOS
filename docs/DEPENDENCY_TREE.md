@@ -58,10 +58,13 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 
 - No HELIOS module dependencies detected.
 
-### `draconic/controller.lua`
+### `draconic/profiler.lua`
 
-- depends on → `core/facility_protocol.lua`
-- depends on → `core/network.lua`
+- depends on → `draconic/profiler_engine.lua`
+
+### `draconic/profiler_engine.lua`
+
+- No HELIOS module dependencies detected.
 
 ### `gui/control-room/manifest.lua`
 
@@ -78,7 +81,9 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 - depends on → `core/module_loader.lua`
 - depends on → `core/module_manager.lua`
 - depends on → `core/power_format.lua`
+- depends on → `draconic/controller.lua`
 - depends on → `draconic/guardian.lua`
+- depends on → `draconic/profiler.lua`
 - depends on → `mainframe/device_registry.lua`
 - depends on → `mainframe/main.lua`
 - depends on → `modules/extreme_reactors/reactor_adapter.lua`
@@ -95,6 +100,7 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 
 - depends on → `core/config.lua`
 - depends on → `core/display.lua`
+- depends on → `core/facility_protocol.lua`
 - depends on → `core/gui.lua`
 - depends on → `core/gui_loader.lua`
 - depends on → `core/mainframe_authority.lua`
@@ -103,7 +109,6 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 - depends on → `core/power_format.lua`
 - depends on → `core/ui.lua`
 - depends on → `core/ui_contract.lua`
-- depends on → `core/facility_protocol.lua`
 - depends on → `mainframe/device_registry.lua`
 - depends on → `mainframe/manual_control.lua`
 - depends on → `mainframe/reactor_governor.lua`
@@ -138,6 +143,10 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 
 - No HELIOS module dependencies detected.
 
+### `draconic/controller.lua`
+
+- No HELIOS module dependencies detected.
+
 ### `modules/extreme_reactors/reactor_adapter.lua`
 
 - No HELIOS module dependencies detected.
@@ -165,7 +174,6 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 
 ### `core/facility_protocol.lua`
 
-- used by ← `draconic/controller.lua`
 - used by ← `mainframe/main.lua`
 
 ### `core/gui.lua`
@@ -195,7 +203,6 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 ### `core/network.lua`
 
 - used by ← `mainframe/main.lua`
-- used by ← `draconic/controller.lua`
 - used by ← `terminal/main.lua`
 
 ### `core/power_format.lua`
@@ -216,6 +223,14 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 ### `draconic/guardian.lua`
 
 - used by ← `helios.lua`
+
+### `draconic/profiler.lua`
+
+- used by ← `helios.lua`
+
+### `draconic/profiler_engine.lua`
+
+- used by ← `draconic/profiler.lua`
 
 ### `gui/control-room/manifest.lua`
 
@@ -255,6 +270,10 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 - used by ← `helios.lua`
 
 ### `tools/discovery_probe.lua`
+
+- used by ← `helios.lua`
+
+### `draconic/controller.lua`
 
 - used by ← `helios.lua`
 

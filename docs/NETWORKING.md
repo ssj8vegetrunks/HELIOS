@@ -89,3 +89,23 @@ Mainframe facility collection until the Overseer lease expires. The Guardian
 then automatically falls back to the elected primary Mainframe. All discovery,
 presence, welcome, and telemetry messages must carry the same `siteId`; the
 current preserved default is `default`.
+
+## Draconic Profiler link
+
+The optional Draconic Profiler uses a separate, local wireless-modem link. It
+does not join `helios.facility.v1`, compete for the Guardian's Mainframe/Overseer
+collector lease, or attach to reactor peripherals.
+
+- The Profiler sends a targeted subscription to channel `43120` every three
+  seconds, naming both its own computer ID and the configured Guardian ID.
+- The named Guardian sends one-second telemetry to channel `43121` while that
+  ten-second subscription lease remains live.
+- Every telemetry message is addressed to the subscribing Profiler ID and is
+  ignored by other Profilers.
+- The link has no command message and the Profiler contains no actuator path.
+  It can observe, classify, and persist trends, but it cannot alter either gate
+  or reactor state.
+
+One Guardian currently serves one paired Profiler. Both computers require a
+wireless modem; the Guardian's normal wired facility-network connection may
+remain in place at the same time.

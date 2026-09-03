@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.1.0-alpha.9
+-- HELIOS Draconic Guardian v1.1.0-alpha.10
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -20,7 +20,8 @@ local FRACTION = { OFF = 0, MIN = .25, MED = .50, MAX = 1 }
 local PRESET_RAMP_STEP = 50000
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.1.0-alpha.9"
+local GUARDIAN_VERSION = "1.1.0-alpha.10"
+local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
 local facilityNetwork,facilityProtocol,facilityIdentity,facilitySequence
@@ -710,9 +711,11 @@ local function facilityWorker()
       siteId=facilitySiteId,facilityType="draconic_reactor",state=tostring(r.status or "unknown"),
       generationRate=tonumber(r.generationRate),temperature=tonumber(r.temperature),
       fieldStrength=tonumber(r.fieldStrength),maxFieldStrength=tonumber(r.maxFieldStrength),
+      fieldDrainRate=tonumber(r.fieldDrainRate),
       energySaturation=tonumber(r.energySaturation),maxEnergySaturation=tonumber(r.maxEnergySaturation),
       fuelConversion=tonumber(r.fuelConversion),maxFuelConversion=tonumber(r.maxFuelConversion),
       fieldGate=tonumber(data and data.inputSet),exportGate=tonumber(data and data.outputSet),
+      fieldInput=tonumber(data and data.inputFlow),exportFlow=tonumber(data and data.outputFlow),
       mode=controls.mode,request=controls.request,commissioned=controls.commissioned==true,
       ratedOutput=tonumber(controls.rated),localAuthority=true,remoteCommands=false,
       guardianMessage=tostring(controls.message or ""),telemetryStale=controls.telemetryStale==true,
@@ -778,6 +781,59 @@ local function facilityWorker()
     elseif event=="peripheral" or event=="peripheral_detach" then facilityNetwork.openAll() end
   end
 end
-parallel.waitForAny(inputWorker,controlWorker,displayWorker,facilityWorker)
+local function profilerWorker()
+  local modemName,modem
+  local names=peripheral.getNames();sort(names)
+  for _,name in ipairs(names) do
+    local candidate=peripheral.wrap(name)
+    if candidate and type(candidate.isWireless)=="function" then
+      local ok,wireless=pcall(candidate.isWireless)
+      if ok and wireless then modemName,modem=name,candidate;break end
+    end
+  end
+  if not modem then while true do os.pullEvent("guardian_profiler_wireless_disabled") end end
+  modem.open(PROFILER_REQUEST_CHANNEL)
+  local profilerId,leaseUntil
+  local timer=os.startTimer(1)
+  local function snapshot()
+    local r=data and data.reactor or {}
+    local imminent,alarmMessage=imminentMeltdown(r)
+    return {
+      state=tostring(r.status or "unknown"),generationRate=tonumber(r.generationRate),
+      temperature=tonumber(r.temperature),fieldStrength=tonumber(r.fieldStrength),
+      maxFieldStrength=tonumber(r.maxFieldStrength),fieldDrainRate=tonumber(r.fieldDrainRate),
+      energySaturation=tonumber(r.energySaturation),maxEnergySaturation=tonumber(r.maxEnergySaturation),
+      fuelConversion=tonumber(r.fuelConversion),maxFuelConversion=tonumber(r.maxFuelConversion),
+      fieldInput=tonumber(data and data.inputFlow),fieldGate=tonumber(data and data.inputSet),
+      exportFlow=tonumber(data and data.outputFlow),exportGate=tonumber(data and data.outputSet),
+      mode=controls.mode,request=controls.request,commissioned=controls.commissioned==true,
+      ratedOutput=tonumber(controls.rated),guardianMessage=tostring(controls.message or ""),
+      telemetryStale=controls.telemetryStale==true,alarmLevel=imminent and 3 or nil,
+      alarmMessage=alarmMessage,
+    }
+  end
+  while true do
+    local event,a,channel,replyChannel,message=os.pullEvent()
+    if event=="modem_message" and a==modemName and channel==PROFILER_REQUEST_CHANNEL and
+       type(message)=="table" and message.heliosProfiler==true and message.version==1 and
+       message.kind=="subscribe" and tonumber(message.targetGuardianId)==os.getComputerID() and
+       tonumber(message.profilerId) then
+      profilerId=tonumber(message.profilerId);leaseUntil=os.epoch("utc")/1000+10
+    elseif event=="timer" and a==timer then
+      local now=os.epoch("utc")/1000
+      if profilerId and leaseUntil and now<leaseUntil then
+        modem.transmit(PROFILER_TELEMETRY_CHANNEL,PROFILER_REQUEST_CHANNEL,{
+          heliosProfiler=true,version=1,kind="telemetry",guardianId=os.getComputerID(),
+          guardianVersion=GUARDIAN_VERSION,targetProfilerId=profilerId,sentAt=now,payload=snapshot(),
+        })
+      elseif leaseUntil and now>=leaseUntil then profilerId,leaseUntil=nil,nil end
+      timer=os.startTimer(1)
+    elseif event=="peripheral_detach" and a==modemName then
+      -- Losing this optional read-only link must never stop the Guardian.
+      while true do os.pullEvent("guardian_profiler_wireless_disabled") end
+    end
+  end
+end
+parallel.waitForAny(inputWorker,controlWorker,displayWorker,facilityWorker,profilerWorker)
 save(controls)
 
