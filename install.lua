@@ -1,7 +1,7 @@
 -- HELIOS single-file installer
 -- Manual-control alpha: guarded direct plant authority.
 
-local VERSION = "1.6.0-alpha.7"
+local VERSION = "1.6.0-alpha.8"
 local INSTALL_DIR = "/helios"
 local STAGE_DIR = "/.helios-install"
 local MODULE_PACK_BASE_URL = "https://raw.githubusercontent.com/ssj8vegetrunks/HELIOS/agent/facility-network-alpha1/module-pack"
@@ -1239,7 +1239,16 @@ function i18n.new(config)
     function service.value(value)
         if value == nil then return service.get("common.unknown") end
         local key = valueKey(value)
-        return replace(selected.strings[key] or fallback.strings[key] or tostring(value))
+        local direct = selected.strings[key] or fallback.strings[key]
+        if direct then return replace(direct) end
+        local text = tostring(value)
+        local rpm = text:match("^AUTOMATIC / HOLDING ([%d%.]+) RPM$")
+        if rpm then return service.get("value.automatic_holding_rpm", { rpm = rpm }, text) end
+        local rods, steam = text:match("^Holding ([%d%.]+) exposed rod%-equivalents for ([%d%.]+) mB/t$")
+        if rods then return service.get("value.holding_rods_for_steam", { rods = rods, steam = steam }, text) end
+        local field, export = text:match("^Manual gates applied: field ([%d%.]+[kM]?), export ([%d%.]+[kM]?) RF/t$")
+        if field then return service.get("value.manual_gates_applied", { field = field, export = export }, text) end
+        return text
     end
     return service
 end
@@ -2529,7 +2538,7 @@ return {
     name = "HELIOS Control Room",
     version = "1.0.0",
     apiVersion = 1,
-    compatibleCoreVersions = { "1.6.0-alpha.4", "1.6.0-alpha.5", "1.6.0-alpha.6", "1.6.0-alpha.7" },
+    compatibleCoreVersions = { "1.6.0-alpha.4", "1.6.0-alpha.5", "1.6.0-alpha.6", "1.6.0-alpha.7", "1.6.0-alpha.8" },
     entry = "renderer.lua",
     minimumWidth = 50,
     minimumHeight = 31,
@@ -2670,7 +2679,7 @@ function renderer.render(snapshot, state, services)
             line("F " .. nameOf(reactor.name, snapshot) .. ": " ..
                 (reactor.online and tv(reactor.state or "ONLINE") or tv("STALE")),
                 reactor.online and colors.magenta or colors.orange)
-            line("  DRACONIC GUARDIAN - " ..
+            line("  DRACONIC " .. tr("common.guardian", "GUARDIAN") .. " - " ..
                 tv(reactor.guardianMessage or reactor.mode or "MONITORING"), colors.lightGray)
         end
         for _, turbine in ipairs(snapshot.turbines or {}) do
@@ -3010,6 +3019,17 @@ return {
         ["dashboard.power_reserve"] = "POWER RESERVE",
         ["dashboard.graphical_only"] = "Lookout duty only",
         ["dashboard.manual_advanced"] = "Captain's orders: use the CABIN text panel",
+        ["dashboard.screen_title"] = "HELIOS // {title}",
+        ["dashboard.central_power_management"] = "The ship's power command",
+        ["dashboard.computer_id"] = "Ship's mark", ["dashboard.attached_hardware"] = "Crew aboard",
+        ["dashboard.monitor_output"] = "Lookout glass", ["dashboard.remote_terminals"] = "Distant lookouts",
+        ["dashboard.discovery"] = "Charting", ["dashboard.control"] = "Helm", ["dashboard.alarms"] = "Bells",
+        ["dashboard.turbine"] = "Sail", ["dashboard.storage"] = "Treasure hold",
+        ["dashboard.turbine_subtitle"] = "Live lookout and helmsman's course",
+        ["dashboard.energy_storage"] = "TREASURE HOLD", ["dashboard.storage_subtitle"] = "Eyes-only cargo tally",
+        ["dashboard.flow_plan"] = "Flow seen/set/course", ["dashboard.tanks_in_out"] = "Ballast in / out",
+        ["dashboard.full_in"] = "Hold full in", ["dashboard.max_io"] = "Max cargo flow", ["dashboard.matrix"] = "Hold grid",
+        ["dashboard.matrix_value"] = "{cells} cells / {providers} mates", ["dashboard.cyanite"] = "BLUE SPOILS",
         ["value.active"] = "SAILIN'", ["value.offline"] = "MOORED",
         ["value.ready"] = "SHIPSHAPE", ["value.running"] = "SAILIN'",
         ["value.stable"] = "STEADY", ["value.hold"] = "HOLD FAST",
@@ -3024,6 +3044,17 @@ return {
         ["value.rotor_is_inside_the_target_deadband"] = "The sail holds its ordered course",
         ["value.waiting_for_governor_update"] = "Awaitin' the helmsman's word",
         ["value.link_stale"] = "OLD SIGNAL",
+        ["value.automatic_preparing_steam"] = "AUTO-HELM / RAISIN' STEAM",
+        ["value.automatic_governors_active"] = "AUTO-HELM / HELMSMEN AT WORK",
+        ["value.automatic_waiting_for_plant"] = "AUTO-HELM / AWAITIN' THE SHIP",
+        ["value.automatic_no_controlled_plant"] = "AUTO-HELM / NO SHIP UNDER COMMAND",
+        ["value.automatic_holding_rpm"] = "AUTO-HELM / HOLDIN' {rpm} RPM",
+        ["value.holding_rods_for_steam"] = "Holdin' {rods} rods aloft for {steam} mB/t",
+        ["value.manual_gates_applied"] = "Captain set the gates: shield {field}, plunder {export} RF/t",
+        ["value.generating"] = "MAKIN' POWER", ["value.learned"] = "CHARTED",
+        ["value.steam"] = "STEAM", ["value.mirrored"] = "MIRRORED", ["value.none"] = "NARY ONE",
+        ["value.known"] = "CHARTED", ["value.clear"] = "ALL QUIET", ["value.disabled"] = "STRUCK",
+        ["value.ready_standby"] = "READY / AT ANCHOR",
         ["nav.home"] = "MAIN DECK",
         ["nav.overview"] = "SHIP'S LOG",
         ["nav.reactors"] = "HEARTS",
@@ -3113,6 +3144,17 @@ return {
         ["dashboard.power_reserve"] = "POWER RESERVE",
         ["dashboard.graphical_only"] = "Graphical monitoring only",
         ["dashboard.manual_advanced"] = "Manual control: ADVANCED text interface",
+        ["dashboard.screen_title"] = "HELIOS // {title}",
+        ["dashboard.central_power_management"] = "Central power management",
+        ["dashboard.computer_id"] = "Computer ID", ["dashboard.attached_hardware"] = "Attached hardware",
+        ["dashboard.monitor_output"] = "Monitor output", ["dashboard.remote_terminals"] = "Remote terminals",
+        ["dashboard.discovery"] = "Discovery", ["dashboard.control"] = "Control", ["dashboard.alarms"] = "Alarms",
+        ["dashboard.turbine"] = "Turbine", ["dashboard.storage"] = "Storage",
+        ["dashboard.turbine_subtitle"] = "Live telemetry and governor plan",
+        ["dashboard.energy_storage"] = "ENERGY STORAGE", ["dashboard.storage_subtitle"] = "Universal read-only telemetry",
+        ["dashboard.flow_plan"] = "Flow actual/set/plan", ["dashboard.tanks_in_out"] = "Tanks in / out",
+        ["dashboard.full_in"] = "Full in", ["dashboard.max_io"] = "Max I/O", ["dashboard.matrix"] = "Matrix",
+        ["dashboard.matrix_value"] = "{cells} cells / {providers} providers", ["dashboard.cyanite"] = "CYANITE",
         ["value.active"] = "ACTIVE", ["value.offline"] = "OFFLINE",
         ["value.ready"] = "READY", ["value.running"] = "RUNNING",
         ["value.stable"] = "STABLE", ["value.hold"] = "HOLD",
@@ -3127,6 +3169,17 @@ return {
         ["value.rotor_is_inside_the_target_deadband"] = "Rotor is inside the target deadband",
         ["value.waiting_for_governor_update"] = "Waiting for governor update",
         ["value.link_stale"] = "LINK STALE",
+        ["value.automatic_preparing_steam"] = "AUTOMATIC / PREPARING STEAM",
+        ["value.automatic_governors_active"] = "AUTOMATIC / GOVERNORS ACTIVE",
+        ["value.automatic_waiting_for_plant"] = "AUTOMATIC / WAITING FOR PLANT",
+        ["value.automatic_no_controlled_plant"] = "AUTOMATIC / NO CONTROLLED PLANT",
+        ["value.automatic_holding_rpm"] = "AUTOMATIC / HOLDING {rpm} RPM",
+        ["value.holding_rods_for_steam"] = "Holding {rods} exposed rod-equivalents for {steam} mB/t",
+        ["value.manual_gates_applied"] = "Manual gates applied: field {field}, export {export} RF/t",
+        ["value.generating"] = "GENERATING", ["value.learned"] = "LEARNED",
+        ["value.steam"] = "STEAM", ["value.mirrored"] = "MIRRORED", ["value.none"] = "NONE",
+        ["value.known"] = "KNOWN", ["value.clear"] = "CLEAR", ["value.disabled"] = "DISABLED",
+        ["value.ready_standby"] = "READY / STANDBY",
         ["nav.home"] = "HOME",
         ["nav.overview"] = "OVERVIEW",
         ["nav.reactors"] = "REACTORS",
@@ -3216,6 +3269,17 @@ return {
         ["dashboard.power_reserve"] = "RESERVE D'ENERGIE",
         ["dashboard.graphical_only"] = "Surveillance graphique seulement",
         ["dashboard.manual_advanced"] = "Controle manuel : interface texte AVANCEE",
+        ["dashboard.screen_title"] = "HELIOS // {title}",
+        ["dashboard.central_power_management"] = "Gestion centrale de l'energie",
+        ["dashboard.computer_id"] = "ID ordinateur", ["dashboard.attached_hardware"] = "Materiel connecte",
+        ["dashboard.monitor_output"] = "Sortie moniteur", ["dashboard.remote_terminals"] = "Terminaux distants",
+        ["dashboard.discovery"] = "Detection", ["dashboard.control"] = "Controle", ["dashboard.alarms"] = "Alarmes",
+        ["dashboard.turbine"] = "Turbine", ["dashboard.storage"] = "Stockage",
+        ["dashboard.turbine_subtitle"] = "Telemetrie et plan du regulateur",
+        ["dashboard.energy_storage"] = "STOCKAGE D'ENERGIE", ["dashboard.storage_subtitle"] = "Telemetrie universelle en lecture seule",
+        ["dashboard.flow_plan"] = "Debit reel/regle/prevu", ["dashboard.tanks_in_out"] = "Reservoirs entree / sortie",
+        ["dashboard.full_in"] = "Plein dans", ["dashboard.max_io"] = "E/S max", ["dashboard.matrix"] = "Matrice",
+        ["dashboard.matrix_value"] = "{cells} cellules / {providers} fournisseurs", ["dashboard.cyanite"] = "CYANITE",
         ["value.active"] = "ACTIF", ["value.offline"] = "HORS LIGNE",
         ["value.ready"] = "PRET", ["value.running"] = "EN MARCHE",
         ["value.stable"] = "STABLE", ["value.hold"] = "MAINTIEN",
@@ -3230,6 +3294,17 @@ return {
         ["value.rotor_is_inside_the_target_deadband"] = "Le rotor est dans la plage cible",
         ["value.waiting_for_governor_update"] = "En attente du regulateur",
         ["value.link_stale"] = "LIAISON PERIMEE",
+        ["value.automatic_preparing_steam"] = "AUTOMATIQUE / PREPARATION VAPEUR",
+        ["value.automatic_governors_active"] = "AUTOMATIQUE / REGULATEURS ACTIFS",
+        ["value.automatic_waiting_for_plant"] = "AUTOMATIQUE / ATTENTE DE LA CENTRALE",
+        ["value.automatic_no_controlled_plant"] = "AUTOMATIQUE / AUCUNE CENTRALE CONTROLEE",
+        ["value.automatic_holding_rpm"] = "AUTOMATIQUE / MAINTIEN A {rpm} RPM",
+        ["value.holding_rods_for_steam"] = "Maintien de {rods} barres equivalentes pour {steam} mB/t",
+        ["value.manual_gates_applied"] = "Vannes manuelles appliquees : champ {field}, export {export} RF/t",
+        ["value.generating"] = "PRODUCTION", ["value.learned"] = "APPRIS",
+        ["value.steam"] = "VAPEUR", ["value.mirrored"] = "REPLIQUE", ["value.none"] = "AUCUN",
+        ["value.known"] = "CONNUS", ["value.clear"] = "AUCUNE", ["value.disabled"] = "DESACTIVEES",
+        ["value.ready_standby"] = "PRET / EN VEILLE",
         ["nav.home"] = "ACCUEIL",
         ["nav.overview"] = "SOMMAIRE",
         ["nav.reactors"] = "REACTEURS",
@@ -4328,7 +4403,7 @@ function mainframe.run(config)
     local function render()
         ui.setIdConflicts(idConflicts)
         dashboardButtons = {}
-        ui.header("HELIOS", "Central power management", function()
+        ui.header("HELIOS", tr("dashboard.central_power_management", nil, "Central power management"), function()
             dashboardButtons.reactors = ui.inlineButton(tr("nav.reactors"), colors.red)
             write(" ")
             dashboardButtons.turbines = ui.inlineButton(tr("nav.turbines"), colors.blue)
@@ -4336,18 +4411,18 @@ function mainframe.run(config)
             dashboardButtons.storage = ui.inlineButton(tr("nav.power"), colors.yellow)
             print("")
         end)
-        ui.status("System", "ONLINE", colors.lime)
-        ui.status("Computer ID", config.computerId)
-        ui.status("Attached hardware", #devices, #devices > 0 and colors.lime or colors.orange)
+        ui.status(tr("common.system"), tr("common.online"), colors.lime)
+        ui.status(tr("dashboard.computer_id", nil, "Computer ID"), config.computerId)
+        ui.status(tr("dashboard.attached_hardware", nil, "Attached hardware"), #devices, #devices > 0 and colors.lime or colors.orange)
         local monitorCount = display.count()
-        ui.status("Monitor output", monitorCount > 0 and (monitorCount .. " MIRRORED") or "NONE",
+        ui.status(tr("dashboard.monitor_output", nil, "Monitor output"), monitorCount > 0 and (monitorCount .. " " .. tv("MIRRORED")) or tv("NONE"),
             monitorCount > 0 and colors.lime or colors.gray)
-        ui.status("Remote terminals", ("%d ONLINE / %d KNOWN"):format(onlineTerminalCount(),
-            (function() local count = 0 for _ in pairs(terminals) do count = count + 1 end return count end)()),
+        ui.status(tr("dashboard.remote_terminals", nil, "Remote terminals"), ("%d %s / %d %s"):format(onlineTerminalCount(), tr("common.online"),
+            (function() local count = 0 for _ in pairs(terminals) do count = count + 1 end return count end)(), tv("KNOWN")),
             onlineTerminalCount() > 0 and colors.lime or colors.gray)
-        ui.status("Discovery", modeName(), maintenance and colors.orange or colors.cyan)
+        ui.status(tr("dashboard.discovery", nil, "Discovery"), tv(modeName()), maintenance and colors.orange or colors.cyan)
         local controlText, controlColour = controlStatus()
-        ui.status("Control", controlText, controlColour)
+        ui.status(tr("dashboard.control", nil, "Control"), tv(controlText), controlColour)
         if registryStale then
             ui.line("Registry may be outdated", colors.orange)
         elseif maintenance then
@@ -4378,7 +4453,7 @@ function mainframe.run(config)
             alarmButton = nil
             silenceButton = nil
             scramButton = nil
-            ui.status("Alarms", config.alarms.enabled and "CLEAR" or "DISABLED",
+            ui.status(tr("dashboard.alarms", nil, "Alarms"), tv(config.alarms.enabled and "CLEAR" or "DISABLED"),
                 config.alarms.enabled and colors.lime or colors.gray)
         end
 
@@ -4399,9 +4474,9 @@ function mainframe.run(config)
             print(("+ %d more (run: helios scan)"):format(#devices - availableRows))
         end
         term.setCursorPos(1, footerRow)
-        dashboardButtons.control = ui.inlineButton("CONTROL", colors.lime)
+        dashboardButtons.control = ui.inlineButton(tr("dashboard.control", nil, "CONTROL"), colors.lime)
         write(" ")
-        dashboardButtons.settings = ui.inlineButton("SETTINGS", colors.cyan)
+        dashboardButtons.settings = ui.inlineButton(tr("nav.settings"), colors.cyan)
         write(" ")
         dashboardButtons.graphical = ui.inlineButton("GUI", colors.lightGray)
         print("")
@@ -5584,7 +5659,7 @@ function mainframe.run(config)
         end
 
         local function draw()
-            navigationButtons = facilityHeader("TURBINES", "Live telemetry and governor plan")
+            navigationButtons = facilityHeader(tr("nav.turbines"), tr("dashboard.turbine_subtitle", nil, "Live telemetry and governor plan"))
             if #turbines == 0 then
                 ui.status("Status", "NO TURBINES FOUND", colors.orange)
                 print("")
@@ -5594,30 +5669,30 @@ function mainframe.run(config)
             end
             if selected > #turbines then selected = #turbines end
             local turbine = turbines[selected]
-            ui.status("Turbine", ("%d/%d %s"):format(selected, #turbines, deviceName(turbine.name)), colors.cyan)
+            ui.status(tr("dashboard.turbine", nil, "Turbine"), ("%d/%d %s"):format(selected, #turbines, deviceName(turbine.name)), colors.cyan)
             if turbine.error then
                 ui.status("Telemetry", turbine.error, colors.red)
             else
-                ui.status("State", turbine.active == true and "ACTIVE" or turbine.active == false and "OFFLINE" or "UNKNOWN",
+                ui.status(tr("common.state"), tv(turbine.active == true and "ACTIVE" or turbine.active == false and "OFFLINE" or "UNKNOWN"),
                     turbine.active == true and colors.lime or colors.orange)
-                ui.status("Rotor speed", formatValue(turbine.rotorSpeed, " RPM"), colors.cyan)
+                ui.status(tr("common.rotor_speed"), formatValue(turbine.rotorSpeed, " RPM"), colors.cyan)
                 local plan = turbine.governor or {}
-                ui.status("Governor", (plan.state or "WAITING") .. " / " ..
-                    (plan.actuatorState or "WAITING"),
+                ui.status(tr("common.governor"), tv(plan.state or "WAITING") .. " / " ..
+                    tv(plan.actuatorState or "WAITING"),
                     (plan.trusted == false or plan.actuatorState == "FAULT" or
                         plan.state == "CALIBRATION FAILED") and colors.red or colors.lime)
-                ui.status("Power output", powerFormat.power(turbine.energyProduction, config.power, true), colors.cyan)
-                ui.status("Energy buffer", formatValue(turbine.energyPercent, "%"))
+                ui.status(tr("common.power_output"), powerFormat.power(turbine.energyProduction, config.power, true), colors.cyan)
+                ui.status(tr("common.energy_buffer"), formatValue(turbine.energyPercent, "%"))
                 if plan.currentFlow ~= nil and plan.recommendedFlow ~= nil then
-                    ui.status("Flow actual/set/plan", ("%s / %.0f -> %.0f"):format(
+                    ui.status(tr("dashboard.flow_plan", nil, "Flow actual/set/plan"), ("%s / %.0f -> %.0f"):format(
                         plan.actualFlow and ("%.0f"):format(plan.actualFlow) or "N/A",
                         plan.currentFlow, plan.recommendedFlow), colors.cyan)
                 else
-                    ui.status("Flow actual/set/plan", "N/A / HOLD", colors.gray)
+                    ui.status(tr("dashboard.flow_plan", nil, "Flow actual/set/plan"), "N/A / " .. tv("HOLD"), colors.gray)
                 end
-                ui.status("Tanks in / out", formatValue(turbine.inputPercent, "%") .. " / " ..
+                ui.status(tr("dashboard.tanks_in_out", nil, "Tanks in / out"), formatValue(turbine.inputPercent, "%") .. " / " ..
                     formatValue(turbine.outputPercent, "%"))
-                ui.status("Inductor", turbine.inductorEngaged == true and "ENGAGED" or turbine.inductorEngaged == false and "DISENGAGED" or "N/A")
+                ui.status(tr("common.inductor"), tv(turbine.inductorEngaged == true and "ENGAGED" or turbine.inductorEngaged == false and "DISENGAGED" or "N/A"))
                 local profile = (config.control.turbineProfiles or {})[tostring(turbine.name)]
                 if type(profile) == "table" and profile.calibrated == true then
                     idleButton = ui.button(profile.assistedIdle == true and
@@ -5709,7 +5784,7 @@ function mainframe.run(config)
         end
 
         local function draw()
-            navigationButtons = facilityHeader("ENERGY STORAGE", "Universal read-only telemetry")
+            navigationButtons = facilityHeader(tr("dashboard.energy_storage", nil, "ENERGY STORAGE"), tr("dashboard.storage_subtitle", nil, "Universal read-only telemetry"))
             if #storages == 0 then
                 ui.status("Status", "NO SUPPORTED STORAGE FOUND", colors.orange)
                 print("")
@@ -5720,28 +5795,28 @@ function mainframe.run(config)
             end
             if selected > #storages then selected = #storages end
             local storage = storages[selected]
-            ui.status("Storage", ("%d/%d %s"):format(selected, #storages, deviceName(storage.name)), colors.cyan)
-            ui.status("Driver", storage.adapterName or "UNKNOWN", storage.fallback and colors.orange or colors.lime)
+            ui.status(tr("dashboard.storage", nil, "Storage"), ("%d/%d %s"):format(selected, #storages, deviceName(storage.name)), colors.cyan)
+            ui.status(tr("common.driver"), storage.adapterName or tv("UNKNOWN"), storage.fallback and colors.orange or colors.lime)
             if storage.error then
                 ui.status("Telemetry", storage.error, colors.red)
             else
-                ui.status("Charge", formatPercent(storage.percent), colors.cyan)
-                ui.status("Stored", powerFormat.power(storage.stored, config.power, false) .. " / " .. powerFormat.power(storage.capacity, config.power, false))
-                ui.status("Input", powerFormat.power(storage.input, config.power, true))
-                ui.status("Output", powerFormat.power(storage.output, config.power, true))
-                ui.status("Net", signedPower(storage.net), storage.net and (storage.net > 0 and colors.lime or storage.net < 0 and colors.orange or colors.white) or colors.gray)
-                ui.status("State", storage.state or "UNKNOWN", storage.state == "CHARGING" and colors.lime or storage.state == "DRAINING" and colors.orange or colors.white)
+                ui.status(tr("common.charge"), formatPercent(storage.percent), colors.cyan)
+                ui.status(tr("common.stored"), powerFormat.power(storage.stored, config.power, false) .. " / " .. powerFormat.power(storage.capacity, config.power, false))
+                ui.status(tr("common.input"), powerFormat.power(storage.input, config.power, true))
+                ui.status(tr("common.output"), powerFormat.power(storage.output, config.power, true))
+                ui.status(tr("common.net"), signedPower(storage.net), storage.net and (storage.net > 0 and colors.lime or storage.net < 0 and colors.orange or colors.white) or colors.gray)
+                ui.status(tr("common.state"), tv(storage.state or "UNKNOWN"), storage.state == "CHARGING" and colors.lime or storage.state == "DRAINING" and colors.orange or colors.white)
                 if storage.state == "CHARGING" then
-                    ui.status("Full in", storageAdapter.formatETA(storage))
+                    ui.status(tr("dashboard.full_in", nil, "Full in"), storageAdapter.formatETA(storage))
                 elseif storage.state == "DRAINING" then
                     ui.status("Empty in", storageAdapter.formatETA(storage))
                 end
                 local details = storage.details or {}
                 if details.transferCap ~= nil then
-                    ui.status("Max I/O", powerFormat.power(details.transferCap, config.power, true))
+                    ui.status(tr("dashboard.max_io", nil, "Max I/O"), powerFormat.power(details.transferCap, config.power, true))
                 end
                 if details.cells ~= nil or details.providers ~= nil then
-                    ui.status("Matrix", ("%s cells / %s providers"):format(tostring(details.cells or "?"), tostring(details.providers or "?")))
+                    ui.status(tr("dashboard.matrix", nil, "Matrix"), tr("dashboard.matrix_value", { cells = tostring(details.cells or "?"), providers = tostring(details.providers or "?") }, "{cells} cells / {providers} providers"))
                 end
             end
             print("")
@@ -5866,10 +5941,12 @@ function mainframe.run(config)
         local function header(title)
             gui.prepare()
             local width = select(1, term.getSize())
-            gui.text(1, 1, "HELIOS // " .. title, colors.yellow)
             local version = "v" .. tostring(config.version)
+            gui.text(1, 1, language.fit("dashboard.screen_title", math.max(1, width - #version - 1), { title = title }, "HELIOS // {title}"), colors.yellow)
             gui.text(math.max(1, width - #version + 1), 1, version, colors.yellow)
             local state, detail, colour = readiness()
+            state, detail = tv(state), tv(detail)
+            state, detail = tv(state), tv(detail)
             gui.text(1, 2, " " .. state .. " ", colors.black, colour)
             gui.text(#state + 4, 2, detail, colour, colors.black,
                 math.max(0, width - #state - 3))
@@ -5962,7 +6039,7 @@ function mainframe.run(config)
                     config.power, true), colors.lime)
                 gui.text(1, 17, tr("common.guardian") .. " " .. tv(reactor.mode or "UNKNOWN") .. " / " ..
                     tv(reactor.request or "UNKNOWN"), colors.orange)
-                gui.text(1, 19, "[<] PREVIOUS     NEXT [>]", colors.cyan)
+                gui.text(1, 19, "[<] " .. tr("common.previous") .. "     " .. tr("common.next") .. " [>]", colors.cyan)
                 return
             end
             local output = reactor.mode == "steam" and reactor.steamProduction or reactor.energyProduction
@@ -5983,16 +6060,16 @@ function mainframe.run(config)
             local barWidth = math.max(10, width - 10)
             gui.text(1, 6, ("%d/%d  %s"):format(selected.reactors, #reactorList,
                 deviceName(reactor.name)), colors.cyan, colors.black, width)
-            gui.text(1, 7, ("TYPE %-8s  %s"):format(string.upper(reactor.mode or "unknown"),
-                reactor.active == true and "ACTIVE" or "OFFLINE"),
+            gui.text(1, 7, ("%s %-8s  %s"):format(tr("common.type"), tv(reactor.mode or "unknown"),
+                tv(reactor.active == true and "ACTIVE" or "OFFLINE")),
                 reactor.active == true and colors.lime or colors.orange)
             local unit = reactor.mode == "steam" and "mB/t" or "FE/t"
             gui.text(1, 8,
-                maximum and ("OUTPUT %.0f / %.0f %s"):format(output or 0, maximum, unit) or
-                    ("OUTPUT %.0f / LEARNING"):format(output or 0),
+            maximum and ("%s %.0f / %.0f %s"):format(tr("common.output"), output or 0, maximum, unit) or
+                ("%s %.0f / %s"):format(tr("common.output"), output or 0, tv("LEARNING")),
                 colors.lightGray, colors.black, width)
             if target then
-                gui.text(1, 9, ("DEMAND %.0f %s"):format(target, unit), colors.yellow)
+                gui.text(1, 9, ("%s %.0f %s"):format(tr("common.demand"), target, unit), colors.yellow)
             end
             gui.progress(1, 10, barWidth, outputPercent,
                 reactor.active == true and colors.lime or colors.orange, colors.gray)
@@ -6004,17 +6081,17 @@ function mainframe.run(config)
                 gui.text(math.max(1, width - 8), 10,
                     output and ("%.0f"):format(output) or "N/A", colors.white)
             end
-            gui.text(1, 12, "FUEL", colors.lightGray)
+            gui.text(1, 12, tr("common.fuel"), colors.lightGray)
             gui.progress(1, 13, math.max(10, width - 10), reactor.fuelPercent or 0,
                 (reactor.fuelPercent or 0) < 20 and colors.orange or colors.lime, colors.gray)
             gui.text(math.max(1, width - 8), 13,
                 reactor.fuelPercent and ("%6.1f%%"):format(reactor.fuelPercent) or "   N/A", colors.white)
             local buffer = reactor.mode == "steam" and reactor.hotFluidPercent or reactor.energyPercent
-            gui.text(1, 15, ("CYANITE %s mB"):format(
+            gui.text(1, 15, ("%s %s mB"):format(tr("dashboard.cyanite", nil, "CYANITE"),
                 reactor.waste and ("%.0f"):format(reactor.waste) or "N/A"), colors.cyan)
-            gui.text(math.max(24, width - 16), 15, ("BUFFER %s"):format(
+            gui.text(math.max(24, width - 16), 15, ("%s %s"):format(tr("common.buffer"),
                 buffer and ("%.1f%%"):format(buffer) or "N/A"), colors.cyan)
-            gui.text(1, 17, "[<] PREVIOUS     NEXT [>]", colors.cyan)
+            gui.text(1, 17, "[<] " .. tr("common.previous") .. "     " .. tr("common.next") .. " [>]", colors.cyan)
         end
 
         local function turbinePage()
@@ -6031,7 +6108,7 @@ function mainframe.run(config)
                 deviceName(turbine.name)), colors.cyan, colors.black, width)
             gui.text(1, 7, tv(turbine.active == true and "ACTIVE" or "OFFLINE"),
                 turbine.active == true and colors.lime or colors.orange)
-            gui.text(1, 9, ("ROTOR %.1f RPM"):format(rpm), rpm >= 1900 and colors.red or colors.white)
+            gui.text(1, 9, ("%s %.1f RPM"):format(tr("common.rotor_speed"), rpm), rpm >= 1900 and colors.red or colors.white)
             local gaugeWidth = math.max(20, width - 1)
             gui.rpmGauge(1, 10, gaugeWidth, rpm)
             local lowLabel = "[900 RPM]"
@@ -6047,7 +6124,7 @@ function mainframe.run(config)
             gui.text(1, 13, tr("common.state") .. " " .. tv(plan.state or "WAITING"), colors.white)
             gui.text(1, 14, tr("common.output") .. " " .. powerFormat.power(turbine.energyProduction,
                 config.power, true), colors.cyan)
-            gui.text(1, 16, "[<] PREVIOUS     NEXT [>]", colors.cyan)
+            gui.text(1, 16, "[<] " .. tr("common.previous") .. "     " .. tr("common.next") .. " [>]", colors.cyan)
         end
 
         local function storagePage()
@@ -6068,12 +6145,12 @@ function mainframe.run(config)
                 storage.percent and ("%6.1f%%"):format(storage.percent) or "   N/A", colors.white)
             gui.text(1, 11, tr("common.stored") .. "  " .. powerFormat.power(storage.stored,
                 config.power, false), colors.white)
-            gui.text(1, 12, "FILL    " .. powerFormat.power(storage.input,
+            gui.text(1, 12, tr("common.input") .. "    " .. powerFormat.power(storage.input,
                 config.power, true), colors.lime)
-            gui.text(1, 13, "DRAW    " .. powerFormat.power(storage.output,
+            gui.text(1, 13, tr("common.output") .. "    " .. powerFormat.power(storage.output,
                 config.power, true), colors.orange)
             gui.text(1, 14, tr("common.state") .. "   " .. tv(storage.state or "UNKNOWN"), colors.cyan)
-            gui.text(1, 16, "[<] PREVIOUS     NEXT [>]", colors.cyan)
+            gui.text(1, 16, "[<] " .. tr("common.previous") .. "     " .. tr("common.next") .. " [>]", colors.cyan)
         end
 
         local function draw()

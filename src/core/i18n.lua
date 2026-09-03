@@ -76,7 +76,16 @@ function i18n.new(config)
     function service.value(value)
         if value == nil then return service.get("common.unknown") end
         local key = valueKey(value)
-        return replace(selected.strings[key] or fallback.strings[key] or tostring(value))
+        local direct = selected.strings[key] or fallback.strings[key]
+        if direct then return replace(direct) end
+        local text = tostring(value)
+        local rpm = text:match("^AUTOMATIC / HOLDING ([%d%.]+) RPM$")
+        if rpm then return service.get("value.automatic_holding_rpm", { rpm = rpm }, text) end
+        local rods, steam = text:match("^Holding ([%d%.]+) exposed rod%-equivalents for ([%d%.]+) mB/t$")
+        if rods then return service.get("value.holding_rods_for_steam", { rods = rods, steam = steam }, text) end
+        local field, export = text:match("^Manual gates applied: field ([%d%.]+[kM]?), export ([%d%.]+[kM]?) RF/t$")
+        if field then return service.get("value.manual_gates_applied", { field = field, export = export }, text) end
+        return text
     end
     return service
 end

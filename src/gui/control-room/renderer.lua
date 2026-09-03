@@ -130,7 +130,7 @@ function renderer.render(snapshot, state, services)
             line("F " .. nameOf(reactor.name, snapshot) .. ": " ..
                 (reactor.online and tv(reactor.state or "ONLINE") or tv("STALE")),
                 reactor.online and colors.magenta or colors.orange)
-            line("  DRACONIC GUARDIAN - " ..
+            line("  DRACONIC " .. tr("common.guardian", "GUARDIAN") .. " - " ..
                 tv(reactor.guardianMessage or reactor.mode or "MONITORING"), colors.lightGray)
         end
         for _, turbine in ipairs(snapshot.turbines or {}) do
