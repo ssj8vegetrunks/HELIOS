@@ -2507,6 +2507,7 @@ function mainframe.run(config)
             local width = select(1, term.getSize())
             gui.text(1, 6, tr("dashboard.system_readiness"), colors.lightGray)
             local state, detail, colour = readiness()
+            state, detail = tv(state), tv(detail)
             gui.text(1, 7, state, colour)
             gui.text(1, 8, detail, colors.white, colors.black, width)
             gui.text(1, 10, ("REACTORS  %d   TURBINES  %d   STORAGE  %d"):format(

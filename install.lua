@@ -1,7 +1,7 @@
 -- HELIOS single-file installer
 -- Manual-control alpha: guarded direct plant authority.
 
-local VERSION = "1.6.0-alpha.9"
+local VERSION = "1.6.0-alpha.10"
 local INSTALL_DIR = "/helios"
 local STAGE_DIR = "/.helios-install"
 local MODULE_PACK_BASE_URL = "https://raw.githubusercontent.com/ssj8vegetrunks/HELIOS/agent/facility-network-alpha1/module-pack"
@@ -2538,7 +2538,7 @@ return {
     name = "HELIOS Control Room",
     version = "1.0.0",
     apiVersion = 1,
-    compatibleCoreVersions = { "1.6.0-alpha.4", "1.6.0-alpha.5", "1.6.0-alpha.6", "1.6.0-alpha.7", "1.6.0-alpha.8", "1.6.0-alpha.9" },
+    compatibleCoreVersions = { "1.6.0-alpha.4", "1.6.0-alpha.5", "1.6.0-alpha.6", "1.6.0-alpha.7", "1.6.0-alpha.8", "1.6.0-alpha.9", "1.6.0-alpha.10" },
     entry = "renderer.lua",
     minimumWidth = 50,
     minimumHeight = 31,
@@ -6007,6 +6007,7 @@ function mainframe.run(config)
             local width = select(1, term.getSize())
             gui.text(1, 6, tr("dashboard.system_readiness"), colors.lightGray)
             local state, detail, colour = readiness()
+            state, detail = tv(state), tv(detail)
             gui.text(1, 7, state, colour)
             gui.text(1, 8, detail, colors.white, colors.black, width)
             gui.text(1, 10, ("REACTORS  %d   TURBINES  %d   STORAGE  %d"):format(
