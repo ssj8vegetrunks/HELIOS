@@ -9,6 +9,11 @@ cannot produce blank labels or disable controls.
 
 ## Selecting a language
 
+The installer asks for language before showing any installation category or
+configuration screen. That choice controls the rest of the installer and is
+written directly to the new HELIOS configuration. On an upgrade, the existing
+language is marked as the current choice but the operator may change it.
+
 ```text
 helios language list
 helios language set fr_ca

@@ -1,10 +1,145 @@
 -- HELIOS single-file installer
 -- Manual-control alpha: guarded direct plant authority.
 
-local VERSION = "1.6.0-alpha.5"
+local VERSION = "1.6.0-alpha.6"
 local INSTALL_DIR = "/helios"
 local STAGE_DIR = "/.helios-install"
 local MODULE_PACK_BASE_URL = "https://raw.githubusercontent.com/ssj8vegetrunks/HELIOS/agent/facility-network-alpha1/module-pack"
+local installerLanguage = "en_us"
+local installerTranslations = {
+    fr_ca = {
+        ["Installer"] = "Programme d'installation",
+        ["mainframe"] = "Systeme central", ["terminal"] = "Terminal distant",
+        ["guardian"] = "Gardien Draconic", ["profiler"] = "Profileur Draconic",
+        ["reactor"] = "Reacteur", ["turbine"] = "Turbine",
+        ["battery"] = "Batterie", ["all"] = "Tous les systemes",
+        ["Guardian computer ID"] = "Identifiant du Gardien",
+        ["Location"] = "Emplacement", ["Display"] = "Affichage",
+        ["installed successfully"] = "installe avec succes",
+        ["Module Pack"] = "Lot de modules", ["Previous version"] = "Version precedente",
+        ["Upgrade mode: low-space (configuration/data preserved)"] = "Mode faible espace (configuration/donnees conservees)",
+        ["Industrial Power Management Suite"] = "Suite de gestion energetique industrielle",
+        ["Please enter a number from the list."] = "Entrez un numero de la liste.",
+        ["Select an installation category:"] = "Choisissez une categorie d'installation :",
+        ["Install Mainframe"] = "Installer le systeme central",
+        ["Install Remote Terminal"] = "Installer un terminal distant",
+        ["Modules"] = "Modules",
+        ["Select a module:"] = "Choisissez un module :",
+        ["Hardware Probe (run once, read-only)"] = "Sonde materielle (une fois, lecture seule)",
+        ["Draconic Reactor Guardian"] = "Gardien de reacteur Draconic",
+        ["Draconic Reactor Profiler (read-only)"] = "Profileur Draconic (lecture seule)",
+        ["Checking HELIOS Network"] = "Verification du reseau HELIOS",
+        ["Looking for an existing mainframe..."] = "Recherche d'un systeme central existant...",
+        ["No existing HELIOS mainframe found."] = "Aucun systeme central HELIOS trouve.",
+        ["Remote Terminal Configuration"] = "Configuration du terminal distant",
+        ["Select the information this terminal will request:"] = "Choisissez les donnees demandees par ce terminal :",
+        ["Reactor"] = "Reacteur", ["Turbine"] = "Turbine", ["Battery"] = "Batterie",
+        ["All systems overview"] = "Sommaire de tous les systemes",
+        ["Profiler Pairing"] = "Jumelage du profileur",
+        ["Enter the computer ID shown by the Draconic Guardian:"] = "Entrez l'identifiant affiche par le Gardien Draconic :",
+        ["Guardian computer ID must be a whole number."] = "L'identifiant du Gardien doit etre un nombre entier.",
+        ["Ready to Install"] = "Pret pour l'installation",
+        ["Install HELIOS?"] = "Installer HELIOS?",
+        ["Installation cancelled."] = "Installation annulee.",
+        ["Low-Space Upgrade"] = "Mise a niveau a faible espace",
+        ["Not enough room for a second HELIOS copy."] = "Espace insuffisant pour une deuxieme copie de HELIOS.",
+        ["Preserving configuration and calibration data."] = "Conservation de la configuration et des donnees d'etalonnage.",
+        ["Replacing installed program files in place..."] = "Remplacement des fichiers du programme sur place...",
+        ["Installing Module Pack"] = "Installation du lot de modules",
+        ["Downloading official peripheral modules..."] = "Telechargement des modules peripheriques officiels...",
+        ["Installation Complete"] = "Installation terminee",
+        ["HELIOS will start automatically after reboot."] = "HELIOS demarrera automatiquement apres le redemarrage.",
+        ["Run now with: helios"] = "Demarrer maintenant avec : helios",
+        ["Check setup with: helios status"] = "Verifier la configuration avec : helios status",
+        ["HELIOS installation failed:"] = "Echec de l'installation de HELIOS :",
+        ["An existing /startup program was found."] = "Un programme /startup existe deja.",
+        ["HELIOS can preserve it as /startup/00-user.lua."] = "HELIOS peut le conserver sous /startup/00-user.lua.",
+        ["Convert startup to a startup directory?"] = "Convertir startup en dossier de demarrage?",
+    },
+    en_pi = {
+        ["Installer"] = "Shipwright",
+        ["mainframe"] = "Flagship", ["terminal"] = "Lookout Post",
+        ["guardian"] = "Draconic Quartermaster", ["profiler"] = "Draconic Cartographer",
+        ["reactor"] = "Heart", ["turbine"] = "Sail",
+        ["battery"] = "Treasure Hold", ["all"] = "Whole Ship",
+        ["Guardian computer ID"] = "Quartermaster's mark",
+        ["Location"] = "Berth", ["Display"] = "Lookout duty",
+        ["installed successfully"] = "be fitted and ready",
+        ["Module Pack"] = "Special Cargo", ["Previous version"] = "Old charts",
+        ["Upgrade mode: low-space (configuration/data preserved)"] = "Cramped-hold refit (charts preserved)",
+        ["Industrial Power Management Suite"] = "Industrial Plunder Management",
+        ["Please enter a number from the list."] = "Choose a numbered course, matey.",
+        ["Select an installation category:"] = "Choose yer vessel's duty:",
+        ["Install Mainframe"] = "Outfit the Flagship",
+        ["Install Remote Terminal"] = "Outfit a Lookout Post",
+        ["Modules"] = "Special Cargo",
+        ["Select a module:"] = "Choose yer cargo:",
+        ["Hardware Probe (run once, read-only)"] = "Ship Survey (eyes only, one voyage)",
+        ["Draconic Reactor Guardian"] = "Draconic Quartermaster",
+        ["Draconic Reactor Profiler (read-only)"] = "Draconic Cartographer (eyes only)",
+        ["Checking HELIOS Network"] = "Scoutin' the HELIOS Fleet",
+        ["Looking for an existing mainframe..."] = "Lookin' for another flagship...",
+        ["No existing HELIOS mainframe found."] = "No rival flagship spotted.",
+        ["Remote Terminal Configuration"] = "Outfit the Lookout Post",
+        ["Select the information this terminal will request:"] = "Choose what this lookout watches:",
+        ["Reactor"] = "Heart", ["Turbine"] = "Sail", ["Battery"] = "Treasure Hold",
+        ["All systems overview"] = "The whole ship",
+        ["Profiler Pairing"] = "Pair the Cartographer",
+        ["Enter the computer ID shown by the Draconic Guardian:"] = "Enter the Quartermaster's computer mark:",
+        ["Guardian computer ID must be a whole number."] = "That computer mark must be a whole number.",
+        ["Ready to Install"] = "Ready to Set Sail",
+        ["Install HELIOS?"] = "Outfit this vessel with HELIOS?",
+        ["Installation cancelled."] = "Voyage abandoned.",
+        ["Low-Space Upgrade"] = "Cramped-Hold Upgrade",
+        ["Not enough room for a second HELIOS copy."] = "The hold cannot fit a second HELIOS copy.",
+        ["Preserving configuration and calibration data."] = "Guardin' yer charts and calibration logs.",
+        ["Replacing installed program files in place..."] = "Refittin' HELIOS in place...",
+        ["Installing Module Pack"] = "Loadin' Special Cargo",
+        ["Downloading official peripheral modules..."] = "Haulin' aboard the official modules...",
+        ["Installation Complete"] = "Vessel Outfitted",
+        ["HELIOS will start automatically after reboot."] = "HELIOS sets sail after the next reboot.",
+        ["Run now with: helios"] = "Set sail now with: helios",
+        ["Check setup with: helios status"] = "Inspect the riggin' with: helios status",
+        ["HELIOS installation failed:"] = "HELIOS ran aground:",
+        ["An existing /startup program was found."] = "There be an old /startup aboard.",
+        ["HELIOS can preserve it as /startup/00-user.lua."] = "HELIOS can stow it as /startup/00-user.lua.",
+        ["Convert startup to a startup directory?"] = "Turn startup into a proper cargo hold?",
+    },
+}
+
+local function installerText(value)
+    local translated = installerTranslations[installerLanguage]
+    return translated and translated[value] or value
+end
+
+local nativePrint = print
+local function print(value, ...)
+    if type(value) == "string" and select("#", ...) == 0 then
+        return nativePrint(installerText(value))
+    end
+    return nativePrint(value, ...)
+end
+
+local function selectInstallerLanguage(existingLanguage)
+    term.setBackgroundColor(colors.black);term.setTextColor(colors.white);term.clear();term.setCursorPos(1, 1)
+    nativePrint("HELIOS")
+    nativePrint("Language / Langue / Tongue")
+    local choices = {
+        { id = "en_us", name = "English (US)" },
+        { id = "fr_ca", name = "Francais (Canada)" },
+        { id = "en_pi", name = "Pirate English" },
+    }
+    for index, choice in ipairs(choices) do
+        local current = choice.id == existingLanguage and " *" or ""
+        nativePrint(("  [%d] %s%s"):format(index, choice.name, current))
+    end
+    while true do
+        term.setTextColor(colors.yellow);write("> ");term.setTextColor(colors.white)
+        local selected = tonumber(read())
+        if selected and choices[selected] then installerLanguage = choices[selected].id;return end
+        term.setTextColor(colors.red);nativePrint("1 / 2 / 3");term.setTextColor(colors.white)
+    end
+end
 
 local function clear()
     term.setBackgroundColor(colors.black)
@@ -20,16 +155,16 @@ local function title(subtitle)
     term.setTextColor(colors.lightGray)
     print("Industrial Power Management Suite")
     term.setTextColor(colors.gray)
-    print(subtitle or "")
+    print(installerText(subtitle or ""))
     term.setTextColor(colors.white)
     print("")
 end
 
 local function choose(prompt, options)
     while true do
-        print(prompt)
+        print(installerText(prompt))
         for index, option in ipairs(options) do
-            print(("  [%d] %s"):format(index, option.label))
+            print(("  [%d] %s"):format(index, installerText(option.label)))
         end
         term.setTextColor(colors.yellow)
         write("> ")
@@ -46,9 +181,11 @@ local function choose(prompt, options)
 end
 
 local function confirm(prompt)
-    write(prompt .. " [Y/N] ")
+    write(installerText(prompt) .. " [Y/N] ")
     local answer = read():lower()
-    return answer == "y" or answer == "yes"
+    return answer == "y" or answer == "yes" or
+        (installerLanguage == "fr_ca" and (answer == "o" or answer == "oui")) or
+        (installerLanguage == "en_pi" and answer == "aye")
 end
 
 local function findExistingMainframe(timeout)
@@ -2381,7 +2518,7 @@ return {
     name = "HELIOS Control Room",
     version = "1.0.0",
     apiVersion = 1,
-    compatibleCoreVersions = { "1.6.0-alpha.4", "1.6.0-alpha.5" },
+    compatibleCoreVersions = { "1.6.0-alpha.4", "1.6.0-alpha.5", "1.6.0-alpha.6" },
     entry = "renderer.lua",
     minimumWidth = 50,
     minimumHeight = 31,
@@ -2825,8 +2962,8 @@ return {
         ["common.telemetry_lost"] = "LOOKOUT GONE BLIND",
         ["nav.home"] = "MAIN DECK",
         ["nav.overview"] = "SHIP'S LOG",
-        ["nav.reactors"] = "REACTORS",
-        ["nav.turbines"] = "TURBINES",
+        ["nav.reactors"] = "HEARTS",
+        ["nav.turbines"] = "SAILS",
         ["nav.power"] = "PLUNDER",
         ["nav.advanced"] = "CAPTAIN'S CABIN",
         ["nav.settings"] = "RIGGING",
@@ -10010,7 +10147,7 @@ end
     return true
 end
 
-local function buildConfig(role, display, existing, profilerGuardianId)
+local function buildConfig(role, display, existing, profilerGuardianId, selectedLanguage)
     existing = type(existing) == "table" and existing or {}
     local discovery = type(existing.discovery) == "table" and existing.discovery or {}
     local alarms = type(existing.alarms) == "table" and existing.alarms or {}
@@ -10043,7 +10180,8 @@ local function buildConfig(role, display, existing, profilerGuardianId)
             showPeripheralNames = uiSettings.showPeripheralNames == true,
             monitorTextScale = tonumber(uiSettings.monitorTextScale) or 0.5,
             renderer = type(uiSettings.renderer) == "string" and uiSettings.renderer or "default",
-            language = type(uiSettings.language) == "string" and
+            language = type(selectedLanguage) == "string" and selectedLanguage or
+                type(uiSettings.language) == "string" and
                 uiSettings.language:match("^[a-z][a-z]_[a-z][a-z]$") and
                 uiSettings.language or "en_us",
         },
@@ -10184,7 +10322,8 @@ local function runInstaller()
         local ok, loaded = pcall(dofile, INSTALL_DIR .. "/config.lua")
         if ok and type(loaded) == "table" then existingConfig = loaded end
     end
-    title("Installer " .. VERSION)
+    selectInstallerLanguage(existingConfig and existingConfig.ui and existingConfig.ui.language)
+    title(installerText("Installer") .. " " .. VERSION)
     local selection = choose("Select an installation category:", {
         { label = "Install Mainframe", value = "mainframe" },
         { label = "Install Remote Terminal", value = "terminal" },
@@ -10209,8 +10348,8 @@ local function runInstaller()
             return
         end
         role = module
-        installLabel = module == "guardian" and "Module: Draconic Reactor Guardian" or
-            "Module: Draconic Reactor Profiler (read-only)"
+        installLabel = module == "guardian" and installerText("Draconic Reactor Guardian") or
+            installerText("Draconic Reactor Profiler (read-only)")
     end
 
     if role == "mainframe" and not (existingConfig and existingConfig.role == "mainframe") then
@@ -10250,17 +10389,17 @@ local function runInstaller()
     end
 
     title("Ready to Install")
-    print(installLabel or ("Role: " .. role))
-    if display then print("Display: " .. display) end
-    if profilerGuardianId then print("Guardian computer ID: " .. profilerGuardianId) end
-    print("Location: " .. INSTALL_DIR)
+    print(installLabel or installerText(role))
+    if display then print(installerText("Display") .. ": " .. installerText(display)) end
+    if profilerGuardianId then print(installerText("Guardian computer ID") .. ": " .. profilerGuardianId) end
+    print(installerText("Location") .. ": " .. INSTALL_DIR)
     print("")
     if not confirm("Install HELIOS?") then
         print("Installation cancelled.")
         return
     end
 
-    local configText = buildConfig(role, display, existingConfig, profilerGuardianId)
+    local configText = buildConfig(role, display, existingConfig, profilerGuardianId, installerLanguage)
     local requiredBytes = embeddedInstallBytes(configText, role)
     local freeSpace = fs.getFreeSpace("/")
     local lowSpaceUpgrade = type(freeSpace) == "number" and freeSpace < requiredBytes
@@ -10361,14 +10500,14 @@ shell.run("/helios/helios.lua", ...)
 
     title("Installation Complete")
     term.setTextColor(colors.lime)
-    print("HELIOS " .. VERSION .. " installed successfully.")
+    print("HELIOS " .. VERSION .. " " .. installerText("installed successfully") .. ".")
     term.setTextColor(colors.white)
-    print(installLabel or ("Role: " .. role))
-    if modulePackVersion then print("Module Pack: " .. tostring(modulePackVersion)) end
-    if display then print("Display: " .. display) end
-    if profilerGuardianId then print("Guardian computer ID: " .. profilerGuardianId) end
-    if previousInstall then print("Previous version: " .. previousInstall) end
-    if lowSpaceUpgrade then print("Upgrade mode: low-space (configuration/data preserved)") end
+    print(installLabel or installerText(role))
+    if modulePackVersion then print(installerText("Module Pack") .. ": " .. tostring(modulePackVersion)) end
+    if display then print(installerText("Display") .. ": " .. installerText(display)) end
+    if profilerGuardianId then print(installerText("Guardian computer ID") .. ": " .. profilerGuardianId) end
+    if previousInstall then print(installerText("Previous version") .. ": " .. previousInstall) end
+    if lowSpaceUpgrade then print(installerText("Upgrade mode: low-space (configuration/data preserved)")) end
     if autoStarted then
         print("HELIOS will start automatically after reboot.")
     else

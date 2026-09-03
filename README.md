@@ -45,7 +45,7 @@ Start with the [tester guide](docs/TESTING.md), [site map](docs/SITE_MAP.md),
 [dependency map](docs/DEPENDENCY_MAP.md), [language-pack contract](docs/LANGUAGE_PACKS.md),
 or [module template](module-template/README.md).
 
-Core `1.6.0-alpha.5` bundles English (`en_us`), Canadian French (`fr_ca`), and
+Core `1.6.0-alpha.6` bundles English (`en_us`), Canadian French (`fr_ca`), and
 Pirate English (`en_pi`) language packs. English remains the automatic fallback
 for incomplete packs.
 
@@ -53,7 +53,7 @@ for incomplete packs.
 > HELIOS/Core version, computer role, peripheral names, reproduction steps, and
 > the exact error when reporting a defect.
 
-# HELIOS - v1.6.0 Alpha 5 Localization Contract
+# HELIOS - v1.6.0 Alpha 6 Localization Contract
 
 Industrial power management for **CC:Tweaked** and **Extreme Reactors**.
 
