@@ -607,18 +607,19 @@ function mainframe.run(config)
     end
 
     local function snapshotFor(assignment)
-        local includeAll = assignment == "all"
+        -- A terminal's assignment selects its preferred presentation; it is not
+        -- an authorization boundary. Graphical remotes expose navigation for
+        -- the whole read-only plant, so every snapshot must carry every page.
         return uiContract.attach({
             helios = true,
             kind = "snapshot",
             version = config.version,
             sentAt = network.now(),
             assignment = assignment,
-            reactors = (includeAll or assignment == "reactor") and reactors or {},
-            facilityReactors = (includeAll or assignment == "reactor") and
-                facilityReactorViews() or {},
-            turbines = (includeAll or assignment == "turbine") and turbines or {},
-            storages = (includeAll or assignment == "battery") and storages or {},
+            reactors = reactors,
+            facilityReactors = facilityReactorViews(),
+            turbines = turbines,
+            storages = storages,
             aliases = config.deviceAliases,
             showPeripheralNames = config.ui.showPeripheralNames,
             power = config.power,

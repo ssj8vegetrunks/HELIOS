@@ -1,7 +1,7 @@
 -- HELIOS single-file installer
 -- Manual-control alpha: guarded direct plant authority.
 
-local VERSION = "1.6.0-alpha.11"
+local VERSION = "1.6.0-alpha.12"
 local INSTALL_DIR = "/helios"
 local STAGE_DIR = "/.helios-install"
 local MODULE_PACK_BASE_URL = "https://raw.githubusercontent.com/ssj8vegetrunks/HELIOS/agent/facility-network-alpha1/module-pack"
@@ -2538,7 +2538,7 @@ return {
     name = "HELIOS Control Room",
     version = "1.0.0",
     apiVersion = 1,
-    compatibleCoreVersions = { "1.6.0-alpha.4", "1.6.0-alpha.5", "1.6.0-alpha.6", "1.6.0-alpha.7", "1.6.0-alpha.8", "1.6.0-alpha.9", "1.6.0-alpha.10", "1.6.0-alpha.11" },
+    compatibleCoreVersions = { "1.6.0-alpha.4", "1.6.0-alpha.5", "1.6.0-alpha.6", "1.6.0-alpha.7", "1.6.0-alpha.8", "1.6.0-alpha.9", "1.6.0-alpha.10", "1.6.0-alpha.11", "1.6.0-alpha.12" },
     entry = "renderer.lua",
     minimumWidth = 50,
     minimumHeight = 31,
@@ -4110,18 +4110,19 @@ function mainframe.run(config)
     end
 
     local function snapshotFor(assignment)
-        local includeAll = assignment == "all"
+        -- A terminal's assignment selects its preferred presentation; it is not
+        -- an authorization boundary. Graphical remotes expose navigation for
+        -- the whole read-only plant, so every snapshot must carry every page.
         return uiContract.attach({
             helios = true,
             kind = "snapshot",
             version = config.version,
             sentAt = network.now(),
             assignment = assignment,
-            reactors = (includeAll or assignment == "reactor") and reactors or {},
-            facilityReactors = (includeAll or assignment == "reactor") and
-                facilityReactorViews() or {},
-            turbines = (includeAll or assignment == "turbine") and turbines or {},
-            storages = (includeAll or assignment == "battery") and storages or {},
+            reactors = reactors,
+            facilityReactors = facilityReactorViews(),
+            turbines = turbines,
+            storages = storages,
             aliases = config.deviceAliases,
             showPeripheralNames = config.ui.showPeripheralNames,
             power = config.power,
