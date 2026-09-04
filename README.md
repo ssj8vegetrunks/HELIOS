@@ -35,11 +35,9 @@ settings and automatic startup, run the HELIOS installer and select
 preset are stored under `/helios/data/`, and its facility telemetry is
 advertised to a HELIOS Mainframe over `helios.facility.v1`.
 
-To record warm-state reactor trends without granting another computer control,
-run the same installer on a second computer and select
-`Modules` > `Draconic Reactor Profiler (read-only)`. Enter the Guardian's
-computer ID when prompted and attach a wireless modem to both computers. The
-Profiler stores output-bracket observations locally and never sends commands.
+The read-only Draconic Profiler is retained as a maintainer/debug utility. It
+is intentionally omitted from the normal installer menu and never sends
+reactor commands.
 
 Start with the [tester guide](docs/TESTING.md), [site map](docs/SITE_MAP.md),
 [dependency map](docs/DEPENDENCY_MAP.md), [language-pack contract](docs/LANGUAGE_PACKS.md),

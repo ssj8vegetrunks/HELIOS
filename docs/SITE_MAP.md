@@ -4,14 +4,15 @@
 
 | Path | Purpose | Hardware writes |
 |---|---|---|
-| `install.lua` | HELIOS Mainframe/Remote/Guardian/Profiler installer | Only after role setup and explicit operation |
+| `install.lua` | HELIOS Mainframe/Remote/Guardian installer, with hidden debug utilities | Only after role setup and explicit operation |
 | `discovery_probe.lua` | Standalone peripheral and method inventory | No |
 | `draconic_guardian.lua` | Standalone Draconic Reactor Guardian | Yes, guarded and locally authoritative |
 | `module-template/` | Copyable Lua developer starter | No; actuator examples fail closed |
 
 The installer presents Mainframe and Remote Terminal as HELIOS computer roles.
-Read-only Probe, the Draconic Guardian, and the read-only Draconic Profiler are
-selected from the separate `Modules` submenu.
+The read-only Probe and Draconic Guardian are selected from the separate
+`Modules` submenu. The read-only Draconic Profiler remains available only
+through the hidden maintainer/debug path.
 
 ## Repository layout
 

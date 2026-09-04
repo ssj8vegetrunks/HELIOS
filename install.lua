@@ -204,7 +204,7 @@ local function title(subtitle)
     print("")
 end
 
-local function choose(prompt, options)
+local function choose(prompt, options, hiddenOptions)
     while true do
         print(installerText(prompt))
         for index, option in ipairs(options) do
@@ -214,6 +214,8 @@ local function choose(prompt, options)
         write("> ")
         term.setTextColor(colors.white)
         local answer = read()
+        local hidden = hiddenOptions and hiddenOptions[answer:lower()]
+        if hidden then return hidden end
         local selected = tonumber(answer)
         if selected and options[selected] then
             return options[selected].value
@@ -11062,7 +11064,10 @@ local function runInstaller()
         local module = choose("Select a module:", {
             { label = "Hardware Probe (run once, read-only)", value = "probe" },
             { label = "Draconic Reactor Guardian", value = "guardian" },
-            { label = "Draconic Reactor Profiler (read-only)", value = "profiler" },
+        }, {
+            -- Maintainer/debug path: intentionally absent from the displayed
+            -- module list. The profiler observes Guardian telemetry only.
+            d = "profiler",
         })
         if module == "probe" then
             local temporaryProbe = "/.helios-probe-run.lua"
