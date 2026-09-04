@@ -1,5 +1,25 @@
 local gui = {}
 
+local function textLength(value)
+    local _, count = tostring(value or ""):gsub("[^\128-\191]", "")
+    return count
+end
+
+local function textSlice(value, limit)
+    local text, count, finish = tostring(value or ""), 0, 0
+    for index = 1, #text do
+        local byte = text:byte(index)
+        if byte < 128 or byte >= 192 then
+            count = count + 1
+            if count > limit then break end
+        end
+        finish = index
+    end
+    return text:sub(1, finish)
+end
+
+gui.length = textLength
+
 local function clamp(value, low, high)
     value = tonumber(value) or 0
     return math.max(low, math.min(high, value))
@@ -17,9 +37,10 @@ function gui.text(x, y, value, foreground, background, width)
     if y < 1 or y > screenHeight or x > screenWidth then return end
     x = math.max(1, x)
     local text = tostring(value or "")
-    width = math.max(0, math.min(tonumber(width) or #text, screenWidth - x + 1))
-    text = string.sub(text, 1, width)
-    if #text < width then text = text .. string.rep(" ", width - #text) end
+    width = math.max(0, math.min(tonumber(width) or textLength(text), screenWidth - x + 1))
+    text = textSlice(text, width)
+    local length = textLength(text)
+    if length < width then text = text .. string.rep(" ", width - length) end
     term.setCursorPos(x, y)
     term.setBackgroundColor(background or colors.black)
     term.setTextColor(foreground or colors.white)
@@ -31,7 +52,7 @@ end
 function gui.button(x, y, label, foreground, background)
     local text = "[" .. tostring(label) .. "]"
     gui.text(x, y, text, foreground, background)
-    return { x1 = x, x2 = x + #text - 1, y = y }
+    return { x1 = x, x2 = x + textLength(text) - 1, y = y }
 end
 
 function gui.hit(button, x, y)

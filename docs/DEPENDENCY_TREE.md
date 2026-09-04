@@ -110,6 +110,10 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 
 - No HELIOS module dependencies detected.
 
+### `lang/ja_jp.lua`
+
+- No HELIOS module dependencies detected.
+
 ### `mainframe/device_registry.lua`
 
 - No HELIOS module dependencies detected.
@@ -281,6 +285,10 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 - No HELIOS modules directly depend on this module.
 
 ### `lang/fr_ca.lua`
+
+- No HELIOS modules directly depend on this module.
+
+### `lang/ja_jp.lua`
 
 - No HELIOS modules directly depend on this module.
 

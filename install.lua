@@ -1,7 +1,7 @@
 -- HELIOS single-file installer
 -- Manual-control alpha: guarded direct plant authority.
 
-local VERSION = "1.6.0-alpha.13"
+local VERSION = "1.6.0-alpha.14"
 local INSTALL_DIR = "/helios"
 local STAGE_DIR = "/.helios-install"
 local MODULE_PACK_BASE_URL = "https://raw.githubusercontent.com/ssj8vegetrunks/HELIOS/agent/facility-network-alpha1/module-pack"
@@ -55,6 +55,55 @@ local installerTranslations = {
         ["An existing /startup program was found."] = "Un programme /startup existe deja.",
         ["HELIOS can preserve it as /startup/00-user.lua."] = "HELIOS peut le conserver sous /startup/00-user.lua.",
         ["Convert startup to a startup directory?"] = "Convertir startup en dossier de demarrage?",
+    },
+    ja_jp = {
+        ["Installer"] = "インストーラー",
+        ["mainframe"] = "メインフレーム", ["terminal"] = "リモート端末",
+        ["guardian"] = "ドラコニック・ガーディアン", ["profiler"] = "ドラコニック・プロファイラー",
+        ["reactor"] = "原子炉", ["turbine"] = "タービン",
+        ["battery"] = "蓄電設備", ["all"] = "全システム",
+        ["Guardian computer ID"] = "ガーディアンのコンピューターID",
+        ["Location"] = "場所", ["Display"] = "表示",
+        ["installed successfully"] = "正常にインストールされました",
+        ["Module Pack"] = "モジュールパック", ["Previous version"] = "以前のバージョン",
+        ["Upgrade mode: low-space (configuration/data preserved)"] = "省容量アップグレード（設定とデータを保持）",
+        ["Industrial Power Management Suite"] = "産業用電力管理システム",
+        ["Please enter a number from the list."] = "一覧の番号を入力してください。",
+        ["Select an installation category:"] = "インストール種別を選択してください：",
+        ["Install Mainframe"] = "メインフレームをインストール",
+        ["Install Remote Terminal"] = "リモート端末をインストール",
+        ["Modules"] = "モジュール",
+        ["Select a module:"] = "モジュールを選択してください：",
+        ["Hardware Probe (run once, read-only)"] = "ハードウェア検査（一度だけ、読み取り専用）",
+        ["Draconic Reactor Guardian"] = "ドラコニック原子炉ガーディアン",
+        ["Draconic Reactor Profiler (read-only)"] = "ドラコニック原子炉プロファイラー（読み取り専用）",
+        ["Checking HELIOS Network"] = "HELIOSネットワークを確認中",
+        ["Looking for an existing mainframe..."] = "既存のメインフレームを検索中...",
+        ["No existing HELIOS mainframe found."] = "既存のHELIOSメインフレームが見つかりません。",
+        ["Remote Terminal Configuration"] = "リモート端末の設定",
+        ["Select the information this terminal will request:"] = "この端末が取得する情報を選択してください：",
+        ["Reactor"] = "原子炉", ["Turbine"] = "タービン", ["Battery"] = "蓄電設備",
+        ["All systems overview"] = "全システム概要",
+        ["Profiler Pairing"] = "プロファイラーのペアリング",
+        ["Enter the computer ID shown by the Draconic Guardian:"] = "ガーディアンに表示されたコンピューターIDを入力してください：",
+        ["Guardian computer ID must be a whole number."] = "コンピューターIDは整数で入力してください。",
+        ["Ready to Install"] = "インストール準備完了",
+        ["Install HELIOS?"] = "HELIOSをインストールしますか？",
+        ["Installation cancelled."] = "インストールを中止しました。",
+        ["Low-Space Upgrade"] = "省容量アップグレード",
+        ["Not enough room for a second HELIOS copy."] = "HELIOSの予備コピーを置く空き容量がありません。",
+        ["Preserving configuration and calibration data."] = "設定と校正データを保持します。",
+        ["Replacing installed program files in place..."] = "プログラムファイルを更新中...",
+        ["Installing Module Pack"] = "モジュールパックをインストール中",
+        ["Downloading official peripheral modules..."] = "公式周辺機器モジュールをダウンロード中...",
+        ["Installation Complete"] = "インストール完了",
+        ["HELIOS will start automatically after reboot."] = "再起動後にHELIOSが自動起動します。",
+        ["Run now with: helios"] = "今すぐ起動：helios",
+        ["Check setup with: helios status"] = "設定確認：helios status",
+        ["HELIOS installation failed:"] = "HELIOSのインストールに失敗しました：",
+        ["An existing /startup program was found."] = "既存の/startupプログラムが見つかりました。",
+        ["HELIOS can preserve it as /startup/00-user.lua."] = "/startup/00-user.luaとして保持できます。",
+        ["Convert startup to a startup directory?"] = "startupをディレクトリに変換しますか？",
     },
     en_pi = {
         ["Installer"] = "Shipwright",
@@ -123,11 +172,11 @@ end
 local function selectInstallerLanguage(existingLanguage)
     term.setBackgroundColor(colors.black);term.setTextColor(colors.white);term.clear();term.setCursorPos(1, 1)
     nativePrint("HELIOS")
-    nativePrint("Language / Langue / Tongue")
+    nativePrint("Language / Langue / 言語")
     local choices = {
         { id = "en_us", name = "English (US)" },
         { id = "fr_ca", name = "Francais (Canada)" },
-        { id = "en_pi", name = "Pirate English" },
+        { id = "ja_jp", name = "日本語 (experimental)" },
     }
     for index, choice in ipairs(choices) do
         local current = choice.id == existingLanguage and " *" or ""
@@ -135,7 +184,9 @@ local function selectInstallerLanguage(existingLanguage)
     end
     while true do
         term.setTextColor(colors.yellow);write("> ");term.setTextColor(colors.white)
-        local selected = tonumber(read())
+        local answer = read():lower()
+        if answer == "p" then installerLanguage = "en_pi";return end
+        local selected = tonumber(answer)
         if selected and choices[selected] then installerLanguage = choices[selected].id;return end
         term.setTextColor(colors.red);nativePrint("1 / 2 / 3");term.setTextColor(colors.white)
     end
@@ -185,6 +236,7 @@ local function confirm(prompt)
     local answer = read():lower()
     return answer == "y" or answer == "yes" or
         (installerLanguage == "fr_ca" and (answer == "o" or answer == "oui")) or
+        (installerLanguage == "ja_jp" and (answer == "はい" or answer == "hai")) or
         (installerLanguage == "en_pi" and answer == "aye")
 end
 
@@ -962,6 +1014,26 @@ return protocol
     ["core/gui.lua"] = [=[
 local gui = {}
 
+local function textLength(value)
+    local _, count = tostring(value or ""):gsub("[^\128-\191]", "")
+    return count
+end
+
+local function textSlice(value, limit)
+    local text, count, finish = tostring(value or ""), 0, 0
+    for index = 1, #text do
+        local byte = text:byte(index)
+        if byte < 128 or byte >= 192 then
+            count = count + 1
+            if count > limit then break end
+        end
+        finish = index
+    end
+    return text:sub(1, finish)
+end
+
+gui.length = textLength
+
 local function clamp(value, low, high)
     value = tonumber(value) or 0
     return math.max(low, math.min(high, value))
@@ -979,9 +1051,10 @@ function gui.text(x, y, value, foreground, background, width)
     if y < 1 or y > screenHeight or x > screenWidth then return end
     x = math.max(1, x)
     local text = tostring(value or "")
-    width = math.max(0, math.min(tonumber(width) or #text, screenWidth - x + 1))
-    text = string.sub(text, 1, width)
-    if #text < width then text = text .. string.rep(" ", width - #text) end
+    width = math.max(0, math.min(tonumber(width) or textLength(text), screenWidth - x + 1))
+    text = textSlice(text, width)
+    local length = textLength(text)
+    if length < width then text = text .. string.rep(" ", width - length) end
     term.setCursorPos(x, y)
     term.setBackgroundColor(background or colors.black)
     term.setTextColor(foreground or colors.white)
@@ -993,7 +1066,7 @@ end
 function gui.button(x, y, label, foreground, background)
     local text = "[" .. tostring(label) .. "]"
     gui.text(x, y, text, foreground, background)
-    return { x1 = x, x2 = x + #text - 1, y = y }
+    return { x1 = x, x2 = x + textLength(text) - 1, y = y }
 end
 
 function gui.hit(button, x, y)
@@ -1195,6 +1268,24 @@ local function replace(template, values)
     end))
 end
 
+local function textLength(value)
+    local _, count = tostring(value or ""):gsub("[^\128-\191]", "")
+    return count
+end
+
+local function textSlice(value, limit)
+    local text, count, finish = tostring(value or ""), 0, 0
+    for index = 1, #text do
+        local byte = text:byte(index)
+        if byte < 128 or byte >= 192 then
+            count = count + 1
+            if count > limit then break end
+        end
+        finish = index
+    end
+    return text:sub(1, finish)
+end
+
 local function valueKey(value)
     return "value." .. tostring(value):lower():gsub("[^%w]+", "_"):gsub("^_+", ""):gsub("_+$", "")
 end
@@ -1206,7 +1297,9 @@ function i18n.available()
             local id = file:match("^([a-z][a-z]_[a-z][a-z])%.lua$")
             if id then
                 local pack = loadPack(id)
-                if pack then result[#result + 1] = { id = id, name = pack.name or id } end
+                if pack and pack.hidden ~= true then
+                    result[#result + 1] = { id = id, name = pack.name or id }
+                end
             end
         end
     end
@@ -1229,10 +1322,10 @@ function i18n.new(config)
     end
     function service.fit(key, width, values, explicitFallback)
         local value = service.get(key, values, explicitFallback)
-        width = math.max(0, math.floor(tonumber(width) or #value))
-        if #value <= width then return value end
-        if width <= 3 then return value:sub(1, width) end
-        return value:sub(1, width - 3) .. "..."
+        width = math.max(0, math.floor(tonumber(width) or textLength(value)))
+        if textLength(value) <= width then return value end
+        if width <= 3 then return textSlice(value, width) end
+        return textSlice(value, width - 3) .. "..."
     end
     -- Translate API/governor enum values only when a language pack explicitly
     -- provides a mapping. Unknown device text is deliberately preserved.
@@ -2538,7 +2631,7 @@ return {
     name = "HELIOS Control Room",
     version = "1.0.0",
     apiVersion = 1,
-    compatibleCoreVersions = { "1.6.0-alpha.4", "1.6.0-alpha.5", "1.6.0-alpha.6", "1.6.0-alpha.7", "1.6.0-alpha.8", "1.6.0-alpha.9", "1.6.0-alpha.10", "1.6.0-alpha.11", "1.6.0-alpha.12", "1.6.0-alpha.13" },
+    compatibleCoreVersions = { "1.6.0-alpha.4", "1.6.0-alpha.5", "1.6.0-alpha.6", "1.6.0-alpha.7", "1.6.0-alpha.8", "1.6.0-alpha.9", "1.6.0-alpha.10", "1.6.0-alpha.11", "1.6.0-alpha.12", "1.6.0-alpha.13", "1.6.0-alpha.14" },
     entry = "renderer.lua",
     minimumWidth = 50,
     minimumHeight = 31,
@@ -2989,6 +3082,7 @@ end
 return {
     id = "en_pi",
     name = "Pirate English",
+    hidden = true,
     strings = {
         ["common.online"] = "SAILIN'",
         ["common.waiting"] = "AWAITIN'",
@@ -3410,6 +3504,125 @@ return {
         ["guardian.automatic"] = "SUPERVISION AUTOMATIQUE SECURISEE",
         ["guardian.assisted"] = "MANUEL ASSISTE - VERROUILLAGES ACTIFS",
         ["guardian.unrestricted"] = "CONTROLE LIBRE - INTERVENTION AUTOMATIQUE COUPEE",
+    },
+}
+]=],
+
+    ["lang/ja_jp.lua"] = [=[
+return {
+    id = "ja_jp",
+    name = "日本語 (実験的)",
+    strings = {
+        ["common.online"] = "オンライン", ["common.waiting"] = "待機中",
+        ["common.unknown"] = "不明", ["common.read_only"] = "読み取り専用",
+        ["common.quit"] = "Q 終了", ["common.back"] = "戻る",
+        ["common.state"] = "状態", ["common.status"] = "状態", ["common.system"] = "システム",
+        ["common.generation"] = "発電", ["common.output"] = "出力", ["common.input"] = "入力",
+        ["common.stored"] = "蓄電量", ["common.capacity"] = "容量", ["common.charge"] = "充電率",
+        ["common.driver"] = "ドライバー", ["common.telemetry"] = "遠隔測定",
+        ["common.governor"] = "制御器", ["common.type"] = "種類", ["common.link"] = "接続",
+        ["common.rotor_speed"] = "ローター速度", ["common.energy_buffer"] = "エネルギーバッファ",
+        ["common.power_output"] = "電力出力", ["common.field_gate"] = "フィールドゲート",
+        ["common.export_gate"] = "出力ゲート", ["common.guardian"] = "ガーディアン",
+        ["common.version"] = "バージョン", ["common.fuel"] = "燃料", ["common.buffer"] = "バッファ",
+        ["common.demand"] = "要求", ["common.inductor"] = "インダクター", ["common.net"] = "正味",
+        ["common.steam_production"] = "蒸気生成", ["common.waste"] = "廃棄物",
+        ["common.dispatch_mode"] = "配分モード", ["common.power_dispatch_requested"] = "電力配分要求",
+        ["common.core_temperature"] = "炉心温度", ["common.field_strength"] = "フィールド強度",
+        ["common.saturation"] = "飽和度", ["common.fuel_conversion"] = "燃料消費率",
+        ["common.telemetry_lost"] = "遠隔測定喪失",
+        ["common.previous"] = "前へ", ["common.next"] = "次へ",
+
+        ["dashboard.control_room"] = "HELIOS // 中央制御室",
+        ["dashboard.system_ready"] = "システム準備完了", ["dashboard.fault"] = "異常",
+        ["dashboard.warning"] = "警告", ["dashboard.power_storage"] = "蓄電設備",
+        ["dashboard.steam_production"] = "蒸気生成", ["dashboard.power_production"] = "発電量",
+        ["dashboard.net_power_flow"] = "正味電力", ["dashboard.activity"] = "HELIOS 稼働状況",
+        ["dashboard.no_devices"] = "報告された装置なし",
+        ["dashboard.storage_reserve"] = "蓄電残量 {percent}%",
+        ["dashboard.system_readiness"] = "システム準備状態", ["dashboard.power_reserve"] = "電力予備",
+        ["dashboard.graphical_only"] = "グラフィカル監視のみ",
+        ["dashboard.manual_advanced"] = "手動制御：詳細テキスト画面",
+        ["dashboard.screen_title"] = "HELIOS // {title}",
+        ["dashboard.central_power_management"] = "中央電力管理",
+        ["dashboard.computer_id"] = "コンピューターID", ["dashboard.attached_hardware"] = "接続機器",
+        ["dashboard.monitor_output"] = "モニター出力", ["dashboard.remote_terminals"] = "リモート端末",
+        ["dashboard.discovery"] = "検出", ["dashboard.control"] = "制御", ["dashboard.alarms"] = "警報",
+        ["dashboard.turbine"] = "タービン", ["dashboard.storage"] = "蓄電設備",
+        ["dashboard.turbine_subtitle"] = "遠隔測定と制御計画",
+        ["dashboard.energy_storage"] = "蓄電設備", ["dashboard.storage_subtitle"] = "汎用読み取り専用遠隔測定",
+        ["dashboard.flow_plan"] = "流量 実測/設定/計画", ["dashboard.tanks_in_out"] = "タンク 入力/出力",
+        ["dashboard.full_in"] = "満充電まで", ["dashboard.max_io"] = "最大入出力", ["dashboard.matrix"] = "マトリクス",
+        ["dashboard.matrix_value"] = "{cells} セル / {providers} プロバイダー",
+        ["dashboard.cyanite"] = "シアナイト", ["dashboard.more_devices"] = "+ 他 {count} 台 (helios scan)",
+        ["dashboard.gui"] = "画面", ["dashboard.keyboard_help"] = "キー: B 画面 | V/G/E/C/A/R/S | Q 終了",
+        ["dashboard.device_counts"] = "原子炉 {reactors}   タービン {turbines}   蓄電 {storage}",
+        ["dashboard.plant_overview"] = "発電所概要",
+
+        ["remote.screen_title"] = "HELIOS // リモート {title}",
+        ["remote.searching_mainframe"] = "メインフレームを検索中",
+        ["remote.combined_storage"] = "合計蓄電量",
+        ["remote.monitoring_read_only"] = "リモート監視 - 読み取り専用",
+        ["remote.no_reactors"] = "原子炉の報告なし", ["remote.no_turbines"] = "タービンの報告なし",
+        ["remote.no_storage"] = "蓄電設備の報告なし",
+
+        ["value.active"] = "稼働中", ["value.offline"] = "オフライン",
+        ["value.warning"] = "警告", ["value.calibrating"] = "校正中", ["value.starting"] = "起動中",
+        ["value.searching"] = "検索中", ["value.no_modem"] = "モデムなし",
+        ["value.id_conflict_telemetry_untrusted"] = "ID競合 - 遠隔測定は信頼できません",
+        ["value.link_lost_data_stale"] = "接続喪失 - データが古いです",
+        ["value.ready"] = "準備完了", ["value.running"] = "運転中", ["value.stable"] = "安定",
+        ["value.hold"] = "維持", ["value.charging"] = "充電中", ["value.draining"] = "放電中",
+        ["value.engaged"] = "有効", ["value.disengaged"] = "無効", ["value.monitoring"] = "監視中",
+        ["value.standby"] = "待機", ["value.dispatched"] = "配分済み", ["value.stale"] = "期限切れ",
+        ["value.learning"] = "学習中", ["value.fault"] = "異常", ["value.automatic"] = "自動",
+        ["value.manual"] = "手動", ["value.link_stale"] = "接続期限切れ",
+        ["value.calibrated_steam_reactor_is_not_currently_required"] = "校正済み蒸気炉は現在不要です",
+        ["value.storage_demand_assigned_to_this_power_reactor"] = "蓄電要求がこの発電炉に割り当てられました",
+        ["value.rotor_is_inside_the_target_deadband"] = "ローターは目標範囲内です",
+        ["value.waiting_for_governor_update"] = "制御器の更新を待機中",
+        ["value.automatic_preparing_steam"] = "自動 / 蒸気準備中",
+        ["value.automatic_governors_active"] = "自動 / 制御器稼働中",
+        ["value.automatic_waiting_for_plant"] = "自動 / 発電所を待機中",
+        ["value.automatic_no_controlled_plant"] = "自動 / 制御対象なし",
+        ["value.automatic_holding_rpm"] = "自動 / {rpm} RPMを維持",
+        ["value.holding_rods_for_steam"] = "蒸気 {steam} mB/t のため制御棒 {rods} 本相当を維持",
+        ["value.manual_gates_applied"] = "手動ゲート適用：フィールド {field}、出力 {export} RF/t",
+        ["value.generating"] = "発電中", ["value.learned"] = "学習済み", ["value.steam"] = "蒸気",
+        ["value.mirrored"] = "複製", ["value.none"] = "なし", ["value.known"] = "既知",
+        ["value.clear"] = "正常", ["value.disabled"] = "無効", ["value.ready_standby"] = "準備完了 / 待機",
+        ["value.true"] = "はい", ["value.false"] = "いいえ", ["value.reactor"] = "原子炉",
+        ["value.turbine"] = "タービン", ["value.battery"] = "蓄電設備", ["value.monitor"] = "モニター",
+
+        ["nav.home"] = "ホーム", ["nav.overview"] = "概要", ["nav.reactors"] = "原子炉",
+        ["nav.turbines"] = "タービン", ["nav.power"] = "電力", ["nav.advanced"] = "詳細",
+        ["nav.settings"] = "設定", ["nav.raw_data"] = "生データ", ["nav.setup"] = "構成",
+        ["nav.manual_gates"] = "手動ゲート",
+        ["alarm.critical"] = "緊急", ["alarm.guardian_critical"] = "ガーディアンが重大警報を報告",
+        ["alarm.scram"] = "緊急停止",
+
+        ["profiler.title"] = "HELIOS // ドラコニック・プロファイラー {version}",
+        ["profiler.guardian_status"] = "ガーディアン {id}  {status}",
+        ["profiler.wireless_modem"] = "無線モデム: {name}",
+        ["profiler.subscription_wait"] = "読み取り専用要求を送信中。",
+        ["profiler.confirm_wireless"] = "ガーディアンの無線モデムも確認してください。",
+        ["profiler.operating_point"] = "現在の運転点", ["profiler.field_input_drain"] = "フィールド入力/消費",
+        ["profiler.trend"] = "傾向", ["profiler.output_bracket"] = "出力範囲: {output} RF/t",
+        ["profiler.observed_stable"] = "観測: {observed}秒   安定: {stable}秒",
+        ["profiler.field_range"] = "フィールド範囲: {minimum} - {maximum}",
+        ["profiler.core_range"] = "炉心範囲: {minimum} - {maximum} C",
+        ["profiler.fuel_range"] = "燃料範囲: {minimum} - {maximum}",
+        ["profiler.footer"] = "読み取り専用 | ガーディアン {version} | Q 終了",
+        ["profiler.waiting"] = "ガーディアンの遠隔測定を待機中",
+        ["profiler.link_stale"] = "最近のガーディアン遠隔測定なし",
+        ["profiler.reactor_wait"] = "オンライン運転状態を待機中",
+        ["profiler.settling"] = "出力範囲が最近変更されました", ["profiler.observing"] = "温間傾向を観測中",
+        ["profiler.deteriorating"] = "フィールド低下または温度上昇", ["profiler.stable"] = "温間出力が安定",
+        ["profiler.improving"] = "封じ込めまたは温度が改善中", ["profiler.unsettled"] = "傾向は未安定",
+        ["guardian.title"] = "HELIOS // ドラコニック・ガーディアン {version}",
+        ["guardian.automatic"] = "自動安全監視",
+        ["guardian.assisted"] = "支援手動 - 安全インターロック有効",
+        ["guardian.unrestricted"] = "無制限制御 - 自動介入無効",
     },
 }
 ]=],
@@ -6013,8 +6226,9 @@ function mainframe.run(config)
             state, detail = tv(state), tv(detail)
             state, detail = tv(state), tv(detail)
             gui.text(1, 2, " " .. state .. " ", colors.black, colour)
-            gui.text(#state + 4, 2, detail, colour, colors.black,
-                math.max(0, width - #state - 3))
+            local stateWidth = gui.length(state)
+            gui.text(stateWidth + 4, 2, detail, colour, colors.black,
+                math.max(0, width - stateWidth - 3))
             buttons = {}
             local x = 1
             buttons.overview = gui.button(x, 4, tr("nav.home"), colors.white,
@@ -9121,8 +9335,9 @@ function terminal.run(config)
         local state, detail, colour = graphicalStatus()
         state, detail = tv(state), tv(detail)
         gui.text(1, 2, " " .. state .. " ", colors.black, colour)
-        gui.text(#state + 4, 2, detail, colour, colors.black,
-            math.max(0, width - #state - 3))
+        local stateWidth = gui.length(state)
+        gui.text(stateWidth + 4, 2, detail, colour, colors.black,
+            math.max(0, width - stateWidth - 3))
         graphicalButtons = {}
         local x = 1
         graphicalButtons.overview = gui.button(x, 4, tr("nav.home"), colors.white,

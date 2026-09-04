@@ -12,7 +12,7 @@ REQUIRED_CAPABILITIES = {"reactor_adapter", "turbine_adapter", "storage_adapter"
 
 
 def main() -> None:
-    manifest = json.loads(MANIFEST.read_text())
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
     assert manifest.get("schema_version") == 1, "Unsupported module manifest schema"
     assert isinstance(manifest.get("pack"), dict), "Missing pack metadata"
     assert manifest["pack"].get("version"), "Missing Module Pack version"

@@ -32,6 +32,24 @@ local function replace(template, values)
     end))
 end
 
+local function textLength(value)
+    local _, count = tostring(value or ""):gsub("[^\128-\191]", "")
+    return count
+end
+
+local function textSlice(value, limit)
+    local text, count, finish = tostring(value or ""), 0, 0
+    for index = 1, #text do
+        local byte = text:byte(index)
+        if byte < 128 or byte >= 192 then
+            count = count + 1
+            if count > limit then break end
+        end
+        finish = index
+    end
+    return text:sub(1, finish)
+end
+
 local function valueKey(value)
     return "value." .. tostring(value):lower():gsub("[^%w]+", "_"):gsub("^_+", ""):gsub("_+$", "")
 end
@@ -43,7 +61,9 @@ function i18n.available()
             local id = file:match("^([a-z][a-z]_[a-z][a-z])%.lua$")
             if id then
                 local pack = loadPack(id)
-                if pack then result[#result + 1] = { id = id, name = pack.name or id } end
+                if pack and pack.hidden ~= true then
+                    result[#result + 1] = { id = id, name = pack.name or id }
+                end
             end
         end
     end
@@ -66,10 +86,10 @@ function i18n.new(config)
     end
     function service.fit(key, width, values, explicitFallback)
         local value = service.get(key, values, explicitFallback)
-        width = math.max(0, math.floor(tonumber(width) or #value))
-        if #value <= width then return value end
-        if width <= 3 then return value:sub(1, width) end
-        return value:sub(1, width - 3) .. "..."
+        width = math.max(0, math.floor(tonumber(width) or textLength(value)))
+        if textLength(value) <= width then return value end
+        if width <= 3 then return textSlice(value, width) end
+        return textSlice(value, width - 3) .. "..."
     end
     -- Translate API/governor enum values only when a language pack explicitly
     -- provides a mapping. Unknown device text is deliberately preserved.

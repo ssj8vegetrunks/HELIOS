@@ -1,6 +1,7 @@
 return {
     id = "en_pi",
     name = "Pirate English",
+    hidden = true,
     strings = {
         ["common.online"] = "SAILIN'",
         ["common.waiting"] = "AWAITIN'",

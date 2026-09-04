@@ -301,8 +301,9 @@ function terminal.run(config)
         local state, detail, colour = graphicalStatus()
         state, detail = tv(state), tv(detail)
         gui.text(1, 2, " " .. state .. " ", colors.black, colour)
-        gui.text(#state + 4, 2, detail, colour, colors.black,
-            math.max(0, width - #state - 3))
+        local stateWidth = gui.length(state)
+        gui.text(stateWidth + 4, 2, detail, colour, colors.black,
+            math.max(0, width - stateWidth - 3))
         graphicalButtons = {}
         local x = 1
         graphicalButtons.overview = gui.button(x, 4, tr("nav.home"), colors.white,
