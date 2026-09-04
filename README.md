@@ -43,7 +43,7 @@ Start with the [tester guide](docs/TESTING.md), [site map](docs/SITE_MAP.md),
 [dependency map](docs/DEPENDENCY_MAP.md), [language-pack contract](docs/LANGUAGE_PACKS.md),
 or [module template](module-template/README.md).
 
-Core `1.6.0-alpha.16` bundles English (`en_us`), Canadian French (`fr_ca`), German
+Core `1.6.0-alpha.17` bundles English (`en_us`), Canadian French (`fr_ca`), German
 (`de_de`), and hidden Pirate English (`en_pi`) language packs. English remains the automatic fallback
 for incomplete packs.
 

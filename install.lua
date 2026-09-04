@@ -1,10 +1,10 @@
 -- HELIOS single-file installer
 -- Manual-control alpha: guarded direct plant authority.
 
-local VERSION = "1.6.0-alpha.16"
+local VERSION = "1.6.0-alpha.17"
 local INSTALL_DIR = "/helios"
 local STAGE_DIR = "/.helios-install"
-local MODULE_PACK_BASE_URL = "https://raw.githubusercontent.com/ssj8vegetrunks/HELIOS/agent/facility-network-alpha1/module-pack"
+local MODULE_PACK_BASE_URL = "https://raw.githubusercontent.com/ssj8vegetrunks/HELIOS/testing/public-alpha/module-pack"
 local installerLanguage = "en_us"
 local installerTranslations = {
     de_de = {
@@ -1564,7 +1564,7 @@ return loader
     ["core/module_manager.lua"] = [=[
 -- @section MODULE PACK DOWNLOAD AND VALIDATION
 local manager = {}
-local BASE_URL = "https://raw.githubusercontent.com/ssj8vegetrunks/HELIOS/agent/facility-network-alpha1/module-pack"
+local BASE_URL = "https://raw.githubusercontent.com/ssj8vegetrunks/HELIOS/testing/public-alpha/module-pack"
 local MODULE_DIR = "/helios/modules"
 local STAGE_DIR = "/.helios-module-update"
 local BACKUP_DIR = "/helios/modules.previous"
