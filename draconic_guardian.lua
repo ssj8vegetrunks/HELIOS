@@ -9,7 +9,7 @@ local MAX_TEMPERATURE, MINIMUM_FUEL = 8000, 10
 -- The calibration may approach the real limit, but never crosses the 15%
 -- hard shutdown interlock: 17% is the operating-edge cutoff.
 local COMMISSION_START_FLOW, COMMISSION_SAMPLES = 50000, 20
-local COMMISSION_FIELD_FLOOR, COMMISSION_TEMP_LIMIT = 17, 5000
+local COMMISSION_FIELD_FLOOR, COMMISSION_TEMP_LIMIT = 17, 7500
 local COMMISSION_STEP_RATIO, COMMISSION_MIN_STEP = 1.25, 50000
 local COMMISSION_SHORTFALL_SAMPLES = 20
 -- A cool reactor ramps up to a new export request over several seconds.  This
@@ -31,7 +31,7 @@ local FIELD_TUNE_SAMPLES, FIELD_TUNE_RATIO = 150, .02
 local FIELD_RECOVERY_RATIO, MINIMUM_FIELD_INPUT = .05, 50000
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.1"
+local GUARDIAN_VERSION = "1.2.0-alpha.2"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
