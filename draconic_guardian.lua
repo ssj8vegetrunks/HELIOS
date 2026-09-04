@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.1.0-alpha.11
+-- HELIOS Draconic Guardian v1.2.0-alpha.1
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -27,9 +27,11 @@ local LIFECYCLE_BAND, LIFECYCLE_PROOF_SAMPLES = 5, 150
 local LIFECYCLE_FIELD_FLOOR, LIFECYCLE_PROBE_FIELD = 30, 35
 local LIFECYCLE_TEMP_LIMIT, LIFECYCLE_FIELD_DRIFT = 6750, .5
 local LIFECYCLE_STEP_RATIO, LIFECYCLE_MIN_STEP = 1.02, 50000
+local FIELD_TUNE_SAMPLES, FIELD_TUNE_RATIO = 150, .02
+local FIELD_RECOVERY_RATIO, MINIMUM_FIELD_INPUT = .05, 50000
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.1.0-alpha.11"
+local GUARDIAN_VERSION = "1.2.0-alpha.1"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -308,7 +310,7 @@ end
 local function load()
   local d={mode="AUTO",request="OFF",rated=nil,commissioned=false,commissioning=false,commissionFlow=nil,commissionSamples=0,commissionShortfallSamples=0,commissionSettleSamples=0,commissionLastSafe=nil,recovery=false,arm=0,initialRequested=false,startActivated=false,liveGatesSelected=false,message="Automatic safe supervision"}
   if not fs.exists(SETTINGS) then return d end;local ok,s=pcall(dofile,SETTINGS);if not ok or type(s)~="table" then return d end
-  d.mode=(s.mode=="ASSISTED" or s.mode=="UNRESTRICTED") and s.mode or "AUTO";d.request=(FRACTION[s.request] or s.request=="MANUAL" or s.request=="OVERDRIVE") and s.request or "OFF";d.rated=tonumber(s.rated);d.lifecycleCeilings=type(s.lifecycleCeilings)=="table" and s.lifecycleCeilings or {};d.injectorBaseline=positive(s.injectorBaseline);d.manualField=positive(s.manualField);d.manualExport=positive(s.manualExport) or 0;d.overdriveField=positive(s.overdriveField);d.overdriveExport=positive(s.overdriveExport);d.commissioned=s.commissioned==true;d.message=tostring(s.message or d.message);return d
+  d.mode=(s.mode=="ASSISTED" or s.mode=="UNRESTRICTED") and s.mode or "AUTO";d.request=(FRACTION[s.request] or s.request=="MANUAL" or s.request=="OVERDRIVE") and s.request or "OFF";d.rated=tonumber(s.rated);d.lifecycleCeilings=type(s.lifecycleCeilings)=="table" and s.lifecycleCeilings or {};d.currentCycleCeilings={};d.injectorBaseline=positive(s.injectorBaseline);d.manualField=positive(s.manualField);d.manualExport=positive(s.manualExport) or 0;d.overdriveField=positive(s.overdriveField);d.overdriveExport=positive(s.overdriveExport);d.commissioned=s.commissioned==true;d.message=tostring(s.message or d.message);return d
 end
 local function save(c)
   local parent=fs.getDir(SETTINGS);if parent~="" and not fs.exists(parent) then fs.makeDir(parent) end
@@ -326,13 +328,31 @@ local function lifecycleCeiling(c,r)
   local proven=tonumber(c.rated) or 0
   -- A later band inherits the best earlier proof, but a new fuel cycle never
   -- inherits a late-cycle ceiling from a higher conversion band.
-  for prior=0,band,LIFECYCLE_BAND do proven=math.max(proven,tonumber(c.lifecycleCeilings[tostring(prior)]) or 0) end
+  for prior=0,band,LIFECYCLE_BAND do
+    local profile=c.lifecycleCeilings[tostring(prior)]
+    proven=math.max(proven,tonumber(type(profile)=="table" and profile.export or profile) or 0)
+  end
   return proven,key,band
 end
 local function lifecycleTarget(c,r)
-  local proven,key,band=lifecycleCeiling(c,r)
+  local historical,key,band=lifecycleCeiling(c,r)
+  c.currentCycleCeilings=type(c.currentCycleCeilings)=="table" and c.currentCycleCeilings or {}
+  local conversion=pct(r.fuelConversion,r.maxFuelConversion) or 0
+  if tonumber(c.lastFuelConversion) and conversion+2<tonumber(c.lastFuelConversion) then
+    c.currentCycleCeilings={};c.lifecycleApplied=tonumber(c.rated) or 0;c.lifecycleFieldApplied=positive(c.injectorBaseline)
+    c.lifecycleSamples=0;c.fieldTuneSamples=0;c.lifecycleBandKey=nil;c.message=tr("guardian.fresh_core",nil,"Fresh fuel cycle detected; returning to commissioned baseline")
+  end
+  c.lastFuelConversion=conversion
+  local proven=tonumber(c.rated) or 0
+  for prior=0,band,LIFECYCLE_BAND do
+    proven=math.max(proven,tonumber(c.currentCycleCeilings[tostring(prior)]) or 0)
+  end
   if c.lifecycleBandKey~=key then
-    c.lifecycleBandKey=key;c.lifecycleApplied=proven;c.lifecycleSamples=0;c.lifecycleStartField=nil
+    local previousBand=tonumber(c.lifecycleBandKey)
+    c.lifecycleBandKey=key
+    if previousBand and band<previousBand then c.lifecycleApplied=tonumber(c.rated) or 0
+    else c.lifecycleApplied=math.max(tonumber(c.rated) or 0,math.min(tonumber(c.lifecycleApplied) or proven,historical)) end
+    c.lifecycleSamples=0;c.lifecycleStartField=nil;c.fieldTuneSamples=0
   end
   local applied=math.max(proven,tonumber(c.lifecycleApplied) or proven)
   local field=pct(r.fieldStrength,r.maxFieldStrength) or 0
@@ -347,7 +367,9 @@ local function lifecycleTarget(c,r)
     c.lifecycleStartField=tonumber(c.lifecycleStartField) or field
     if c.lifecycleSamples>=LIFECYCLE_PROOF_SAMPLES then
       if field>=c.lifecycleStartField-LIFECYCLE_FIELD_DRIFT then
-        c.lifecycleCeilings[key]=math.max(tonumber(c.lifecycleCeilings[key]) or 0,applied)
+        c.currentCycleCeilings[key]=math.max(tonumber(c.currentCycleCeilings[key]) or 0,applied)
+        local old=c.lifecycleCeilings[key];local oldExport=tonumber(type(old)=="table" and old.export or old) or 0
+        c.lifecycleCeilings[key]={export=math.max(oldExport,applied),fieldInput=positive(c.lifecycleFieldApplied) or positive(c.injectorBaseline),field=field,temperature=temp,conversion=conversion}
         proven=math.max(proven,applied)
         c.lifecycleApplied=math.max(applied+LIFECYCLE_MIN_STEP,math.floor(applied*LIFECYCLE_STEP_RATIO))
         c.lifecycleSamples=0;c.lifecycleStartField=field
@@ -360,6 +382,26 @@ local function lifecycleTarget(c,r)
   end
   c.lifecycleSamples=0;c.lifecycleStartField=nil
   return applied,"adaptive ceiling held until field and generation stabilize"
+end
+local function lifecycleFieldTarget(c,r,baseline)
+  local field=pct(r.fieldStrength,r.maxFieldStrength) or 0
+  local applied=positive(c.lifecycleFieldApplied) or positive(baseline) or MINIMUM_FIELD_INPUT
+  c.fieldTuneSamples=(tonumber(c.fieldTuneSamples) or 0)+1
+  c.fieldTuneStart=tonumber(c.fieldTuneStart) or field
+  if field<35 then
+    applied=math.max(applied+LIFECYCLE_MIN_STEP,math.floor(applied*(1+FIELD_RECOVERY_RATIO)))
+    c.fieldTuneSamples=0;c.fieldTuneStart=field
+  elseif c.fieldTuneSamples>=FIELD_TUNE_SAMPLES then
+    local drift=field-c.fieldTuneStart
+    if field>60 and drift>=0 then
+      applied=math.max(MINIMUM_FIELD_INPUT,math.floor(applied*(1-FIELD_TUNE_RATIO)))
+    elseif drift<-.5 then
+      applied=math.max(applied+LIFECYCLE_MIN_STEP,math.floor(applied*(1+FIELD_RECOVERY_RATIO)))
+    end
+    c.fieldTuneSamples=0;c.fieldTuneStart=field
+  end
+  c.lifecycleFieldApplied=applied
+  return applied
 end
 
 -- AUTO and ASSISTED retain containment. UNRESTRICTED is visibly armed and lets
@@ -487,14 +529,14 @@ local function supervise(b,d,c)
   if c.request=="OFF" then gate(b.output,0);reactor(b.reactor,"stopReactor");c.message="Manual OFF: export closed";return end
   if not live then ensureStarted(b,c,status,"Requested "..tostring(c.request).." output",injectorCap,r);return end
   if live then
-    gate(b.input,injectorCap)
     local ceiling=lifecycleCeiling(c,r)
     local note
-    if c.request=="MAX" and not free then ceiling,note=lifecycleTarget(c,r)
-    else c.lifecycleApplied=nil;c.lifecycleSamples=0;c.lifecycleStartField=nil end
+    local fieldTarget=injectorCap
+    if c.request=="MAX" and not free then ceiling,note=lifecycleTarget(c,r);fieldTarget=lifecycleFieldTarget(c,r,injectorCap)
+    else c.lifecycleApplied=nil;c.lifecycleSamples=0;c.lifecycleStartField=nil;c.lifecycleFieldApplied=nil;c.fieldTuneSamples=0;c.fieldTuneStart=nil end
     local target=ceiling*(FRACTION[c.request] or 0)
-    gate(b.output,target)
-    c.message=(free and "UNRESTRICTED" or "ASSISTED").." "..c.request.." "..fmt(target).." RF/t"..(note and " - "..note or "")
+    gate(b.input,fieldTarget);gate(b.output,target)
+    c.message=(free and "UNRESTRICTED" or "ASSISTED").." "..c.request.." "..fmt(target).." RF/t, field "..fmt(fieldTarget).." RF/t"..(note and " - "..note or "")
   end
 end
 local function draw(t,b,d,page,c,bs)
@@ -632,11 +674,14 @@ local function drawComputer(t,d,c)
   line(18,"Guardian: "..tostring(c.message),colors.lightGray)
   line(19,"HELIOS link: "..(facilityConnected and "ONLINE" or (facilityNetwork and "WAITING" or "LOCAL ONLY")),facilityConnected and colors.lime or colors.gray)
 end
+if rawget(_G,"HELIOS_GUARDIAN_TEST") then
+  return {lifecycleTarget=lifecycleTarget,lifecycleFieldTarget=lifecycleFieldTarget,lifecycleCeiling=lifecycleCeiling}
+end
 local binding,page,controls,buttons=inspect(),"overview",load(),{}
 controls.inputControlVerified=false;controls.outputControlVerified=false;controls.gatesOwned=false;controls.telemetryStale=false
 local computer=term.current();local target=binding.monitor and peripheral.wrap(binding.monitor) or computer;compactMonitor(target,binding.monitor~=nil)
 local function beginCalibration()
-  controls.commissioning=true;controls.commissionFlow=COMMISSION_START_FLOW;controls.commissionSamples=0;controls.commissionShortfallSamples=0;controls.commissionSettleSamples=0;controls.commissionLastSafe=nil;controls.recovery=false;controls.commissioned=false;controls.rated=nil;controls.lifecycleCeilings={};controls.lifecycleApplied=nil;controls.lifecycleSamples=0;controls.lifecycleBandKey=nil;controls.request="OFF"
+  controls.commissioning=true;controls.commissionFlow=COMMISSION_START_FLOW;controls.commissionSamples=0;controls.commissionShortfallSamples=0;controls.commissionSettleSamples=0;controls.commissionLastSafe=nil;controls.recovery=false;controls.commissioned=false;controls.rated=nil;controls.lifecycleCeilings={};controls.currentCycleCeilings={};controls.lifecycleApplied=nil;controls.lifecycleFieldApplied=nil;controls.lifecycleSamples=0;controls.lifecycleBandKey=nil;controls.lastFuelConversion=nil;controls.request="OFF"
   controls.initialRequested=true;controls.startActivated=false;controls.message="Automatic calibration requested by operator"
 end
 local function act(choice,d)

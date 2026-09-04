@@ -1,5 +1,18 @@
 # HELIOS Control Boundary
 
+## Draconic lifecycle governor
+
+The Draconic Guardian treats its commissioned export as a conservative baseline,
+not a permanent maximum. While Assisted MAX is selected it proves higher export
+points in five-percent fuel-conversion bands and independently trims field input
+toward stable containment. A point is retained only after a thirty-second stable
+observation window.
+
+Historical late-cycle settings are never applied to a fresh core. A detected
+drop in fuel conversion clears current-cycle proofs, returns both gates to the
+commissioned baseline, and requires the new cycle to prove its path forward.
+Stored profiles guide later bands but never bypass live safety interlocks.
+
 ## Guarded manual authority (1.6 alpha)
 
 - Manual authority requires separate ARM and CONFIRM actions.

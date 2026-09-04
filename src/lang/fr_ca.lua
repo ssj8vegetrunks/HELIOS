@@ -162,6 +162,7 @@ return {
         ["guardian.commission_testing"] = "Essai a {trial} RF/t: production {generation} RF/t ({sample}/{total})",
         ["guardian.commission_proved"] = "{trial} RF/t verifie; progression vers {next} RF/t",
         ["guardian.calibrating"] = "Etalonnage {trial} RF/t: echantillon stable {sample}/{total}",
+        ["guardian.fresh_core"] = "Nouveau cycle de carburant detecte; retour au niveau etalonne",
         ["profiler.trend_header"] = "TENDANCE                       30 S        5 MIN",
         ["profiler.field_per_minute"] = "Champ %/min", ["profiler.core_per_minute"] = "Coeur C/min",
         ["profiler.saturation_per_minute"] = "Saturation %/min",

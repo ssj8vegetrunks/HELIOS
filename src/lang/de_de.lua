@@ -137,6 +137,7 @@ return {
         ["guardian.commission_testing"] = "Test {trial} RF/t: Erzeugung {generation} RF/t ({sample}/{total})",
         ["guardian.commission_proved"] = "{trial} RF/t bestaetigt; erhoeht auf {next} RF/t",
         ["guardian.calibrating"] = "Kalibrierung {trial} RF/t: stabile Probe {sample}/{total}",
+        ["guardian.fresh_core"] = "Neuer Brennstoffzyklus erkannt; Rueckkehr zur kalibrierten Basis",
         ["profiler.trend_header"] = "TREND                         30 SEK       5 MIN",
         ["profiler.field_per_minute"] = "Feld %/min", ["profiler.core_per_minute"] = "Kern C/min",
         ["profiler.saturation_per_minute"] = "Saettigung %/min",

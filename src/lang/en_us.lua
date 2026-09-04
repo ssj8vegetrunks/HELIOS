@@ -162,6 +162,7 @@ return {
         ["guardian.commission_testing"] = "Testing {trial} RF/t: reactor generation {generation} RF/t ({sample}/{total})",
         ["guardian.commission_proved"] = "Calibration proved {trial} RF/t; advancing to {next} RF/t",
         ["guardian.calibrating"] = "Calibrating {trial} RF/t: stable sample {sample}/{total}",
+        ["guardian.fresh_core"] = "Fresh fuel cycle detected; returning to commissioned baseline",
         ["profiler.trend_header"] = "TREND                         30 SEC       5 MIN",
         ["profiler.field_per_minute"] = "Field %/min", ["profiler.core_per_minute"] = "Core C/min",
         ["profiler.saturation_per_minute"] = "Saturation %/min",
