@@ -1,7 +1,7 @@
 -- HELIOS single-file installer
 -- Manual-control alpha: guarded direct plant authority.
 
-local VERSION = "1.6.0-alpha.15"
+local VERSION = "1.6.0-alpha.16"
 local INSTALL_DIR = "/helios"
 local STAGE_DIR = "/.helios-install"
 local MODULE_PACK_BASE_URL = "https://raw.githubusercontent.com/ssj8vegetrunks/HELIOS/agent/facility-network-alpha1/module-pack"
@@ -2624,7 +2624,7 @@ return {
     name = "HELIOS Control Room",
     version = "1.0.0",
     apiVersion = 1,
-    compatibleCoreVersions = { "1.6.0-alpha.4", "1.6.0-alpha.5", "1.6.0-alpha.6", "1.6.0-alpha.7", "1.6.0-alpha.8", "1.6.0-alpha.9", "1.6.0-alpha.10", "1.6.0-alpha.11", "1.6.0-alpha.12", "1.6.0-alpha.13", "1.6.0-alpha.14", "1.6.0-alpha.15" },
+    compatibleCoreVersions = { "1.6.0-alpha.4", "1.6.0-alpha.5", "1.6.0-alpha.6", "1.6.0-alpha.7", "1.6.0-alpha.8", "1.6.0-alpha.9", "1.6.0-alpha.10", "1.6.0-alpha.11", "1.6.0-alpha.12", "1.6.0-alpha.13", "1.6.0-alpha.14", "1.6.0-alpha.15", "1.6.0-alpha.16" },
     entry = "renderer.lua",
     minimumWidth = 50,
     minimumHeight = 31,
@@ -3126,6 +3126,18 @@ return {
         ["remote.monitoring_read_only"] = "FERNUEBERWACHUNG - NUR LESEN",
         ["remote.no_reactors"] = "KEINE REAKTOREN GEMELDET", ["remote.no_turbines"] = "KEINE TURBINEN GEMELDET",
         ["remote.no_storage"] = "KEIN SPEICHER GEMELDET",
+        ["remote.text_title"] = "ENTFERNT {title}", ["remote.telemetry_subtitle"] = "Nur-Lese-Telemetrie des Hauptrechners",
+        ["remote.mainframe_link"] = "Hauptrechnerverbindung", ["remote.combined_charge"] = "Gesamtladung",
+        ["remote.test_speaker"] = "LAUTSPRECHER TESTEN", ["remote.exit_hint"] = "Q beendet HELIOS am Terminal",
+        ["remote.alarm_silenced_mainframe"] = "Alarm am Hauptrechner stummgeschaltet",
+        ["remote.local_speaker_silenced"] = "Lokaler Lautsprecher stumm", ["remote.silence_local"] = "LOKAL STUMM",
+        ["remote.mode"] = "Modus", ["remote.fuel_use"] = "Brennstoff / Verbrauch",
+        ["remote.fuel_case_temperature"] = "Temp. Brennstoff/Gehaeuse", ["remote.steam_average_target"] = "Dampf Mittel/Ziel",
+        ["remote.coolant_hot"] = "Kuehlmittel / heiss", ["remote.rods_range_exposed"] = "Stabbereich / freigelegt",
+        ["remote.terminal_title"] = "ENTFERNTES TERMINAL", ["remote.restricted_subtitle"] = "Auf Hauptrechner beschraenkte Anzeige",
+        ["remote.display_assignment"] = "Anzeigezuweisung",
+        ["remote.no_control_authority"] = "Dieses Terminal hat keine Geraetesteuerung.",
+        ["remote.speaker_hint"] = "X testet den lokalen Lautsprecher.", ["remote.return_main"] = "ZUR HAUPTANSICHT",
 
         ["value.active"] = "AKTIV", ["value.offline"] = "OFFLINE", ["value.warning"] = "WARNUNG",
         ["value.calibrating"] = "KALIBRIERUNG", ["value.starting"] = "STARTET", ["value.searching"] = "SUCHE",
@@ -3153,7 +3165,7 @@ return {
         ["value.clear"] = "KEINE", ["value.disabled"] = "DEAKTIVIERT",
         ["value.ready_standby"] = "BEREIT / BEREITSCHAFT", ["value.true"] = "JA", ["value.false"] = "NEIN",
         ["value.reactor"] = "REAKTOR", ["value.turbine"] = "TURBINE", ["value.battery"] = "SPEICHER",
-        ["value.monitor"] = "MONITOR",
+        ["value.monitor"] = "MONITOR", ["value.all"] = "ALLE",
 
         ["nav.home"] = "START", ["nav.overview"] = "UEBERSICHT", ["nav.reactors"] = "REAKTOREN",
         ["nav.turbines"] = "TURBINEN", ["nav.power"] = "ENERGIE", ["nav.advanced"] = "ERWEITERT",
@@ -3256,6 +3268,18 @@ return {
         ["remote.monitoring_read_only"] = "DISTANT LOOKOUT - EYES ONLY",
         ["remote.no_reactors"] = "NO HEARTS REPORTIN'", ["remote.no_turbines"] = "NO SAILS REPORTIN'",
         ["remote.no_storage"] = "NO HOLDS REPORTIN'",
+        ["remote.text_title"] = "DISTANT {title}", ["remote.telemetry_subtitle"] = "The flagship's eyes-only lookout",
+        ["remote.mainframe_link"] = "Flagship signal", ["remote.combined_charge"] = "All holds filled",
+        ["remote.test_speaker"] = "RING THE BELL", ["remote.exit_hint"] = "Q abandons the lookout",
+        ["remote.alarm_silenced_mainframe"] = "Bell silenced aboard the flagship",
+        ["remote.local_speaker_silenced"] = "Local bell be silent", ["remote.silence_local"] = "SILENCE THIS BELL",
+        ["remote.mode"] = "Course", ["remote.fuel_use"] = "Provisions / use",
+        ["remote.fuel_case_temperature"] = "Beast/hold heat", ["remote.steam_average_target"] = "Steam seen/ordered",
+        ["remote.coolant_hot"] = "Cold / hot ballast", ["remote.rods_range_exposed"] = "Rods range / aloft",
+        ["remote.terminal_title"] = "DISTANT LOOKOUT", ["remote.restricted_subtitle"] = "Flagship-controlled lookout",
+        ["remote.display_assignment"] = "Lookout duty",
+        ["remote.no_control_authority"] = "This lookout commands no machinery.",
+        ["remote.speaker_hint"] = "X rings the local bell.", ["remote.return_main"] = "BACK TO MAIN DECK",
         ["value.active"] = "SAILIN'", ["value.offline"] = "MOORED",
         ["value.warning"] = "BEWARE", ["value.calibrating"] = "TAKIN' BEARINGS",
         ["value.starting"] = "CASTIN' OFF", ["value.searching"] = "SEEKIN'",
@@ -3287,7 +3311,7 @@ return {
         ["value.ready_standby"] = "READY / AT ANCHOR",
         ["value.true"] = "AYE", ["value.false"] = "NAY",
         ["value.reactor"] = "HEART", ["value.turbine"] = "SAIL",
-        ["value.battery"] = "HOLD", ["value.monitor"] = "LOOKOUT",
+        ["value.battery"] = "HOLD", ["value.monitor"] = "LOOKOUT", ["value.all"] = "WHOLE SHIP",
         ["nav.home"] = "MAIN DECK",
         ["nav.overview"] = "SHIP'S LOG",
         ["nav.reactors"] = "HEARTS",
@@ -3399,6 +3423,18 @@ return {
         ["remote.monitoring_read_only"] = "REMOTE MONITORING - READ ONLY",
         ["remote.no_reactors"] = "NO REACTORS REPORTED", ["remote.no_turbines"] = "NO TURBINES REPORTED",
         ["remote.no_storage"] = "NO STORAGE REPORTED",
+        ["remote.text_title"] = "REMOTE {title}", ["remote.telemetry_subtitle"] = "Read-only mainframe telemetry",
+        ["remote.mainframe_link"] = "Mainframe link", ["remote.combined_charge"] = "Combined charge",
+        ["remote.test_speaker"] = "TEST SPEAKER", ["remote.exit_hint"] = "Q exits on the terminal keyboard",
+        ["remote.alarm_silenced_mainframe"] = "Alarm silenced at mainframe",
+        ["remote.local_speaker_silenced"] = "Local speaker silenced", ["remote.silence_local"] = "SILENCE LOCAL",
+        ["remote.mode"] = "Mode", ["remote.fuel_use"] = "Fuel / use",
+        ["remote.fuel_case_temperature"] = "Temps fuel/case", ["remote.steam_average_target"] = "Steam avg/target",
+        ["remote.coolant_hot"] = "Coolant / hot", ["remote.rods_range_exposed"] = "Rods range / exposed",
+        ["remote.terminal_title"] = "REMOTE TERMINAL", ["remote.restricted_subtitle"] = "Mainframe-restricted display",
+        ["remote.display_assignment"] = "Display assignment",
+        ["remote.no_control_authority"] = "This terminal has no device-control authority.",
+        ["remote.speaker_hint"] = "X tests the local speaker.", ["remote.return_main"] = "RETURN TO MAIN",
         ["value.active"] = "ACTIVE", ["value.offline"] = "OFFLINE",
         ["value.warning"] = "WARNING", ["value.calibrating"] = "CALIBRATING",
         ["value.starting"] = "STARTING", ["value.searching"] = "SEARCHING",
@@ -3430,7 +3466,7 @@ return {
         ["value.ready_standby"] = "READY / STANDBY",
         ["value.true"] = "YES", ["value.false"] = "NO",
         ["value.reactor"] = "REACTOR", ["value.turbine"] = "TURBINE",
-        ["value.battery"] = "STORAGE", ["value.monitor"] = "MONITOR",
+        ["value.battery"] = "STORAGE", ["value.monitor"] = "MONITOR", ["value.all"] = "ALL",
         ["nav.home"] = "HOME",
         ["nav.overview"] = "OVERVIEW",
         ["nav.reactors"] = "REACTORS",
@@ -3542,6 +3578,18 @@ return {
         ["remote.monitoring_read_only"] = "SURVEILLANCE DISTANTE - LECTURE SEULE",
         ["remote.no_reactors"] = "AUCUN REACTEUR SIGNALE", ["remote.no_turbines"] = "AUCUNE TURBINE SIGNALEE",
         ["remote.no_storage"] = "AUCUN STOCKAGE SIGNALE",
+        ["remote.text_title"] = "DISTANT {title}", ["remote.telemetry_subtitle"] = "Telemetrie centrale en lecture seule",
+        ["remote.mainframe_link"] = "Liaison centrale", ["remote.combined_charge"] = "Charge combinee",
+        ["remote.test_speaker"] = "TESTER LE HAUT-PARLEUR", ["remote.exit_hint"] = "Q quitte sur le clavier du terminal",
+        ["remote.alarm_silenced_mainframe"] = "Alarme coupee au systeme central",
+        ["remote.local_speaker_silenced"] = "Haut-parleur local coupe", ["remote.silence_local"] = "COUPER LOCALEMENT",
+        ["remote.mode"] = "Mode", ["remote.fuel_use"] = "Carburant / usage",
+        ["remote.fuel_case_temperature"] = "Temp. carburant/boitier", ["remote.steam_average_target"] = "Vapeur moy./cible",
+        ["remote.coolant_hot"] = "Liquide froid / chaud", ["remote.rods_range_exposed"] = "Plage barres / exposees",
+        ["remote.terminal_title"] = "TERMINAL DISTANT", ["remote.restricted_subtitle"] = "Affichage limite au systeme central",
+        ["remote.display_assignment"] = "Affectation d'affichage",
+        ["remote.no_control_authority"] = "Ce terminal ne peut commander aucun appareil.",
+        ["remote.speaker_hint"] = "X teste le haut-parleur local.", ["remote.return_main"] = "RETOUR AU SOMMAIRE",
         ["value.active"] = "ACTIF", ["value.offline"] = "HORS LIGNE",
         ["value.warning"] = "AVERTISSEMENT", ["value.calibrating"] = "ETALONNAGE",
         ["value.starting"] = "DEMARRAGE", ["value.searching"] = "RECHERCHE",
@@ -3573,7 +3621,7 @@ return {
         ["value.ready_standby"] = "PRET / EN VEILLE",
         ["value.true"] = "OUI", ["value.false"] = "NON",
         ["value.reactor"] = "REACTEUR", ["value.turbine"] = "TURBINE",
-        ["value.battery"] = "STOCKAGE", ["value.monitor"] = "MONITEUR",
+        ["value.battery"] = "STOCKAGE", ["value.monitor"] = "MONITEUR", ["value.all"] = "TOUS",
         ["nav.home"] = "ACCUEIL",
         ["nav.overview"] = "SOMMAIRE",
         ["nav.reactors"] = "REACTEURS",
@@ -9051,7 +9099,7 @@ function terminal.run(config)
     local lastHelloAt = 0
     local sessionId = network.sessionId("terminal")
     local idConflicts = {}
-    local previousButton, nextButton, silenceButton, testButton
+    local previousButton, nextButton, silenceButton, testButton, advancedMainButton
     local advanced = false
     local graphicalPage = ({ reactor = "reactors", turbine = "turbines",
         battery = "storage" })[config.display] or "overview"
@@ -9141,37 +9189,36 @@ function terminal.run(config)
         term.setTextColor(snapshot.alarm.level >= 3 and colors.red or colors.orange)
         print("!! " .. tostring(snapshot.alarm.message))
         if snapshot.alarmSilenced then
-            print("Alarm silenced at mainframe")
+            print(tr("remote.alarm_silenced_mainframe"))
         elseif localSilenced == alarmSignature(snapshot.alarm) then
-            print("Local speaker silenced")
+            print(tr("remote.local_speaker_silenced"))
         else
-            silenceButton = ui.button("SILENCE LOCAL", colors.orange)
+            silenceButton = ui.button(tr("remote.silence_local"), colors.orange)
         end
         term.setTextColor(colors.white)
     end
 
     -- @section TELEMETRY VIEWS
-    local function renderList(title, list, state, drawItem)
-        ui.header("REMOTE " .. title, "Read-only mainframe telemetry")
+    local function renderList(title, singular, list, state, drawItem)
+        ui.header(tr("remote.text_title", { title = title }), tr("remote.telemetry_subtitle"))
         local link, colour = statusLine()
-        ui.status("Mainframe link", link, colour)
+        ui.status(tr("remote.mainframe_link"), tv(link), colour)
         if not list or #list == 0 then
-            ui.status("Status", "NO DEVICES REPORTED", colors.orange)
+            ui.status(tr("common.status"), tr("dashboard.no_devices"), colors.orange)
             alarmLine()
             return
         end
         if selected > #list then selected = #list end
         local item = list[selected]
-        local singular = ({ REACTORS = "Reactor", TURBINES = "Turbine", STORAGE = "Storage" })[title] or "Device"
         ui.status(singular, ("%d/%d %s"):format(selected, #list, nameOf(item.name, state)), colors.cyan)
         drawItem(item, state)
         print("")
         alarmLine()
-        previousButton = ui.inlineButton("< PREVIOUS", colors.cyan)
+        previousButton = ui.inlineButton("< " .. tr("common.previous"), colors.cyan)
         write(" ")
-        nextButton = ui.inlineButton("NEXT >", colors.cyan)
+        nextButton = ui.inlineButton(tr("common.next") .. " >", colors.cyan)
         print("")
-        testButton = ui.button("TEST SPEAKER", colors.cyan)
+        testButton = ui.button(tr("remote.test_speaker"), colors.cyan)
     end
 
     local function formatValue(value, suffix)
@@ -9195,26 +9242,26 @@ function terminal.run(config)
     end
 
     local function renderReactors(state)
-        renderList("REACTORS", state.reactors, state, function(item)
-            ui.status("Mode", string.upper(item.mode or "unknown"))
-            if item.error then ui.status("Telemetry", item.error, colors.red) return end
+        renderList(tr("nav.reactors"), tr("dashboard.reactor"), state.reactors, state, function(item)
+            ui.status(tr("remote.mode"), tv(item.mode or "unknown"))
+            if item.error then ui.status(tr("common.telemetry"), item.error, colors.red) return end
             ui.status(tr("common.state"), tv(item.active == true and "ACTIVE" or item.active == false and "OFFLINE" or "UNKNOWN"))
-            ui.status("Fuel / use", ("%s / %s"):format(
+            ui.status(tr("remote.fuel_use"), ("%s / %s"):format(
                 formatValue(item.fuelPercent, "%"),
                 formatValue(item.fuelUse, " mB/t")))
-            ui.status("Temps fuel/case", ("%s / %s"):format(
+            ui.status(tr("remote.fuel_case_temperature"), ("%s / %s"):format(
                 formatValue(item.fuelTemperature, " C"),
                 formatValue(item.casingTemperature, " C")))
             if item.mode == "steam" then
                 local plan = item.governor or {}
-                ui.status("Steam avg/target", ("%s / %s"):format(
+                ui.status(tr("remote.steam_average_target"), ("%s / %s"):format(
                     formatValue(plan.averageSteamProduction or
                         item.steamProduction, ""),
                     formatValue(plan.targetSteam, " mB/t")), colors.cyan)
-                ui.status("Coolant / hot", ("%s / %s"):format(
+                ui.status(tr("remote.coolant_hot"), ("%s / %s"):format(
                     formatValue(item.coolantPercent, "%"),
                     formatValue(item.hotFluidPercent, "%")))
-                ui.status("Rods range / exposed",
+                ui.status(tr("remote.rods_range_exposed"),
                     formatRodLayout(item, plan.currentRodExposure))
                 ui.status(tr("common.governor"), tv(plan.state or "WAITING") .. " / " ..
                     tv(plan.actuatorState or "WAITING"),
@@ -9230,8 +9277,8 @@ function terminal.run(config)
     end
 
     local function renderTurbines(state)
-        renderList("TURBINES", state.turbines, state, function(item)
-            if item.error then ui.status("Telemetry", item.error, colors.red) return end
+        renderList(tr("nav.turbines"), tr("dashboard.turbine"), state.turbines, state, function(item)
+            if item.error then ui.status(tr("common.telemetry"), item.error, colors.red) return end
             ui.status(tr("common.state"), tv(item.active == true and "ACTIVE" or item.active == false and "OFFLINE" or "UNKNOWN"))
             ui.status(tr("common.rotor_speed"), formatValue(item.rotorSpeed, " RPM"), colors.cyan)
             local plan = item.governor or {}
@@ -9241,20 +9288,20 @@ function terminal.run(config)
             ui.status(tr("common.power_output"), powerFormat.power(item.energyProduction, state.power, true), colors.cyan)
             ui.status(tr("common.energy_buffer"), formatValue(item.energyPercent, "%"))
             if plan.currentFlow ~= nil and plan.recommendedFlow ~= nil then
-                ui.status("Flow actual/set/plan", ("%s / %.0f -> %.0f"):format(
+                ui.status(tr("dashboard.flow_plan"), ("%s / %.0f -> %.0f"):format(
                     plan.actualFlow and ("%.0f"):format(plan.actualFlow) or "N/A",
                     plan.currentFlow, plan.recommendedFlow), colors.cyan)
             else
-                ui.status("Flow actual/set/plan", "N/A / HOLD", colors.gray)
+                ui.status(tr("dashboard.flow_plan"), "N/A / " .. tv("HOLD"), colors.gray)
             end
             ui.status(tr("common.inductor"), tv(item.inductorEngaged == true and "ENGAGED" or item.inductorEngaged == false and "DISENGAGED" or "N/A"))
         end)
     end
 
     local function renderStorage(state)
-        renderList("STORAGE", state.storages, state, function(item)
+        renderList(tr("dashboard.energy_storage"), tr("dashboard.storage"), state.storages, state, function(item)
             ui.status(tr("common.driver"), item.adapterName or tv("UNKNOWN"), item.fallback and colors.orange or colors.lime)
-            if item.error then ui.status("Telemetry", item.error, colors.red) return end
+            if item.error then ui.status(tr("common.telemetry"), item.error, colors.red) return end
             ui.status(tr("common.charge"), formatValue(item.percent, "%"), colors.cyan)
             ui.status(tr("common.stored"), powerFormat.power(item.stored, state.power, false) .. " / " .. powerFormat.power(item.capacity, state.power, false))
             ui.status(tr("common.input"), powerFormat.power(item.input, state.power, true))
@@ -9265,12 +9312,12 @@ function terminal.run(config)
     end
 
     local function renderOverview(state)
-        ui.header("REMOTE OVERVIEW", "Read-only mainframe telemetry")
+        ui.header(tr("remote.text_title", { title = tr("nav.overview") }), tr("remote.telemetry_subtitle"))
         local link, colour = statusLine()
-        ui.status("Mainframe link", link, colour)
-        ui.status("Reactors", #(state.reactors or {}), colors.cyan)
-        ui.status("Turbines", #(state.turbines or {}), colors.cyan)
-        ui.status("Storage", #(state.storages or {}), colors.cyan)
+        ui.status(tr("remote.mainframe_link"), tv(link), colour)
+        ui.status(tr("nav.reactors"), #(state.reactors or {}), colors.cyan)
+        ui.status(tr("nav.turbines"), #(state.turbines or {}), colors.cyan)
+        ui.status(tr("dashboard.storage"), #(state.storages or {}), colors.cyan)
         local production = 0
         for _, reactor in ipairs(state.reactors or {}) do production = production + (tonumber(reactor.energyProduction) or 0) end
         for _, turbine in ipairs(state.turbines or {}) do production = production + (tonumber(turbine.energyProduction) or 0) end
@@ -9279,13 +9326,13 @@ function terminal.run(config)
             stored = stored + (tonumber(storage.stored) or 0)
             capacity = capacity + (tonumber(storage.capacity) or 0)
         end
-        ui.status("Generation", powerFormat.power(production, state.power, true), colors.lime)
-        ui.status("Stored", powerFormat.power(stored, state.power, false))
-        if capacity > 0 then ui.status("Combined charge", ("%.1f%%"):format(stored / capacity * 100)) end
+        ui.status(tr("common.generation"), powerFormat.power(production, state.power, true), colors.lime)
+        ui.status(tr("common.stored"), powerFormat.power(stored, state.power, false))
+        if capacity > 0 then ui.status(tr("remote.combined_charge"), ("%.1f%%"):format(stored / capacity * 100)) end
         print("")
         alarmLine()
-        testButton = ui.button("TEST SPEAKER", colors.cyan)
-        print("Q exits on the terminal keyboard")
+        testButton = ui.button(tr("remote.test_speaker"), colors.cyan)
+        print(tr("remote.exit_hint"))
     end
 
     -- @section READ-ONLY GRAPHICAL VIEWS
@@ -9493,26 +9540,30 @@ function terminal.run(config)
 
     -- @section EVENT LOOP AND RENDERING
     local function renderAdvanced()
-        previousButton, nextButton, silenceButton, testButton = nil, nil, nil, nil
+        previousButton, nextButton, silenceButton, testButton, advancedMainButton = nil, nil, nil, nil, nil
         ui.setIdConflicts(idConflicts)
         if not snapshot then
-            ui.header("REMOTE TERMINAL", "Mainframe-restricted display")
-            ui.status("System", "ONLINE", colors.lime)
-            ui.status("Computer ID", config.computerId)
-            ui.status("Display assignment", string.upper(config.display or "all"), colors.cyan)
+            ui.header(tr("remote.terminal_title"), tr("remote.restricted_subtitle"))
+            ui.status(tr("common.system"), tr("common.online"), colors.lime)
+            ui.status(tr("dashboard.computer_id"), config.computerId)
+            ui.status(tr("remote.display_assignment"), tv(config.display or "all"), colors.cyan)
             local link, colour = statusLine()
-            ui.status("Mainframe link", link, colour)
+            ui.status(tr("remote.mainframe_link"), tv(link), colour)
             print("")
-            print("This terminal has no device-control authority.")
-            print("X tests the local speaker.")
-            print("Press Q to exit HELIOS.")
-            return
+            print(tr("remote.no_control_authority"))
+            print(tr("remote.speaker_hint"))
+            print(tr("remote.exit_hint"))
+        else
+            local assignment = snapshot.assignment or config.display or "all"
+            if assignment == "reactor" then renderReactors(snapshot)
+            elseif assignment == "turbine" then renderTurbines(snapshot)
+            elseif assignment == "battery" then renderStorage(snapshot)
+            else renderOverview(snapshot) end
         end
-        local assignment = snapshot.assignment or config.display or "all"
-        if assignment == "reactor" then renderReactors(snapshot)
-        elseif assignment == "turbine" then renderTurbines(snapshot)
-        elseif assignment == "battery" then renderStorage(snapshot)
-        else renderOverview(snapshot) end
+        local _, height = term.getSize()
+        term.setCursorPos(1, height)
+        term.clearLine()
+        advancedMainButton = ui.inlineButton(tr("remote.return_main"), colors.cyan)
     end
 
     local function render()
@@ -9579,6 +9630,7 @@ function terminal.run(config)
                 elseif gui.hit(graphicalButtons.advanced, x, y) then advanced = true
                 elseif gui.hit(graphicalButtons.previous, x, y) then selected = math.max(1, selected - 1)
                 elseif gui.hit(graphicalButtons.next, x, y) then selected = selected + 1 end
+            elseif ui.hit(advancedMainButton, x, y) then advanced = false
             elseif ui.hit(previousButton, x, y) then selected = math.max(1, selected - 1)
             elseif ui.hit(nextButton, x, y) then selected = selected + 1
             elseif ui.hit(silenceButton, x, y) and snapshot and snapshot.alarm then

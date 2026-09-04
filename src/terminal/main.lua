@@ -25,7 +25,7 @@ function terminal.run(config)
     local lastHelloAt = 0
     local sessionId = network.sessionId("terminal")
     local idConflicts = {}
-    local previousButton, nextButton, silenceButton, testButton
+    local previousButton, nextButton, silenceButton, testButton, advancedMainButton
     local advanced = false
     local graphicalPage = ({ reactor = "reactors", turbine = "turbines",
         battery = "storage" })[config.display] or "overview"
@@ -115,37 +115,36 @@ function terminal.run(config)
         term.setTextColor(snapshot.alarm.level >= 3 and colors.red or colors.orange)
         print("!! " .. tostring(snapshot.alarm.message))
         if snapshot.alarmSilenced then
-            print("Alarm silenced at mainframe")
+            print(tr("remote.alarm_silenced_mainframe"))
         elseif localSilenced == alarmSignature(snapshot.alarm) then
-            print("Local speaker silenced")
+            print(tr("remote.local_speaker_silenced"))
         else
-            silenceButton = ui.button("SILENCE LOCAL", colors.orange)
+            silenceButton = ui.button(tr("remote.silence_local"), colors.orange)
         end
         term.setTextColor(colors.white)
     end
 
     -- @section TELEMETRY VIEWS
-    local function renderList(title, list, state, drawItem)
-        ui.header("REMOTE " .. title, "Read-only mainframe telemetry")
+    local function renderList(title, singular, list, state, drawItem)
+        ui.header(tr("remote.text_title", { title = title }), tr("remote.telemetry_subtitle"))
         local link, colour = statusLine()
-        ui.status("Mainframe link", link, colour)
+        ui.status(tr("remote.mainframe_link"), tv(link), colour)
         if not list or #list == 0 then
-            ui.status("Status", "NO DEVICES REPORTED", colors.orange)
+            ui.status(tr("common.status"), tr("dashboard.no_devices"), colors.orange)
             alarmLine()
             return
         end
         if selected > #list then selected = #list end
         local item = list[selected]
-        local singular = ({ REACTORS = "Reactor", TURBINES = "Turbine", STORAGE = "Storage" })[title] or "Device"
         ui.status(singular, ("%d/%d %s"):format(selected, #list, nameOf(item.name, state)), colors.cyan)
         drawItem(item, state)
         print("")
         alarmLine()
-        previousButton = ui.inlineButton("< PREVIOUS", colors.cyan)
+        previousButton = ui.inlineButton("< " .. tr("common.previous"), colors.cyan)
         write(" ")
-        nextButton = ui.inlineButton("NEXT >", colors.cyan)
+        nextButton = ui.inlineButton(tr("common.next") .. " >", colors.cyan)
         print("")
-        testButton = ui.button("TEST SPEAKER", colors.cyan)
+        testButton = ui.button(tr("remote.test_speaker"), colors.cyan)
     end
 
     local function formatValue(value, suffix)
@@ -169,26 +168,26 @@ function terminal.run(config)
     end
 
     local function renderReactors(state)
-        renderList("REACTORS", state.reactors, state, function(item)
-            ui.status("Mode", string.upper(item.mode or "unknown"))
-            if item.error then ui.status("Telemetry", item.error, colors.red) return end
+        renderList(tr("nav.reactors"), tr("dashboard.reactor"), state.reactors, state, function(item)
+            ui.status(tr("remote.mode"), tv(item.mode or "unknown"))
+            if item.error then ui.status(tr("common.telemetry"), item.error, colors.red) return end
             ui.status(tr("common.state"), tv(item.active == true and "ACTIVE" or item.active == false and "OFFLINE" or "UNKNOWN"))
-            ui.status("Fuel / use", ("%s / %s"):format(
+            ui.status(tr("remote.fuel_use"), ("%s / %s"):format(
                 formatValue(item.fuelPercent, "%"),
                 formatValue(item.fuelUse, " mB/t")))
-            ui.status("Temps fuel/case", ("%s / %s"):format(
+            ui.status(tr("remote.fuel_case_temperature"), ("%s / %s"):format(
                 formatValue(item.fuelTemperature, " C"),
                 formatValue(item.casingTemperature, " C")))
             if item.mode == "steam" then
                 local plan = item.governor or {}
-                ui.status("Steam avg/target", ("%s / %s"):format(
+                ui.status(tr("remote.steam_average_target"), ("%s / %s"):format(
                     formatValue(plan.averageSteamProduction or
                         item.steamProduction, ""),
                     formatValue(plan.targetSteam, " mB/t")), colors.cyan)
-                ui.status("Coolant / hot", ("%s / %s"):format(
+                ui.status(tr("remote.coolant_hot"), ("%s / %s"):format(
                     formatValue(item.coolantPercent, "%"),
                     formatValue(item.hotFluidPercent, "%")))
-                ui.status("Rods range / exposed",
+                ui.status(tr("remote.rods_range_exposed"),
                     formatRodLayout(item, plan.currentRodExposure))
                 ui.status(tr("common.governor"), tv(plan.state or "WAITING") .. " / " ..
                     tv(plan.actuatorState or "WAITING"),
@@ -204,8 +203,8 @@ function terminal.run(config)
     end
 
     local function renderTurbines(state)
-        renderList("TURBINES", state.turbines, state, function(item)
-            if item.error then ui.status("Telemetry", item.error, colors.red) return end
+        renderList(tr("nav.turbines"), tr("dashboard.turbine"), state.turbines, state, function(item)
+            if item.error then ui.status(tr("common.telemetry"), item.error, colors.red) return end
             ui.status(tr("common.state"), tv(item.active == true and "ACTIVE" or item.active == false and "OFFLINE" or "UNKNOWN"))
             ui.status(tr("common.rotor_speed"), formatValue(item.rotorSpeed, " RPM"), colors.cyan)
             local plan = item.governor or {}
@@ -215,20 +214,20 @@ function terminal.run(config)
             ui.status(tr("common.power_output"), powerFormat.power(item.energyProduction, state.power, true), colors.cyan)
             ui.status(tr("common.energy_buffer"), formatValue(item.energyPercent, "%"))
             if plan.currentFlow ~= nil and plan.recommendedFlow ~= nil then
-                ui.status("Flow actual/set/plan", ("%s / %.0f -> %.0f"):format(
+                ui.status(tr("dashboard.flow_plan"), ("%s / %.0f -> %.0f"):format(
                     plan.actualFlow and ("%.0f"):format(plan.actualFlow) or "N/A",
                     plan.currentFlow, plan.recommendedFlow), colors.cyan)
             else
-                ui.status("Flow actual/set/plan", "N/A / HOLD", colors.gray)
+                ui.status(tr("dashboard.flow_plan"), "N/A / " .. tv("HOLD"), colors.gray)
             end
             ui.status(tr("common.inductor"), tv(item.inductorEngaged == true and "ENGAGED" or item.inductorEngaged == false and "DISENGAGED" or "N/A"))
         end)
     end
 
     local function renderStorage(state)
-        renderList("STORAGE", state.storages, state, function(item)
+        renderList(tr("dashboard.energy_storage"), tr("dashboard.storage"), state.storages, state, function(item)
             ui.status(tr("common.driver"), item.adapterName or tv("UNKNOWN"), item.fallback and colors.orange or colors.lime)
-            if item.error then ui.status("Telemetry", item.error, colors.red) return end
+            if item.error then ui.status(tr("common.telemetry"), item.error, colors.red) return end
             ui.status(tr("common.charge"), formatValue(item.percent, "%"), colors.cyan)
             ui.status(tr("common.stored"), powerFormat.power(item.stored, state.power, false) .. " / " .. powerFormat.power(item.capacity, state.power, false))
             ui.status(tr("common.input"), powerFormat.power(item.input, state.power, true))
@@ -239,12 +238,12 @@ function terminal.run(config)
     end
 
     local function renderOverview(state)
-        ui.header("REMOTE OVERVIEW", "Read-only mainframe telemetry")
+        ui.header(tr("remote.text_title", { title = tr("nav.overview") }), tr("remote.telemetry_subtitle"))
         local link, colour = statusLine()
-        ui.status("Mainframe link", link, colour)
-        ui.status("Reactors", #(state.reactors or {}), colors.cyan)
-        ui.status("Turbines", #(state.turbines or {}), colors.cyan)
-        ui.status("Storage", #(state.storages or {}), colors.cyan)
+        ui.status(tr("remote.mainframe_link"), tv(link), colour)
+        ui.status(tr("nav.reactors"), #(state.reactors or {}), colors.cyan)
+        ui.status(tr("nav.turbines"), #(state.turbines or {}), colors.cyan)
+        ui.status(tr("dashboard.storage"), #(state.storages or {}), colors.cyan)
         local production = 0
         for _, reactor in ipairs(state.reactors or {}) do production = production + (tonumber(reactor.energyProduction) or 0) end
         for _, turbine in ipairs(state.turbines or {}) do production = production + (tonumber(turbine.energyProduction) or 0) end
@@ -253,13 +252,13 @@ function terminal.run(config)
             stored = stored + (tonumber(storage.stored) or 0)
             capacity = capacity + (tonumber(storage.capacity) or 0)
         end
-        ui.status("Generation", powerFormat.power(production, state.power, true), colors.lime)
-        ui.status("Stored", powerFormat.power(stored, state.power, false))
-        if capacity > 0 then ui.status("Combined charge", ("%.1f%%"):format(stored / capacity * 100)) end
+        ui.status(tr("common.generation"), powerFormat.power(production, state.power, true), colors.lime)
+        ui.status(tr("common.stored"), powerFormat.power(stored, state.power, false))
+        if capacity > 0 then ui.status(tr("remote.combined_charge"), ("%.1f%%"):format(stored / capacity * 100)) end
         print("")
         alarmLine()
-        testButton = ui.button("TEST SPEAKER", colors.cyan)
-        print("Q exits on the terminal keyboard")
+        testButton = ui.button(tr("remote.test_speaker"), colors.cyan)
+        print(tr("remote.exit_hint"))
     end
 
     -- @section READ-ONLY GRAPHICAL VIEWS
@@ -467,26 +466,30 @@ function terminal.run(config)
 
     -- @section EVENT LOOP AND RENDERING
     local function renderAdvanced()
-        previousButton, nextButton, silenceButton, testButton = nil, nil, nil, nil
+        previousButton, nextButton, silenceButton, testButton, advancedMainButton = nil, nil, nil, nil, nil
         ui.setIdConflicts(idConflicts)
         if not snapshot then
-            ui.header("REMOTE TERMINAL", "Mainframe-restricted display")
-            ui.status("System", "ONLINE", colors.lime)
-            ui.status("Computer ID", config.computerId)
-            ui.status("Display assignment", string.upper(config.display or "all"), colors.cyan)
+            ui.header(tr("remote.terminal_title"), tr("remote.restricted_subtitle"))
+            ui.status(tr("common.system"), tr("common.online"), colors.lime)
+            ui.status(tr("dashboard.computer_id"), config.computerId)
+            ui.status(tr("remote.display_assignment"), tv(config.display or "all"), colors.cyan)
             local link, colour = statusLine()
-            ui.status("Mainframe link", link, colour)
+            ui.status(tr("remote.mainframe_link"), tv(link), colour)
             print("")
-            print("This terminal has no device-control authority.")
-            print("X tests the local speaker.")
-            print("Press Q to exit HELIOS.")
-            return
+            print(tr("remote.no_control_authority"))
+            print(tr("remote.speaker_hint"))
+            print(tr("remote.exit_hint"))
+        else
+            local assignment = snapshot.assignment or config.display or "all"
+            if assignment == "reactor" then renderReactors(snapshot)
+            elseif assignment == "turbine" then renderTurbines(snapshot)
+            elseif assignment == "battery" then renderStorage(snapshot)
+            else renderOverview(snapshot) end
         end
-        local assignment = snapshot.assignment or config.display or "all"
-        if assignment == "reactor" then renderReactors(snapshot)
-        elseif assignment == "turbine" then renderTurbines(snapshot)
-        elseif assignment == "battery" then renderStorage(snapshot)
-        else renderOverview(snapshot) end
+        local _, height = term.getSize()
+        term.setCursorPos(1, height)
+        term.clearLine()
+        advancedMainButton = ui.inlineButton(tr("remote.return_main"), colors.cyan)
     end
 
     local function render()
@@ -553,6 +556,7 @@ function terminal.run(config)
                 elseif gui.hit(graphicalButtons.advanced, x, y) then advanced = true
                 elseif gui.hit(graphicalButtons.previous, x, y) then selected = math.max(1, selected - 1)
                 elseif gui.hit(graphicalButtons.next, x, y) then selected = selected + 1 end
+            elseif ui.hit(advancedMainButton, x, y) then advanced = false
             elseif ui.hit(previousButton, x, y) then selected = math.max(1, selected - 1)
             elseif ui.hit(nextButton, x, y) then selected = selected + 1
             elseif ui.hit(silenceButton, x, y) and snapshot and snapshot.alarm then
