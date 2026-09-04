@@ -1,7 +1,7 @@
 -- HELIOS single-file installer
 -- Manual-control alpha: guarded direct plant authority.
 
-local VERSION = "1.6.0-alpha.12"
+local VERSION = "1.6.0-alpha.13"
 local INSTALL_DIR = "/helios"
 local STAGE_DIR = "/.helios-install"
 local MODULE_PACK_BASE_URL = "https://raw.githubusercontent.com/ssj8vegetrunks/HELIOS/agent/facility-network-alpha1/module-pack"
@@ -2538,7 +2538,7 @@ return {
     name = "HELIOS Control Room",
     version = "1.0.0",
     apiVersion = 1,
-    compatibleCoreVersions = { "1.6.0-alpha.4", "1.6.0-alpha.5", "1.6.0-alpha.6", "1.6.0-alpha.7", "1.6.0-alpha.8", "1.6.0-alpha.9", "1.6.0-alpha.10", "1.6.0-alpha.11", "1.6.0-alpha.12" },
+    compatibleCoreVersions = { "1.6.0-alpha.4", "1.6.0-alpha.5", "1.6.0-alpha.6", "1.6.0-alpha.7", "1.6.0-alpha.8", "1.6.0-alpha.9", "1.6.0-alpha.10", "1.6.0-alpha.11", "1.6.0-alpha.12", "1.6.0-alpha.13" },
     entry = "renderer.lua",
     minimumWidth = 50,
     minimumHeight = 31,
@@ -3045,7 +3045,17 @@ return {
         ["dashboard.more_devices"] = "+ {count} more below deck (run: helios scan)",
         ["dashboard.gui"] = "CHART", ["dashboard.keyboard_help"] = "Keys: B chart | V/G/E/C/A/R/S | Q abandon ship",
         ["dashboard.device_counts"] = "HEARTS  {reactors}   SAILS  {turbines}   HOLDS  {storage}",
+        ["remote.screen_title"] = "HELIOS // DISTANT {title}",
+        ["remote.searching_mainframe"] = "SEEKIN' THE CAPTAIN'S BRIDGE",
+        ["remote.combined_storage"] = "ALL TREASURE HOLDS",
+        ["remote.monitoring_read_only"] = "DISTANT LOOKOUT - EYES ONLY",
+        ["remote.no_reactors"] = "NO HEARTS REPORTIN'", ["remote.no_turbines"] = "NO SAILS REPORTIN'",
+        ["remote.no_storage"] = "NO HOLDS REPORTIN'",
         ["value.active"] = "SAILIN'", ["value.offline"] = "MOORED",
+        ["value.warning"] = "BEWARE", ["value.calibrating"] = "TAKIN' BEARINGS",
+        ["value.starting"] = "CASTIN' OFF", ["value.searching"] = "SEEKIN'",
+        ["value.no_modem"] = "NO WIRELESS PARROT", ["value.id_conflict_telemetry_untrusted"] = "CLASHED MARKS - DON'T TRUST THE LOOKOUT",
+        ["value.link_lost_data_stale"] = "SIGNAL LOST - OLD NEWS",
         ["value.ready"] = "SHIPSHAPE", ["value.running"] = "SAILIN'",
         ["value.stable"] = "STEADY", ["value.hold"] = "HOLD FAST",
         ["value.charging"] = "LOADIN'", ["value.draining"] = "UNLOADIN'",
@@ -3178,7 +3188,17 @@ return {
         ["dashboard.more_devices"] = "+ {count} more (run: helios scan)",
         ["dashboard.gui"] = "GUI", ["dashboard.keyboard_help"] = "Keyboard: B GUI | V/G/E/C/A/R/S | Q exit",
         ["dashboard.device_counts"] = "REACTORS  {reactors}   TURBINES  {turbines}   STORAGE  {storage}",
+        ["remote.screen_title"] = "HELIOS // REMOTE {title}",
+        ["remote.searching_mainframe"] = "SEARCHING FOR MAINFRAME",
+        ["remote.combined_storage"] = "COMBINED STORAGE",
+        ["remote.monitoring_read_only"] = "REMOTE MONITORING - READ ONLY",
+        ["remote.no_reactors"] = "NO REACTORS REPORTED", ["remote.no_turbines"] = "NO TURBINES REPORTED",
+        ["remote.no_storage"] = "NO STORAGE REPORTED",
         ["value.active"] = "ACTIVE", ["value.offline"] = "OFFLINE",
+        ["value.warning"] = "WARNING", ["value.calibrating"] = "CALIBRATING",
+        ["value.starting"] = "STARTING", ["value.searching"] = "SEARCHING",
+        ["value.no_modem"] = "NO MODEM", ["value.id_conflict_telemetry_untrusted"] = "ID CONFLICT - TELEMETRY UNTRUSTED",
+        ["value.link_lost_data_stale"] = "LINK LOST - DATA STALE",
         ["value.ready"] = "READY", ["value.running"] = "RUNNING",
         ["value.stable"] = "STABLE", ["value.hold"] = "HOLD",
         ["value.charging"] = "CHARGING", ["value.draining"] = "DRAINING",
@@ -3311,7 +3331,17 @@ return {
         ["dashboard.more_devices"] = "+ {count} autres (commande : helios scan)",
         ["dashboard.gui"] = "INTERFACE", ["dashboard.keyboard_help"] = "Clavier : B interface | V/G/E/C/A/R/S | Q quitter",
         ["dashboard.device_counts"] = "REACTEURS  {reactors}   TURBINES  {turbines}   STOCKAGE  {storage}",
+        ["remote.screen_title"] = "HELIOS // DISTANT {title}",
+        ["remote.searching_mainframe"] = "RECHERCHE DE L'ORDINATEUR CENTRAL",
+        ["remote.combined_storage"] = "STOCKAGE COMBINE",
+        ["remote.monitoring_read_only"] = "SURVEILLANCE DISTANTE - LECTURE SEULE",
+        ["remote.no_reactors"] = "AUCUN REACTEUR SIGNALE", ["remote.no_turbines"] = "AUCUNE TURBINE SIGNALEE",
+        ["remote.no_storage"] = "AUCUN STOCKAGE SIGNALE",
         ["value.active"] = "ACTIF", ["value.offline"] = "HORS LIGNE",
+        ["value.warning"] = "AVERTISSEMENT", ["value.calibrating"] = "ETALONNAGE",
+        ["value.starting"] = "DEMARRAGE", ["value.searching"] = "RECHERCHE",
+        ["value.no_modem"] = "AUCUN MODEM", ["value.id_conflict_telemetry_untrusted"] = "CONFLIT D'ID - TELEMETRIE NON FIABLE",
+        ["value.link_lost_data_stale"] = "LIAISON PERDUE - DONNEES PERIMEES",
         ["value.ready"] = "PRET", ["value.running"] = "EN MARCHE",
         ["value.stable"] = "STABLE", ["value.hold"] = "MAINTIEN",
         ["value.charging"] = "EN CHARGE", ["value.draining"] = "EN DECHARGE",
@@ -9055,7 +9085,7 @@ function terminal.run(config)
     -- @section READ-ONLY GRAPHICAL VIEWS
     local function graphicalStatus()
         local link = statusLine()
-        if link ~= "ONLINE" then return link, link, colors.red end
+        if link ~= "ONLINE" then return tv(link), tv(link), colors.red end
         if snapshot and snapshot.alarm then
             local level = tonumber(snapshot.alarm.level) or 1
             return level >= 3 and "FAULT" or "WARNING",
@@ -9084,10 +9114,12 @@ function terminal.run(config)
     local function graphicalHeader(title)
         gui.prepare()
         local width, height = term.getSize()
-        gui.text(1, 1, "HELIOS // REMOTE " .. title, colors.yellow)
         local version = "v" .. tostring(config.version)
+        gui.text(1, 1, language.fit("remote.screen_title", math.max(1, width - #version - 1),
+            { title = title }, "HELIOS // REMOTE {title}"), colors.yellow)
         gui.text(math.max(1, width - #version + 1), 1, version, colors.yellow)
         local state, detail, colour = graphicalStatus()
+        state, detail = tv(state), tv(detail)
         gui.text(1, 2, " " .. state .. " ", colors.black, colour)
         gui.text(#state + 4, 2, detail, colour, colors.black,
             math.max(0, width - #state - 3))
@@ -9108,14 +9140,15 @@ function terminal.run(config)
     end
 
     local function graphicalOverview()
-        graphicalHeader("OVERVIEW")
+        graphicalHeader(tr("nav.overview"))
         local width = select(1, term.getSize())
         if not snapshot then
-            gui.text(1, 7, "SEARCHING FOR MAINFRAME", colors.orange)
+            gui.text(1, 7, tr("remote.searching_mainframe"), colors.orange)
             return
         end
         local state, detail, colour = graphicalStatus()
-        gui.text(1, 6, "SYSTEM READINESS", colors.lightGray)
+        state, detail = tv(state), tv(detail)
+        gui.text(1, 6, tr("dashboard.system_readiness"), colors.lightGray)
         gui.text(1, 7, state, colour)
         gui.text(1, 8, detail, colors.white, colors.black, width)
         gui.text(1, 10, tr("dashboard.device_counts", {
@@ -9128,18 +9161,18 @@ function terminal.run(config)
             capacity = capacity + (tonumber(storage.capacity) or 0)
         end
         local percent = capacity > 0 and stored / capacity * 100 or 0
-        gui.text(1, 12, "COMBINED STORAGE", colors.lightGray)
+        gui.text(1, 12, tr("remote.combined_storage"), colors.lightGray)
         gui.progress(1, 13, math.max(10, width - 8), percent,
             percent < 20 and colors.orange or colors.lime, colors.gray)
         gui.text(math.max(1, width - 6), 13, ("%5.1f%%"):format(percent), colors.white)
-        gui.text(1, 15, "REMOTE MONITORING - READ ONLY", colors.gray)
+        gui.text(1, 15, tr("remote.monitoring_read_only"), colors.gray)
     end
 
     local function graphicalReactors()
-        graphicalHeader("REACTORS")
+        graphicalHeader(tr("nav.reactors"))
         local list = snapshot and snapshot.reactors or {}
         local width = select(1, term.getSize())
-        if #list == 0 then gui.text(1, 7, "NO REACTORS REPORTED", colors.orange) return end
+        if #list == 0 then gui.text(1, 7, tr("remote.no_reactors"), colors.orange) return end
         selected = math.max(1, math.min(selected, #list))
         local reactor = list[selected]
         local output = reactor.mode == "steam" and reactor.steamProduction or reactor.energyProduction
@@ -9160,16 +9193,16 @@ function terminal.run(config)
         local barWidth = math.max(10, width - 10)
         gui.text(1, 6, ("%d/%d  %s"):format(selected, #list,
             nameOf(reactor.name, snapshot)), colors.cyan, colors.black, width)
-        gui.text(1, 7, ("TYPE %-8s  %s"):format(string.upper(reactor.mode or "unknown"),
-            reactor.active == true and "ACTIVE" or "OFFLINE"),
+        gui.text(1, 7, ("%s %-8s  %s"):format(tr("common.type"), tv(reactor.mode or "unknown"),
+            tv(reactor.active == true and "ACTIVE" or "OFFLINE")),
             reactor.active == true and colors.lime or colors.orange)
         local unit = reactor.mode == "steam" and "mB/t" or "FE/t"
         gui.text(1, 8,
-            maximum and ("OUTPUT %.0f / %.0f %s"):format(output or 0, maximum, unit) or
-                ("OUTPUT %.0f / LEARNING"):format(output or 0),
+            maximum and ("%s %.0f / %.0f %s"):format(tr("common.output"), output or 0, maximum, unit) or
+                ("%s %.0f / %s"):format(tr("common.output"), output or 0, tv("LEARNING")),
             colors.lightGray, colors.black, width)
         if target then
-            gui.text(1, 9, ("DEMAND %.0f %s"):format(target, unit), colors.yellow)
+            gui.text(1, 9, ("%s %.0f %s"):format(tr("common.demand"), target, unit), colors.yellow)
         end
         gui.progress(1, 10, barWidth, outputPercent,
             reactor.active == true and colors.lime or colors.orange, colors.gray)
@@ -9181,33 +9214,33 @@ function terminal.run(config)
             gui.text(math.max(1, width - 8), 10,
                 output and ("%.0f"):format(output) or "N/A")
         end
-        gui.text(1, 12, "FUEL", colors.lightGray)
+        gui.text(1, 12, tr("common.fuel"), colors.lightGray)
         gui.progress(1, 13, math.max(10, width - 10), reactor.fuelPercent or 0,
             (reactor.fuelPercent or 0) < 20 and colors.orange or colors.lime, colors.gray)
         gui.text(math.max(1, width - 8), 13,
             reactor.fuelPercent and ("%6.1f%%"):format(reactor.fuelPercent) or "N/A")
         local buffer = reactor.mode == "steam" and reactor.hotFluidPercent or reactor.energyPercent
-        gui.text(1, 15, ("CYANITE %s mB"):format(
+        gui.text(1, 15, ("%s %s mB"):format(tr("dashboard.cyanite"),
             reactor.waste and ("%.0f"):format(reactor.waste) or "N/A"), colors.cyan)
-        gui.text(math.max(24, width - 16), 15, ("BUFFER %s"):format(
+        gui.text(math.max(24, width - 16), 15, ("%s %s"):format(tr("common.buffer"),
             buffer and ("%.1f%%"):format(buffer) or "N/A"), colors.cyan)
         graphicalButtons.previous = gui.button(1, 17, "<", colors.cyan, colors.black)
         graphicalButtons.next = gui.button(15, 17, ">", colors.cyan, colors.black)
     end
 
     local function graphicalTurbines()
-        graphicalHeader("TURBINES")
+        graphicalHeader(tr("nav.turbines"))
         local list = snapshot and snapshot.turbines or {}
         local width = select(1, term.getSize())
-        if #list == 0 then gui.text(1, 7, "NO TURBINES REPORTED", colors.orange) return end
+        if #list == 0 then gui.text(1, 7, tr("remote.no_turbines"), colors.orange) return end
         selected = math.max(1, math.min(selected, #list))
         local turbine = list[selected]
         local rpm = tonumber(turbine.rotorSpeed) or 0
         gui.text(1, 6, ("%d/%d  %s"):format(selected, #list,
             nameOf(turbine.name, snapshot)), colors.cyan, colors.black, width)
-        gui.text(1, 7, turbine.active == true and "ACTIVE" or "OFFLINE",
+        gui.text(1, 7, tv(turbine.active == true and "ACTIVE" or "OFFLINE"),
             turbine.active == true and colors.lime or colors.orange)
-        gui.text(1, 9, ("ROTOR %.1f RPM"):format(rpm), rpm >= 1900 and colors.red or colors.white)
+        gui.text(1, 9, ("%s %.1f RPM"):format(tr("common.rotor_speed"), rpm), rpm >= 1900 and colors.red or colors.white)
         local gaugeWidth = math.max(20, width - 1)
         gui.rpmGauge(1, 10, gaugeWidth, rpm)
         local lowLabel, highLabel = "[900 RPM]", "[1800 RPM]"
@@ -9215,31 +9248,31 @@ function terminal.run(config)
             11, lowLabel, colors.lime)
         gui.text(math.min(width - #highLabel + 1,
             math.floor(1800 / 2100 * (gaugeWidth - 1)) - 3), 11, highLabel, colors.lime)
-        gui.text(1, 13, "STATE " .. tostring(turbine.governor and turbine.governor.state or "WAITING"))
-        gui.text(1, 14, "OUTPUT " .. powerFormat.power(turbine.energyProduction,
+        gui.text(1, 13, tr("common.state") .. " " .. tv(turbine.governor and turbine.governor.state or "WAITING"))
+        gui.text(1, 14, tr("common.output") .. " " .. powerFormat.power(turbine.energyProduction,
             snapshot.power, true), colors.cyan)
         graphicalButtons.previous = gui.button(1, 16, "<", colors.cyan, colors.black)
         graphicalButtons.next = gui.button(15, 16, ">", colors.cyan, colors.black)
     end
 
     local function graphicalStorage()
-        graphicalHeader("POWER")
+        graphicalHeader(tr("dashboard.power_storage"))
         local list = snapshot and snapshot.storages or {}
         local width = select(1, term.getSize())
-        if #list == 0 then gui.text(1, 7, "NO STORAGE REPORTED", colors.orange) return end
+        if #list == 0 then gui.text(1, 7, tr("remote.no_storage"), colors.orange) return end
         selected = math.max(1, math.min(selected, #list))
         local storage = list[selected]
         gui.text(1, 6, ("%d/%d  %s"):format(selected, #list,
             nameOf(storage.name, snapshot)), colors.cyan, colors.black, width)
-        gui.text(1, 8, "CAPACITY", colors.lightGray)
+        gui.text(1, 8, tr("common.capacity"), colors.lightGray)
         gui.progress(1, 9, math.max(10, width - 10), storage.percent or 0,
             (storage.percent or 0) < 20 and colors.orange or colors.lime, colors.gray)
         gui.text(math.max(1, width - 8), 9,
             storage.percent and ("%6.1f%%"):format(storage.percent) or "N/A")
-        gui.text(1, 11, "STORED  " .. powerFormat.power(storage.stored, snapshot.power, false))
-        gui.text(1, 12, "FILL    " .. powerFormat.power(storage.input, snapshot.power, true), colors.lime)
-        gui.text(1, 13, "DRAW    " .. powerFormat.power(storage.output, snapshot.power, true), colors.orange)
-        gui.text(1, 14, "STATE   " .. tostring(storage.state or "UNKNOWN"), colors.cyan)
+        gui.text(1, 11, tr("common.stored") .. "  " .. powerFormat.power(storage.stored, snapshot.power, false))
+        gui.text(1, 12, tr("common.input") .. "    " .. powerFormat.power(storage.input, snapshot.power, true), colors.lime)
+        gui.text(1, 13, tr("common.output") .. "    " .. powerFormat.power(storage.output, snapshot.power, true), colors.orange)
+        gui.text(1, 14, tr("common.state") .. "   " .. tv(storage.state or "UNKNOWN"), colors.cyan)
         graphicalButtons.previous = gui.button(1, 16, "<", colors.cyan, colors.black)
         graphicalButtons.next = gui.button(15, 16, ">", colors.cyan, colors.black)
     end

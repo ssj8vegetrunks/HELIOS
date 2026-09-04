@@ -4,7 +4,7 @@
 
 Authoritative file: `install.lua`
 
-Total physical lines: **10794**
+Total physical lines: **10827**
 
 This map uses the actual line numbers in the bundled `install.lua`.
 
@@ -29,17 +29,17 @@ This map uses the actual line numbers in the bundled `install.lua`.
 - Lines 2535-2547: **gui/control-room/manifest.lua** (module contents 2536-2546)
 - Lines 2549-2785: **gui/control-room/renderer.lua** (module contents 2550-2784)
 - Lines 2787-2986: **helios.lua** (module contents 2788-2985)
-- Lines 2988-3119: **lang/en_pi.lua** (module contents 2989-3118)
-- Lines 3121-3252: **lang/en_us.lua** (module contents 3122-3251)
-- Lines 3254-3385: **lang/fr_ca.lua** (module contents 3255-3384)
-- Lines 3387-3501: **mainframe/device_registry.lua** (module contents 3388-3500)
-- Lines 3503-6421: **mainframe/main.lua** (module contents 3504-6420)
-- Lines 6423-6480: **mainframe/manual_control.lua** (module contents 6424-6479)
-- Lines 6482-7841: **mainframe/reactor_governor.lua** (module contents 6483-7840)
-- Lines 7843-8788: **mainframe/turbine_governor.lua** (module contents 7844-8787)
-- Lines 8790-9390: **terminal/main.lua** (module contents 8791-9389)
-- Lines 9392-9542: **tools/discovery_probe.lua** (module contents 9393-9541)
-- Lines 9544-10389: **draconic/controller.lua** (module contents 9545-10388)
+- Lines 2988-3129: **lang/en_pi.lua** (module contents 2989-3128)
+- Lines 3131-3272: **lang/en_us.lua** (module contents 3132-3271)
+- Lines 3274-3415: **lang/fr_ca.lua** (module contents 3275-3414)
+- Lines 3417-3531: **mainframe/device_registry.lua** (module contents 3418-3530)
+- Lines 3533-6451: **mainframe/main.lua** (module contents 3534-6450)
+- Lines 6453-6510: **mainframe/manual_control.lua** (module contents 6454-6509)
+- Lines 6512-7871: **mainframe/reactor_governor.lua** (module contents 6513-7870)
+- Lines 7873-8818: **mainframe/turbine_governor.lua** (module contents 7874-8817)
+- Lines 8820-9423: **terminal/main.lua** (module contents 8821-9422)
+- Lines 9425-9575: **tools/discovery_probe.lua** (module contents 9426-9574)
+- Lines 9577-10422: **draconic/controller.lua** (module contents 9578-10421)
 
 ## Installer code outside bundled modules
 
@@ -63,17 +63,17 @@ This map uses the actual line numbers in the bundled `install.lua`.
 - Lines 2548-2548: **Bundle table separator / installer code**
 - Lines 2786-2786: **Bundle table separator / installer code**
 - Lines 2987-2987: **Bundle table separator / installer code**
-- Lines 3120-3120: **Bundle table separator / installer code**
-- Lines 3253-3253: **Bundle table separator / installer code**
-- Lines 3386-3386: **Bundle table separator / installer code**
-- Lines 3502-3502: **Bundle table separator / installer code**
-- Lines 6422-6422: **Bundle table separator / installer code**
-- Lines 6481-6481: **Bundle table separator / installer code**
-- Lines 7842-7842: **Bundle table separator / installer code**
-- Lines 8789-8789: **Bundle table separator / installer code**
-- Lines 9391-9391: **Bundle table separator / installer code**
-- Lines 9543-9543: **Bundle table separator / installer code**
-- Lines 10390-10794: **Installer/configuration/execution code**
+- Lines 3130-3130: **Bundle table separator / installer code**
+- Lines 3273-3273: **Bundle table separator / installer code**
+- Lines 3416-3416: **Bundle table separator / installer code**
+- Lines 3532-3532: **Bundle table separator / installer code**
+- Lines 6452-6452: **Bundle table separator / installer code**
+- Lines 6511-6511: **Bundle table separator / installer code**
+- Lines 7872-7872: **Bundle table separator / installer code**
+- Lines 8819-8819: **Bundle table separator / installer code**
+- Lines 9424-9424: **Bundle table separator / installer code**
+- Lines 9576-9576: **Bundle table separator / installer code**
+- Lines 10423-10827: **Installer/configuration/execution code**
 
 ## External Module Pack files
 
