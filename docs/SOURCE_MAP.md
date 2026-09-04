@@ -4,7 +4,7 @@
 
 Authoritative file: `install.lua`
 
-Total physical lines: **11250**
+Total physical lines: **11254**
 
 This map uses the actual line numbers in the bundled `install.lua`.
 
@@ -40,7 +40,7 @@ This map uses the actual line numbers in the bundled `install.lua`.
 - Lines 8181-9126: **mainframe/turbine_governor.lua** (module contents 8182-9125)
 - Lines 9128-9736: **terminal/main.lua** (module contents 9129-9735)
 - Lines 9738-9888: **tools/discovery_probe.lua** (module contents 9739-9887)
-- Lines 9890-10845: **draconic/controller.lua** (module contents 9891-10844)
+- Lines 9890-10849: **draconic/controller.lua** (module contents 9891-10848)
 
 ## Installer code outside bundled modules
 
@@ -75,7 +75,7 @@ This map uses the actual line numbers in the bundled `install.lua`.
 - Lines 9127-9127: **Bundle table separator / installer code**
 - Lines 9737-9737: **Bundle table separator / installer code**
 - Lines 9889-9889: **Bundle table separator / installer code**
-- Lines 10846-11250: **Installer/configuration/execution code**
+- Lines 10850-11254: **Installer/configuration/execution code**
 
 ## External Module Pack files
 

@@ -9921,7 +9921,7 @@ local FIELD_TUNE_SAMPLES, FIELD_TUNE_RATIO = 150, .02
 local FIELD_RECOVERY_RATIO, MINIMUM_FIELD_INPUT = .05, 50000
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.2"
+local GUARDIAN_VERSION = "1.2.0-alpha.3"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -10334,6 +10334,10 @@ local function supervise(b,d,c)
   if c.initialRequested then
     if live then c.initialRequested=false;c.startActivated=false;c.message="Initial start complete; reactor is live" end
   end
+  -- Explicit unrestricted Manual control owns both gates exactly. Applying it
+  -- also dismisses calibration recovery so the recovery loop cannot keep
+  -- replacing the operator's export request with zero.
+  if c.recovery and free and c.request=="MANUAL" then c.recovery=false end
   if c.recovery then
     -- A calibration that reaches its edge pauses with export closed until the
     -- field has rebuilt. This prevents an old manual request from resuming.
@@ -10603,7 +10607,7 @@ local function act(choice,d)
   elseif choice=="EXPORT +100k" then controls.manualExport=(tonumber(controls.manualExport) or positive(d.outputSet) or 0)+MANUAL_GATE_STEP
   elseif choice=="EXPORT -1M" then controls.manualExport=math.max(0,(tonumber(controls.manualExport) or positive(d.outputSet) or 0)-MANUAL_GATE_LARGE_STEP)
   elseif choice=="EXPORT +1M" then controls.manualExport=(tonumber(controls.manualExport) or positive(d.outputSet) or 0)+MANUAL_GATE_LARGE_STEP
-  elseif choice=="APPLY MANUAL" then controls.request="MANUAL";controls.overdriveApplied=0;controls.startActivated=false;controls.message="Manual gate pair requested"
+  elseif choice=="APPLY MANUAL" then controls.request="MANUAL";controls.recovery=false;controls.overdriveApplied=0;controls.startActivated=false;controls.message="Manual gate pair applied; calibration recovery dismissed"
   elseif choice=="SAVE AS OVERDRIVE PRESET" then
     local field=positive(controls.manualField) or positive(d.inputSet) or controls.injectorBaseline
     local export=positive(controls.manualExport) or positive(d.outputSet)
