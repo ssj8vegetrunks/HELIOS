@@ -272,10 +272,10 @@ end
 local function compactMonitor(t,isMonitor) if isMonitor and t and type(t.setTextScale)=="function" then pcall(t.setTextScale,.5) end end
 -- Monitor touches report character coordinates. Keep every target on its
 -- rendered row so vertically adjacent controls can never steal a press.
-local function button(t,x,y,label,c,pad)
+local function button(t,x,y,label,c,pad,action)
   local v="["..label.."]";text(t,x,y,v,c or colors.cyan)
   pad=math.max(0,math.floor(tonumber(pad) or 0))
-  return {x1=math.max(1,x-pad),x2=x+#v-1+pad,y1=math.max(1,y-pad),y2=y+pad,x=x,y=y,label=label}
+  return {x1=math.max(1,x-pad),x2=x+#v-1+pad,y1=math.max(1,y-pad),y2=y+pad,x=x,y=y,label=label,action=action}
 end
 local function hit(bs,x,y)
   local picked, distance
@@ -298,7 +298,7 @@ local function hit(bs,x,y)
       end
     end
   end
-  return picked and picked.label
+  return picked and (picked.action or picked.label)
 end
 local function vertical(t,x,y,h,label,now,maximum,c)
   local f=maximum and clamp((tonumber(now) or 0)/maximum) or 0;text(t,x,y,label,colors.lightGray)
@@ -408,14 +408,14 @@ local function supervise(b,d,c)
     gate(b.output,0);gate(b.input,injectorCap)
     if field>=45 and temp<=COMMISSION_TEMP_LIMIT then
       c.recovery=false
-      c.message="Calibration recovery complete; export remains OFF"
-    else c.message="Calibration recovery: output closed while containment rebuilds" end
+      c.message=tr("guardian.recovery_complete",nil,"Calibration recovery complete; export remains OFF")
+    else c.message=tr("guardian.recovery_active",nil,"Calibration recovery: output closed while containment rebuilds") end
     return
   end
   if c.commissioning then
     if not live then
       c.initialRequested=true
-      c.message="Automatic commissioning: waiting for reactor to reach ONLINE"
+      c.message=tr("guardian.commission_wait",nil,"Automatic commissioning: waiting for reactor to reach ONLINE")
       return
     end
     local trial=math.max(COMMISSION_START_FLOW,tonumber(c.commissionFlow) or COMMISSION_START_FLOW)
@@ -426,7 +426,7 @@ local function supervise(b,d,c)
     if field<COMMISSION_FIELD_FLOOR or temp>COMMISSION_TEMP_LIMIT or fuel<=MINIMUM_FUEL then
       gate(b.output,0);gate(b.input,injectorCap);c.commissioning=false;c.initialRequested=false;c.commissionSamples=0;c.commissionShortfallSamples=0;c.commissionSettleSamples=0;c.request="OFF";c.recovery=true
       c.commissioned=tonumber(c.commissionLastSafe) and c.commissionLastSafe>0 or false;c.rated=c.commissionLastSafe
-      c.message="Calibration reached the 17% field edge; output closed. Last verified ceiling "..fmt(c.rated or 0).." RF/t"
+      c.message=tr("guardian.commission_edge",{ceiling=fmt(c.rated or 0)},"Calibration reached the 17% field edge; output closed. Last verified ceiling {ceiling} RF/t")
       return
     end
     -- A Flux Gate's reported flow is not a trustworthy measure of reactor
@@ -440,23 +440,23 @@ local function supervise(b,d,c)
       c.commissionSettleSamples=(tonumber(c.commissionSettleSamples) or 0)+1
       if c.commissionSettleSamples<COMMISSION_SETTLE_SAMPLES then
         c.commissionShortfallSamples=0
-        c.message="Waiting for "..fmt(trial).." RF/t to settle: reactor generation "..fmt(generation).." RF/t ("..c.commissionSettleSamples.."/"..COMMISSION_SETTLE_SAMPLES..")"
+        c.message=tr("guardian.commission_settle",{trial=fmt(trial),generation=fmt(generation),sample=c.commissionSettleSamples,total=COMMISSION_SETTLE_SAMPLES},"Waiting for {trial} RF/t to settle: reactor generation {generation} RF/t ({sample}/{total})")
         return
       end
       c.commissionSamples=0;c.commissionShortfallSamples=(tonumber(c.commissionShortfallSamples) or 0)+1
       if c.commissionShortfallSamples>=COMMISSION_SHORTFALL_SAMPLES then
         gate(b.output,0);c.commissioning=false;c.initialRequested=false;c.request="OFF";c.commissioned=(tonumber(c.commissionLastSafe) or 0)>0;c.rated=c.commissionLastSafe
-        c.message="Calibration complete: output path stopped accepting higher export; verified ceiling "..fmt(c.rated or 0).." RF/t"
-      else c.message="Testing "..fmt(trial).." RF/t: reactor generation "..fmt(generation).." RF/t ("..c.commissionShortfallSamples.."/"..COMMISSION_SHORTFALL_SAMPLES..")" end
+        c.message=tr("guardian.commission_complete",{ceiling=fmt(c.rated or 0)},"Calibration complete: output path stopped accepting higher export; verified ceiling {ceiling} RF/t")
+      else c.message=tr("guardian.commission_testing",{trial=fmt(trial),generation=fmt(generation),sample=c.commissionShortfallSamples,total=COMMISSION_SHORTFALL_SAMPLES},"Testing {trial} RF/t: reactor generation {generation} RF/t ({sample}/{total})") end
       return
     end
     c.commissionSettleSamples=0;c.commissionShortfallSamples=0;c.commissionSamples=stable and (tonumber(c.commissionSamples) or 0)+1 or 0
     if c.commissionSamples>=COMMISSION_SAMPLES then
       c.rated=trial;c.commissionLastSafe=trial;c.commissionSamples=0;c.commissionSettleSamples=0
       c.commissionFlow=math.max(trial+COMMISSION_MIN_STEP,math.floor(trial*COMMISSION_STEP_RATIO))
-      c.message="Calibration proved "..fmt(trial).." RF/t; advancing to "..fmt(c.commissionFlow).." RF/t"
+      c.message=tr("guardian.commission_proved",{trial=fmt(trial),next=fmt(c.commissionFlow)},"Calibration proved {trial} RF/t; advancing to {next} RF/t")
     else
-      c.message="Calibrating "..fmt(trial).." RF/t: stable sample "..c.commissionSamples.."/"..COMMISSION_SAMPLES
+      c.message=tr("guardian.calibrating",{trial=fmt(trial),sample=c.commissionSamples,total=COMMISSION_SAMPLES},"Calibrating {trial} RF/t: stable sample {sample}/{total}")
     end
     return
   end
@@ -575,15 +575,15 @@ local function draw(t,b,d,page,c,bs)
       remaining=string.gsub(string.sub(remaining,split+1),"^%s+","")
     end
   end
-  vertical(t,2,5,12,"CORE",r.temperature,MAX_TEMPERATURE,colors.orange)
-  vertical(t,9,5,12,"FIELD",r.fieldStrength,tonumber(r.maxFieldStrength),colors.red)
-  vertical(t,rightSat,5,12,"SAT",r.energySaturation,tonumber(r.maxEnergySaturation),colors.blue)
-  vertical(t,rightFuel,5,12,"FUEL",r.fuelConversion,tonumber(r.maxFuelConversion),colors.lime)
-  center(5,"REACTOR TELEMETRY",colors.cyan);center(7,"State: "..tostring(r.status),colors.lime);center(8,"Generation: "..fmt(r.generationRate).." RF/t",colors.cyan)
-  center(9,"Core temperature: "..fmt(r.temperature).." C",colors.orange);center(10,"Containment field strength: "..fmt(r.fieldStrength).." / "..fmt(r.maxFieldStrength));center(11,"Energy saturation: "..fmt(r.energySaturation).." / "..fmt(r.maxEnergySaturation));center(12,"Fuel conversion level: "..fmt(r.fuelConversion).." / "..fmt(r.maxFuelConversion))
+  vertical(t,2,5,12,tr("guardian.core",nil,"CORE"),r.temperature,MAX_TEMPERATURE,colors.orange)
+  vertical(t,9,5,12,tr("guardian.field",nil,"FIELD"),r.fieldStrength,tonumber(r.maxFieldStrength),colors.red)
+  vertical(t,rightSat,5,12,tr("guardian.saturation_short",nil,"SAT"),r.energySaturation,tonumber(r.maxEnergySaturation),colors.blue)
+  vertical(t,rightFuel,5,12,tr("common.fuel",nil,"FUEL"),r.fuelConversion,tonumber(r.maxFuelConversion),colors.lime)
+  center(5,tr("guardian.reactor_telemetry",nil,"REACTOR TELEMETRY"),colors.cyan);center(7,tr("common.state",nil,"State")..": "..tr("value."..string.lower(tostring(r.status)),nil,tostring(r.status)),colors.lime);center(8,tr("common.generation",nil,"Generation")..": "..fmt(r.generationRate).." RF/t",colors.cyan)
+  center(9,tr("common.core_temperature",nil,"Core temperature")..": "..fmt(r.temperature).." C",colors.orange);center(10,tr("common.field_strength",nil,"Containment field strength")..": "..fmt(r.fieldStrength).." / "..fmt(r.maxFieldStrength));center(11,tr("common.saturation",nil,"Energy saturation")..": "..fmt(r.energySaturation).." / "..fmt(r.maxEnergySaturation));center(12,tr("common.fuel_conversion",nil,"Fuel conversion")..": "..fmt(r.fuelConversion).." / "..fmt(r.maxFuelConversion))
   local inputControlled=d.inputOverride==true or c.inputControlVerified==true
   local outputControlled=d.outputOverride==true or c.outputControlVerified==true
-  center(14,"GATE CONTROL",colors.cyan);center(15,"Field: "..fmt(d.inputFlow).." / "..fmt(d.inputSet),inputControlled and colors.lime or colors.red);center(16,"Export: "..fmt(d.outputFlow).." / "..fmt(d.outputSet),outputControlled and colors.lime or colors.red);center(17,"modem=field; "..tostring(b.output).."=export",colors.lightGray);centerWrap(18,"GUARDIAN: "..c.message,c.mode=="UNRESTRICTED" and colors.red or colors.lightGray,3)
+  center(14,tr("guardian.gate_control",nil,"GATE CONTROL"),colors.cyan);center(15,tr("guardian.field",nil,"Field")..": "..fmt(d.inputFlow).." / "..fmt(d.inputSet),inputControlled and colors.lime or colors.red);center(16,tr("guardian.export",nil,"Export")..": "..fmt(d.outputFlow).." / "..fmt(d.outputSet),outputControlled and colors.lime or colors.red);center(17,tr("guardian.gate_roles",{output=tostring(b.output)},"modem=field; {output}=export"),colors.lightGray);centerWrap(18,tr("common.guardian",nil,"GUARDIAN")..": "..c.message,c.mode=="UNRESTRICTED" and colors.red or colors.lightGray,3)
   local y=h-7;if not c.gatesOwned then
     text(t,1,y-2,"GATE CONTROL NOT ACQUIRED - REACTOR START DISABLED",colors.red)
     text(t,1,y-1,"Field control: "..tostring(c.inputControlVerified).."  Export control: "..tostring(c.outputControlVerified),colors.orange)
@@ -592,11 +592,11 @@ local function draw(t,b,d,page,c,bs)
   elseif not c.commissioned then
     text(t,1,y-2,"OUTPUT SELECTOR  [OFF] [MIN] [MED] [MAX] [OVERDRIVE]",colors.gray)
     text(t,1,y-1,"LOCKED: calibrate a verified output ceiling against live containment.",colors.orange)
-    bs[#bs+1]=button(t,1,y,"AUTO COMMISSION",colors.orange)
-    text(t,1,y+1,"Starts at 50k RF/t; rises while the field stays at or above 17%.",colors.lightGray)
-    bs[#bs+1]=button(t,1,y+3,"INITIALIZE & ACTIVATE",colors.lime)
-    bs[#bs+1]=button(t,27,y+3,"SAFE SHUTDOWN",colors.red)
-  elseif c.mode=="AUTO" then bs[#bs+1]=button(t,1,y,"ENABLE ASSISTED MANUAL",colors.orange);bs[#bs+1]=button(t,27,y,"RECALIBRATE CEILING",colors.orange);bs[#bs+1]=button(t,1,y+2,"INITIALIZE & ACTIVATE",colors.lime);bs[#bs+1]=button(t,27,y+2,"SAFE SHUTDOWN",colors.red)
+    bs[#bs+1]=button(t,1,y,tr("guardian.auto_commission",nil,"AUTO COMMISSION"),colors.orange,nil,"AUTO COMMISSION")
+    text(t,1,y+1,tr("guardian.commission_hint",nil,"Starts at 50k RF/t; rises while the field stays at or above 17%."),colors.lightGray)
+    bs[#bs+1]=button(t,1,y+3,tr("guardian.initialize",nil,"INITIALIZE & ACTIVATE"),colors.lime,nil,"INITIALIZE & ACTIVATE")
+    bs[#bs+1]=button(t,27,y+3,tr("guardian.safe_shutdown",nil,"SAFE SHUTDOWN"),colors.red,nil,"SAFE SHUTDOWN")
+  elseif c.mode=="AUTO" then bs[#bs+1]=button(t,1,y,tr("guardian.enable_assisted",nil,"ENABLE ASSISTED MANUAL"),colors.orange,nil,"ENABLE ASSISTED MANUAL");bs[#bs+1]=button(t,27,y,tr("guardian.recalibrate",nil,"RECALIBRATE CEILING"),colors.orange,nil,"RECALIBRATE CEILING");bs[#bs+1]=button(t,1,y+2,tr("guardian.initialize",nil,"INITIALIZE & ACTIVATE"),colors.lime,nil,"INITIALIZE & ACTIVATE");bs[#bs+1]=button(t,27,y+2,tr("guardian.safe_shutdown",nil,"SAFE SHUTDOWN"),colors.red,nil,"SAFE SHUTDOWN")
   elseif c.mode=="ASSISTED" then
     local px=1;for _,v in ipairs({"OFF","MIN","MED","MAX"}) do local q=button(t,px,y,v,colors.cyan);bs[#bs+1]=q;px=q.x2+2 end;bs[#bs+1]=button(t,px,y,"ARM UNRESTRICTED",colors.red)
     bs[#bs+1]=button(t,1,y+2,"INITIALIZE & ACTIVATE",colors.lime);bs[#bs+1]=button(t,27,y+2,"SAFE SHUTDOWN",colors.red)
