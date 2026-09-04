@@ -2,7 +2,7 @@
 
 The first graphical interface is a read-only plant overview built on
 `helios.ui` contract version 1. It is the default mainframe display in
-`v1.6.0-alpha.14`. Remote terminals use the same graphical overview and facility
+`v1.6.0-alpha.15`. Remote terminals use the same graphical overview and facility
 pages with their configured reactor/turbine/storage/all snapshot assignment.
 
 ## Navigation

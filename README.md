@@ -45,8 +45,8 @@ Start with the [tester guide](docs/TESTING.md), [site map](docs/SITE_MAP.md),
 [dependency map](docs/DEPENDENCY_MAP.md), [language-pack contract](docs/LANGUAGE_PACKS.md),
 or [module template](module-template/README.md).
 
-Core `1.6.0-alpha.14` bundles English (`en_us`), Canadian French (`fr_ca`), experimental
-Japanese (`ja_jp`), and hidden Pirate English (`en_pi`) language packs. English remains the automatic fallback
+Core `1.6.0-alpha.15` bundles English (`en_us`), Canadian French (`fr_ca`), German
+(`de_de`), and hidden Pirate English (`en_pi`) language packs. English remains the automatic fallback
 for incomplete packs.
 
 > Public Alpha means the interfaces are testable, not yet final. Please include

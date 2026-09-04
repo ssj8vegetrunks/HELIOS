@@ -2,8 +2,8 @@
 
 HELIOS language packs are data-only Lua tables stored in `/helios/lang/`.
 English (`en_us`) is always installed and is the fallback for every missing
-translation. Canadian French (`fr_ca`) and experimental Japanese (`ja_jp`) are visible
-installer choices. Pirate English (`en_pi`) is a hidden installer easter egg selected
+translation. Canadian French (`fr_ca`) and German (`de_de`) are visible installer
+choices. Pirate English (`en_pi`) is a hidden installer easter egg selected
 with `P`; it intentionally uses longer labels to expose cramped
 monitor layouts. A damaged, incomplete, or absent selected pack therefore
 cannot produce blank labels or disable controls.
