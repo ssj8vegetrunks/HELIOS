@@ -9923,10 +9923,11 @@ local FIELD_TUNE_SAMPLES, FIELD_TUNE_RATIO = 150, .02
 local FIELD_RECOVERY_RATIO, MINIMUM_FIELD_INPUT = .05, 50000
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.3"
+local GUARDIAN_VERSION = "1.2.0-alpha.4"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
+local SETTINGS_PENDING,SETTINGS_BACKUP=SETTINGS..".new",SETTINGS..".bak"
 local language
 if fs.exists("/helios/core/i18n.lua") and fs.exists("/helios/config.lua") then
   local ok,service=pcall(function() return dofile("/helios/core/i18n.lua").new(dofile("/helios/config.lua")) end)
@@ -10201,12 +10202,27 @@ local function vertical(t,x,y,h,label,now,maximum,c)
 end
 local function load()
   local d={mode="AUTO",request="OFF",rated=nil,commissioned=false,commissioning=false,commissionFlow=nil,commissionSamples=0,commissionShortfallSamples=0,commissionSettleSamples=0,commissionLastSafe=nil,recovery=false,arm=0,initialRequested=false,startActivated=false,liveGatesSelected=false,message="Automatic safe supervision"}
-  if not fs.exists(SETTINGS) then return d end;local ok,s=pcall(dofile,SETTINGS);if not ok or type(s)~="table" then return d end
-  d.mode=(s.mode=="ASSISTED" or s.mode=="UNRESTRICTED") and s.mode or "AUTO";d.request=(FRACTION[s.request] or s.request=="MANUAL" or s.request=="OVERDRIVE") and s.request or "OFF";d.rated=tonumber(s.rated);d.lifecycleCeilings=type(s.lifecycleCeilings)=="table" and s.lifecycleCeilings or {};d.currentCycleCeilings={};d.injectorBaseline=positive(s.injectorBaseline);d.manualField=positive(s.manualField);d.manualExport=positive(s.manualExport) or 0;d.overdriveField=positive(s.overdriveField);d.overdriveExport=positive(s.overdriveExport);d.commissioned=s.commissioned==true;d.message=tostring(s.message or d.message);return d
+  local s
+  -- A world save or chunk unload can interrupt a direct file replacement. Use
+  -- the first intact checkpoint, including the pending/backup copies left by
+  -- an interrupted atomic save, instead of silently returning factory state.
+  for _,path in ipairs({SETTINGS,SETTINGS_PENDING,SETTINGS_BACKUP}) do
+    if fs.exists(path) then local ok,value=pcall(dofile,path);if ok and type(value)=="table" then s=value;break end end
+  end
+  if not s then return d end
+  d.mode=(s.mode=="ASSISTED" or s.mode=="UNRESTRICTED") and s.mode or "AUTO";d.request=(FRACTION[s.request] or s.request=="MANUAL" or s.request=="OVERDRIVE") and s.request or "OFF";d.rated=tonumber(s.rated);d.lifecycleCeilings=type(s.lifecycleCeilings)=="table" and s.lifecycleCeilings or {};d.currentCycleCeilings=type(s.currentCycleCeilings)=="table" and s.currentCycleCeilings or {};d.injectorBaseline=positive(s.injectorBaseline);d.manualField=positive(s.manualField);d.manualExport=positive(s.manualExport) or 0;d.overdriveField=positive(s.overdriveField);d.overdriveExport=positive(s.overdriveExport);d.commissioned=s.commissioned==true;d.commissioning=s.commissioning==true;d.commissionFlow=positive(s.commissionFlow);d.commissionSamples=math.max(0,math.floor(tonumber(s.commissionSamples) or 0));d.commissionShortfallSamples=math.max(0,math.floor(tonumber(s.commissionShortfallSamples) or 0));d.commissionSettleSamples=math.max(0,math.floor(tonumber(s.commissionSettleSamples) or 0));d.commissionLastSafe=positive(s.commissionLastSafe);d.recovery=s.recovery==true;d.lifecycleApplied=positive(s.lifecycleApplied);d.lifecycleFieldApplied=positive(s.lifecycleFieldApplied);d.lifecycleSamples=math.max(0,math.floor(tonumber(s.lifecycleSamples) or 0));d.lifecycleBandKey=s.lifecycleBandKey and tostring(s.lifecycleBandKey) or nil;d.lifecycleStartField=tonumber(s.lifecycleStartField);d.fieldTuneSamples=math.max(0,math.floor(tonumber(s.fieldTuneSamples) or 0));d.lastFuelConversion=tonumber(s.lastFuelConversion);d.overdriveApplied=tonumber(s.overdriveApplied);d.message=tostring(s.message or d.message);return d
 end
 local function save(c)
   local parent=fs.getDir(SETTINGS);if parent~="" and not fs.exists(parent) then fs.makeDir(parent) end
-  local h=fs.open(SETTINGS,"w");if h then h.write("return "..textutils.serialize(c));h.close() end
+  local h=fs.open(SETTINGS_PENDING,"w");if not h then return false end
+  h.write("return "..textutils.serialize(c));h.close()
+  -- Keep the previous valid checkpoint until the replacement has been fully
+  -- written. load() can recover either side of an interrupted rotation.
+  if fs.exists(SETTINGS_BACKUP) then fs.delete(SETTINGS_BACKUP) end
+  if fs.exists(SETTINGS) then fs.move(SETTINGS,SETTINGS_BACKUP) end
+  fs.move(SETTINGS_PENDING,SETTINGS)
+  if fs.exists(SETTINGS_BACKUP) then fs.delete(SETTINGS_BACKUP) end
+  return true
 end
 
 local function lifecycleBand(r)
