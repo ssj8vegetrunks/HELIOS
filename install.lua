@@ -3025,12 +3025,12 @@ if args[1] == "language" then
     return
 end
 
-if config.role == "guardian" then
+if args[1] == nil and config.role == "guardian" then
     dofile("/helios/draconic/controller.lua")
     return
 end
 
-if config.role == "profiler" then
+if args[1] == nil and config.role == "profiler" then
     dofile("/helios/draconic/profiler.lua")
     return
 end
@@ -3128,6 +3128,25 @@ if args[1] == "facilities" then
     end
     local path = "/helios/data/facilities.lua"
     local facilities = fs.exists(path) and dofile(path) or {}
+    if args[2] == "prune" then
+        local now = os.epoch("utc") / 1000
+        local removed = 0
+        for nodeId, facility in pairs(facilities) do
+            if now - (tonumber(facility.lastSeen) or 0) > 30 then
+                facilities[nodeId] = nil
+                removed = removed + 1
+            end
+        end
+        if not fs.exists("/helios/data") then fs.makeDir("/helios/data") end
+        local handle, reason = fs.open(path, "w")
+        if not handle then error("Could not update facility registry: " .. tostring(reason), 0) end
+        handle.write("return " .. textutils.serialize(facilities))
+        handle.close()
+        print("Removed " .. removed .. " stale facility registration" .. (removed == 1 and "." or "s."))
+        return
+    elseif args[2] ~= nil then
+        error("Usage: helios facilities [prune]", 0)
+    end
     local count = 0
     for nodeId, facility in pairs(facilities) do
         count = count + 1
