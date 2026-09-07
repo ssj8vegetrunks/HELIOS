@@ -69,8 +69,3 @@ HELIOS/
 The Guardian safety loop remains locally authoritative and operates without a
 network link. A persistent Guardian installation reuses HELIOS Core only for
 startup, storage, and the read-only facility-network transport.
-
-The Profiler records one-second warm-reactor telemetry and builds persistent
-250 kRF/t output-bracket histories under
-`/helios/data/draconic-profiler/`. It is paired to one Guardian computer ID and
-has no reactor or flow-gate access.

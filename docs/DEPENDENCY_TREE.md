@@ -6,6 +6,10 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 
 ## Module dependencies
 
+### `core/boot.lua`
+
+- No HELIOS module dependencies detected.
+
 ### `core/config.lua`
 
 - No HELIOS module dependencies detected.
@@ -120,6 +124,7 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 
 ### `mainframe/main.lua`
 
+- depends on → `core/boot.lua`
 - depends on → `core/config.lua`
 - depends on → `core/display.lua`
 - depends on → `core/facility_protocol.lua`
@@ -154,6 +159,7 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 
 ### `terminal/main.lua`
 
+- depends on → `core/boot.lua`
 - depends on → `core/config.lua`
 - depends on → `core/display.lua`
 - depends on → `core/gui.lua`
@@ -169,6 +175,8 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 
 ### `draconic/controller.lua`
 
+- depends on → `core/boot.lua`
+- depends on → `core/config.lua`
 - depends on → `core/i18n.lua`
 
 ### `modules/extreme_reactors/reactor_adapter.lua`
@@ -185,8 +193,15 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 
 ## Reverse dependencies / blast radius
 
+### `core/boot.lua`
+
+- used by ← `draconic/controller.lua`
+- used by ← `mainframe/main.lua`
+- used by ← `terminal/main.lua`
+
 ### `core/config.lua`
 
+- used by ← `draconic/controller.lua`
 - used by ← `helios.lua`
 - used by ← `mainframe/main.lua`
 - used by ← `terminal/main.lua`

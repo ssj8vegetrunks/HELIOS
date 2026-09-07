@@ -32,7 +32,7 @@ local FIELD_TUNE_SAMPLES, FIELD_TUNE_RATIO = 150, .02
 local FIELD_RECOVERY_RATIO, MINIMUM_FIELD_INPUT = .05, 50000
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.5"
+local GUARDIAN_VERSION = "1.2.0-alpha.6"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -190,6 +190,10 @@ local function ensureStarted(b,c,status,reason,fieldTarget,telemetry)
     value,maximum=tonumber(value),tonumber(maximum)
     return value and maximum and maximum>0 and value/maximum*100 or nil
   end
+  -- Remember that a complete charge -> activate sequence is in progress.
+  -- Without this latch, a demand issued while STOPPING reaches CHARGING on the
+  -- next tick and can remain there forever without sending activation.
+  c.initialRequested=true
   gate(b.output,0)
   gate(b.input,fieldSupply)
   if status=="offline" or status=="stopping" or status=="cooling" then
@@ -706,6 +710,10 @@ end
 local binding,page,controls,buttons=inspect(),"overview",load(),{}
 controls.inputControlVerified=false;controls.outputControlVerified=false;controls.gatesOwned=false;controls.telemetryStale=false
 local computer=term.current();local target=binding.monitor and peripheral.wrap(binding.monitor) or computer;compactMonitor(target,binding.monitor~=nil)
+if fs.exists("/helios/core/boot.lua") and fs.exists("/helios/core/config.lua") then
+  local ok,guardianConfig=pcall(function() return dofile("/helios/core/config.lua").load() end)
+  if ok then dofile("/helios/core/boot.lua").run(guardianConfig,target) end
+end
 local function beginCalibration()
   controls.commissioning=true;controls.commissionFlow=COMMISSION_START_FLOW;controls.commissionSamples=0;controls.commissionShortfallSamples=0;controls.commissionSettleSamples=0;controls.commissionLastSafe=nil;controls.recovery=false;controls.commissioned=false;controls.rated=nil;controls.lifecycleCeilings={};controls.currentCycleCeilings={};controls.lifecycleApplied=nil;controls.lifecycleFieldApplied=nil;controls.lifecycleSamples=0;controls.lifecycleBandKey=nil;controls.lastFuelConversion=nil;controls.request="OFF"
   controls.initialRequested=true;controls.startActivated=false;controls.message="Automatic calibration requested by operator"
@@ -720,7 +728,18 @@ local function act(choice,d)
   elseif choice=="ENABLE ASSISTED MANUAL" then controls.mode="ASSISTED";controls.request="OFF";controls.message="Assisted manual enabled at OFF"
   elseif choice=="ARM UNRESTRICTED" then controls.arm=1;controls.message="Unrestricted arming started"
   elseif choice=="CANCEL" then controls.arm=0;controls.message="Unrestricted arming cancelled"
-  elseif controls.arm and controls.arm>0 and choice then controls.arm=controls.arm+1;if controls.arm>4 then controls.arm=0;controls.mode="UNRESTRICTED";controls.request="OFF";controls.message="UNRESTRICTED CONTROL ARMED: operator commands are not overridden" end
+  elseif controls.arm and controls.arm>0 and choice then controls.arm=controls.arm+1;if controls.arm>4 then
+    controls.arm=0;controls.mode="UNRESTRICTED"
+    local status=string.lower(tostring(d and d.reactor and d.reactor.status or "unknown"))
+    local live=status=="online" or status=="running"
+    -- Arming manual control must be a bumpless transfer. Adopt both live gate
+    -- limits and keep a running core running; an already inactive core remains
+    -- OFF until the operator explicitly applies a demand.
+    controls.manualField=positive(d and d.inputSet) or positive(d and d.inputFlow) or controls.injectorBaseline
+    controls.manualExport=positive(d and d.outputSet) or positive(d and d.outputFlow) or 0
+    controls.liveGatesSelected=true;controls.request=live and "MANUAL" or "OFF"
+    controls.message=live and "UNRESTRICTED CONTROL ARMED: live gates adopted without shutdown" or "UNRESTRICTED CONTROL ARMED: reactor remains OFF"
+  end
   elseif choice=="RESTORE AUTOMATIC" then controls.mode="AUTO";controls.request="OFF";controls.arm=0;controls.message="Automatic safety restored"
   elseif choice=="USE LIVE GATES" then controls.manualField=positive(d.inputSet) or positive(d.inputFlow) or controls.injectorBaseline;controls.manualExport=positive(d.outputSet) or positive(d.outputFlow) or 0;controls.liveGatesSelected=true;controls.message="Copied live gate limits into manual controls"
   elseif choice=="FIELD -1k" then controls.manualField=math.max(0,(tonumber(controls.manualField) or positive(d.inputSet) or controls.injectorBaseline or 0)-MANUAL_GATE_FINE_STEP)

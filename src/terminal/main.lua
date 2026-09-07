@@ -4,6 +4,9 @@ local terminal = {}
 function terminal.run(config)
     local display = dofile("/helios/core/display.lua")
     display.start(config)
+    if fs.exists("/helios/core/boot.lua") then
+        dofile("/helios/core/boot.lua").run(config)
+    end
     local ui = dofile("/helios/core/ui.lua")
     ui.setVersion(config.version)
     local language = dofile("/helios/core/i18n.lua").new(config)

@@ -5,9 +5,9 @@ validated HELIOS Alpha build, the standalone read-only Probe, the validated
 standalone Draconic Guardian, and a deliberately safe module starter for Lua
 developers.
 
-The Draconic Guardian control logic is frozen at the live-tested baseline. It
-is currently a standalone controller and does not yet communicate with the
-HELIOS mainframe.
+The Draconic Guardian is a dedicated, locally authoritative controller with
+adaptive lifecycle calibration, persistent operating data, guarded manual
+control, and read-only facility telemetry for a HELIOS Mainframe.
 
 ## Quick start
 
@@ -35,17 +35,12 @@ settings and automatic startup, run the HELIOS installer and select
 preset are stored under `/helios/data/`, and its facility telemetry is
 advertised to a HELIOS Mainframe over `helios.facility.v1`.
 
-The read-only Draconic Profiler is retained as a maintainer/debug utility. It
-is intentionally omitted from the normal installer menu and never sends
-reactor commands.
-
 Start with the [tester guide](docs/TESTING.md), [site map](docs/SITE_MAP.md),
 [dependency map](docs/DEPENDENCY_MAP.md), [language-pack contract](docs/LANGUAGE_PACKS.md),
 or [module template](module-template/README.md).
 
-Core `1.6.0-alpha.17` bundles English (`en_us`), Canadian French (`fr_ca`), German
-(`de_de`), and hidden Pirate English (`en_pi`) language packs. English remains the automatic fallback
-for incomplete packs.
+Core `1.6.0-alpha.18` includes English (`en_us`), Canadian French (`fr_ca`), and
+German (`de_de`). English remains the automatic fallback for incomplete packs.
 
 > Public Alpha means the interfaces are testable, not yet final. Please include
 > HELIOS/Core version, computer role, peripheral names, reproduction steps, and

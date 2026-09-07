@@ -1,7 +1,7 @@
 -- HELIOS single-file installer
 -- Manual-control alpha: guarded direct plant authority.
 
-local VERSION = "1.6.0-alpha.17"
+local VERSION = "1.6.0-alpha.18"
 local INSTALL_DIR = "/helios"
 local STAGE_DIR = "/.helios-install"
 local MODULE_PACK_BASE_URL = "https://raw.githubusercontent.com/ssj8vegetrunks/HELIOS/testing/public-alpha/module-pack"
@@ -409,6 +409,133 @@ local function installStageInPlace()
 end
 
 FILES = {
+    ["core/boot.lua"] = [=[
+local boot = {}
+
+local MARKER = "/helios/data/boot-sequence-complete"
+
+local function pause(seconds)
+    if type(sleep) == "function" then sleep(seconds) end
+end
+
+local function fit(value, width)
+    value = tostring(value or "")
+    if #value <= width then return value end
+    return width > 3 and value:sub(1, width - 3) .. "..." or value:sub(1, width)
+end
+
+local function centered(target, row, value, color)
+    local width = select(1, target.getSize())
+    value = fit(value, width)
+    target.setCursorPos(math.max(1, math.floor((width - #value) / 2) + 1), row)
+    target.setTextColor(color or colors.white)
+    target.write(value)
+end
+
+local function hasPeripheral(fragment)
+    fragment = string.lower(fragment)
+    for _, name in ipairs(peripheral.getNames()) do
+        for _, kind in ipairs({ peripheral.getType(name) }) do
+            if string.find(string.lower(tostring(kind or "")), fragment, 1, true) then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+local function checks(config)
+    local devices = #peripheral.getNames()
+    local role = tostring(config.role or "unknown")
+    local statePath = role == "guardian" and "/helios/data/draconic_guardian.lua" or
+        "/helios/data/devices.lua"
+    return {
+        { "CONFIGURATION", type(config) == "table" and config.version ~= nil, role:upper() },
+        { "CORE SERVICES", fs.exists("/helios/core/config.lua") and fs.exists("/helios/core/network.lua"), tostring(config.version or "unknown") },
+        { "PERIPHERAL BUS", true, tostring(devices) .. " DEVICE" .. (devices == 1 and "" or "S") },
+        { "CONTROL NETWORK", hasPeripheral("modem"), hasPeripheral("modem") and "ONLINE" or "LOCAL" },
+        { "SAVED STATE", fs.exists(statePath), fs.exists(statePath) and "RESTORED" or "NEW" },
+    }
+end
+
+local function statusLine(target, row, label, ok, detail)
+    local width = select(1, target.getSize())
+    local suffix = ok and (detail or "OK") or (detail == "LOCAL" and "LOCAL" or "CHECK")
+    local dots = math.max(1, width - #label - #suffix - 3)
+    target.setCursorPos(1, row)
+    target.setTextColor(colors.lightGray)
+    target.write(fit(label .. " " .. string.rep(".", dots) .. " ", math.max(0, width - #suffix)))
+    target.setTextColor(ok and colors.lime or colors.orange)
+    target.write(fit(suffix, math.min(#suffix, width)))
+end
+
+local function logo(target, config, firstBoot)
+    local width, height = target.getSize()
+    target.setBackgroundColor(colors.black)
+    target.setTextColor(colors.white)
+    target.clear()
+    local top = math.max(1, math.floor(height / 2) - 5)
+    centered(target, top, "\\   |   /", colors.orange)
+    centered(target, top + 1, "\\  |  /", colors.yellow)
+    centered(target, top + 2, "-- [*] --", colors.yellow)
+    centered(target, top + 3, "/  |  \\", colors.yellow)
+    centered(target, top + 4, "/   |   \\", colors.orange)
+    centered(target, top + 6, "H E L I O S", colors.yellow)
+    if width >= 48 then
+        centered(target, top + 8, "HOLISTIC ENERGY LOGISTICS & INDUSTRIAL OPERATIONS SYSTEM", colors.lightGray)
+    else
+        centered(target, top + 8, "INDUSTRIAL OPERATIONS SYSTEM", colors.lightGray)
+    end
+    centered(target, math.min(height, top + 10), firstBoot and "LET THERE BE LIGHT." or
+        ("SYSTEM " .. tostring(config.version or "") .. " READY"), colors.lime)
+end
+
+function boot.run(config, target)
+    target = target or term.current()
+    local firstBoot = not fs.exists(MARKER)
+    local width = select(1, target.getSize())
+    target.setBackgroundColor(colors.black)
+    target.setTextColor(colors.white)
+    target.clear()
+    target.setCursorPos(1, 1)
+    target.setTextColor(colors.yellow)
+    target.write("HELIOS INITIALIZATION")
+    target.setCursorPos(1, 2)
+    target.setTextColor(colors.gray)
+    target.write(fit("Holistic Energy Logistics & Industrial Operations System", width))
+
+    local report = checks(config)
+    local shown = firstBoot and #report or math.min(3, #report)
+    for index = 1, shown do
+        local item = report[index]
+        statusLine(target, index + 3, item[1], item[2], item[3])
+        pause(firstBoot and 0.30 or 0.10)
+    end
+    if firstBoot then
+        target.setCursorPos(1, shown + 5)
+        target.setTextColor(colors.cyan)
+        target.write(fit("FACILITY DISCOVERY COMPLETE", width))
+        pause(0.35)
+    end
+    logo(target, config, firstBoot)
+    pause(firstBoot and 1.25 or 0.45)
+
+    if firstBoot then
+        local parent = fs.getDir(MARKER)
+        if parent ~= "" and not fs.exists(parent) then fs.makeDir(parent) end
+        local handle = fs.open(MARKER, "w")
+        if handle then handle.write(tostring(os.epoch and os.epoch("utc") or os.clock()));handle.close() end
+    end
+    target.setBackgroundColor(colors.black)
+    target.setTextColor(colors.white)
+    target.clear()
+    target.setCursorPos(1, 1)
+    return report
+end
+
+return boot
+]=],
+
     ["core/config.lua"] = [=[
 local config = {}
 
@@ -2626,7 +2753,7 @@ return {
     name = "HELIOS Control Room",
     version = "1.0.0",
     apiVersion = 1,
-    compatibleCoreVersions = { "1.6.0-alpha.4", "1.6.0-alpha.5", "1.6.0-alpha.6", "1.6.0-alpha.7", "1.6.0-alpha.8", "1.6.0-alpha.9", "1.6.0-alpha.10", "1.6.0-alpha.11", "1.6.0-alpha.12", "1.6.0-alpha.13", "1.6.0-alpha.14", "1.6.0-alpha.15", "1.6.0-alpha.16" },
+    compatibleCoreVersions = { "1.6.0-alpha.4", "1.6.0-alpha.5", "1.6.0-alpha.6", "1.6.0-alpha.7", "1.6.0-alpha.8", "1.6.0-alpha.9", "1.6.0-alpha.10", "1.6.0-alpha.11", "1.6.0-alpha.12", "1.6.0-alpha.13", "1.6.0-alpha.14", "1.6.0-alpha.15", "1.6.0-alpha.16", "1.6.0-alpha.17", "1.6.0-alpha.18" },
     entry = "renderer.lua",
     minimumWidth = 50,
     minimumHeight = 31,
@@ -3846,6 +3973,9 @@ local mainframe = {}
 function mainframe.run(config)
     local display = dofile("/helios/core/display.lua")
     display.start(config)
+    if fs.exists("/helios/core/boot.lua") then
+        dofile("/helios/core/boot.lua").run(config)
+    end
     local ui = dofile("/helios/core/ui.lua")
     ui.setVersion(config.version)
     local language = dofile("/helios/core/i18n.lua").new(config)
@@ -9134,6 +9264,9 @@ local terminal = {}
 function terminal.run(config)
     local display = dofile("/helios/core/display.lua")
     display.start(config)
+    if fs.exists("/helios/core/boot.lua") then
+        dofile("/helios/core/boot.lua").run(config)
+    end
     local ui = dofile("/helios/core/ui.lua")
     ui.setVersion(config.version)
     local language = dofile("/helios/core/i18n.lua").new(config)
@@ -9924,7 +10057,7 @@ local FIELD_TUNE_SAMPLES, FIELD_TUNE_RATIO = 150, .02
 local FIELD_RECOVERY_RATIO, MINIMUM_FIELD_INPUT = .05, 50000
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.5"
+local GUARDIAN_VERSION = "1.2.0-alpha.6"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -10082,6 +10215,10 @@ local function ensureStarted(b,c,status,reason,fieldTarget,telemetry)
     value,maximum=tonumber(value),tonumber(maximum)
     return value and maximum and maximum>0 and value/maximum*100 or nil
   end
+  -- Remember that a complete charge -> activate sequence is in progress.
+  -- Without this latch, a demand issued while STOPPING reaches CHARGING on the
+  -- next tick and can remain there forever without sending activation.
+  c.initialRequested=true
   gate(b.output,0)
   gate(b.input,fieldSupply)
   if status=="offline" or status=="stopping" or status=="cooling" then
@@ -10598,6 +10735,10 @@ end
 local binding,page,controls,buttons=inspect(),"overview",load(),{}
 controls.inputControlVerified=false;controls.outputControlVerified=false;controls.gatesOwned=false;controls.telemetryStale=false
 local computer=term.current();local target=binding.monitor and peripheral.wrap(binding.monitor) or computer;compactMonitor(target,binding.monitor~=nil)
+if fs.exists("/helios/core/boot.lua") and fs.exists("/helios/core/config.lua") then
+  local ok,guardianConfig=pcall(function() return dofile("/helios/core/config.lua").load() end)
+  if ok then dofile("/helios/core/boot.lua").run(guardianConfig,target) end
+end
 local function beginCalibration()
   controls.commissioning=true;controls.commissionFlow=COMMISSION_START_FLOW;controls.commissionSamples=0;controls.commissionShortfallSamples=0;controls.commissionSettleSamples=0;controls.commissionLastSafe=nil;controls.recovery=false;controls.commissioned=false;controls.rated=nil;controls.lifecycleCeilings={};controls.currentCycleCeilings={};controls.lifecycleApplied=nil;controls.lifecycleFieldApplied=nil;controls.lifecycleSamples=0;controls.lifecycleBandKey=nil;controls.lastFuelConversion=nil;controls.request="OFF"
   controls.initialRequested=true;controls.startActivated=false;controls.message="Automatic calibration requested by operator"
@@ -10612,7 +10753,18 @@ local function act(choice,d)
   elseif choice=="ENABLE ASSISTED MANUAL" then controls.mode="ASSISTED";controls.request="OFF";controls.message="Assisted manual enabled at OFF"
   elseif choice=="ARM UNRESTRICTED" then controls.arm=1;controls.message="Unrestricted arming started"
   elseif choice=="CANCEL" then controls.arm=0;controls.message="Unrestricted arming cancelled"
-  elseif controls.arm and controls.arm>0 and choice then controls.arm=controls.arm+1;if controls.arm>4 then controls.arm=0;controls.mode="UNRESTRICTED";controls.request="OFF";controls.message="UNRESTRICTED CONTROL ARMED: operator commands are not overridden" end
+  elseif controls.arm and controls.arm>0 and choice then controls.arm=controls.arm+1;if controls.arm>4 then
+    controls.arm=0;controls.mode="UNRESTRICTED"
+    local status=string.lower(tostring(d and d.reactor and d.reactor.status or "unknown"))
+    local live=status=="online" or status=="running"
+    -- Arming manual control must be a bumpless transfer. Adopt both live gate
+    -- limits and keep a running core running; an already inactive core remains
+    -- OFF until the operator explicitly applies a demand.
+    controls.manualField=positive(d and d.inputSet) or positive(d and d.inputFlow) or controls.injectorBaseline
+    controls.manualExport=positive(d and d.outputSet) or positive(d and d.outputFlow) or 0
+    controls.liveGatesSelected=true;controls.request=live and "MANUAL" or "OFF"
+    controls.message=live and "UNRESTRICTED CONTROL ARMED: live gates adopted without shutdown" or "UNRESTRICTED CONTROL ARMED: reactor remains OFF"
+  end
   elseif choice=="RESTORE AUTOMATIC" then controls.mode="AUTO";controls.request="OFF";controls.arm=0;controls.message="Automatic safety restored"
   elseif choice=="USE LIVE GATES" then controls.manualField=positive(d.inputSet) or positive(d.inputFlow) or controls.injectorBaseline;controls.manualExport=positive(d.outputSet) or positive(d.outputFlow) or 0;controls.liveGatesSelected=true;controls.message="Copied live gate limits into manual controls"
   elseif choice=="FIELD -1k" then controls.manualField=math.max(0,(tonumber(controls.manualField) or positive(d.inputSet) or controls.injectorBaseline or 0)-MANUAL_GATE_FINE_STEP)
