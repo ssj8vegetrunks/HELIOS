@@ -518,7 +518,7 @@ function boot.run(config, target)
         pause(0.35)
     end
     logo(target, config, firstBoot)
-    pause(firstBoot and 1.25 or 0.45)
+    pause(firstBoot and 2.25 or 1.45)
 
     if firstBoot then
         local parent = fs.getDir(MARKER)
