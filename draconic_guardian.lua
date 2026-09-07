@@ -25,13 +25,14 @@ local PRESET_RAMP_STEP = 50000
 -- immediately rolls it back to the last proven value.
 local LIFECYCLE_BAND, LIFECYCLE_PROOF_SAMPLES = 5, 150
 local LIFECYCLE_FIELD_FLOOR, LIFECYCLE_PROBE_FIELD = 30, 35
-local LIFECYCLE_TEMP_LIMIT, LIFECYCLE_FIELD_DRIFT = 6750, .5
+local LIFECYCLE_TEMP_LIMIT, LIFECYCLE_TEMP_LEEWAY = 7500, 7750
+local LIFECYCLE_LEEWAY_FIELD, LIFECYCLE_FIELD_DRIFT = 40, .5
 local LIFECYCLE_STEP_RATIO, LIFECYCLE_MIN_STEP = 1.02, 50000
 local FIELD_TUNE_SAMPLES, FIELD_TUNE_RATIO = 150, .02
 local FIELD_RECOVERY_RATIO, MINIMUM_FIELD_INPUT = .05, 50000
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.4"
+local GUARDIAN_VERSION = "1.2.0-alpha.5"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -374,7 +375,12 @@ local function lifecycleTarget(c,r)
   local field=pct(r.fieldStrength,r.maxFieldStrength) or 0
   local temp=tonumber(r.temperature) or math.huge
   local generation=tonumber(r.generationRate) or 0
-  if field<LIFECYCLE_FIELD_FLOOR or temp>LIFECYCLE_TEMP_LIMIT then
+  -- Above 7,500 C, probing is allowed only while containment remains strong.
+  -- 7,750 C is always the adaptive ceiling; the 8,000 C interlock remains the
+  -- final independent emergency boundary in supervise().
+  local temperatureUnsafe=temp>LIFECYCLE_TEMP_LEEWAY or
+    (temp>LIFECYCLE_TEMP_LIMIT and field<LIFECYCLE_LEEWAY_FIELD)
+  if field<LIFECYCLE_FIELD_FLOOR or temperatureUnsafe then
     c.lifecycleApplied=proven;c.lifecycleSamples=0;c.lifecycleStartField=nil
     return proven,"adaptive rollback to proven band ceiling"
   end

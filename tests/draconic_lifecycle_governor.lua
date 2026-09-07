@@ -29,6 +29,18 @@ target = governor.lifecycleTarget(controls, reactor(10, 70, 1000000))
 assert(target == 1050000, "stable output must advance by the conservative minimum step")
 assert(controls.currentCycleCeilings["10"] == 1000000, "stable point must be recorded for this cycle")
 
+-- The lifecycle governor may use the 7,500-7,750 C efficiency band only when
+-- containment is at least 40%; 7,750 C remains an unconditional ceiling.
+controls = { rated = 1000000, lifecycleCeilings = {}, currentCycleCeilings = {}, lifecycleApplied = 1050000 }
+target = governor.lifecycleTarget(controls, reactor(10, 39, 1050000, 7600))
+assert(target == 1000000, "hot probing below 40% containment must roll back")
+controls = { rated = 1000000, lifecycleCeilings = {}, currentCycleCeilings = {}, lifecycleApplied = 1050000 }
+target = governor.lifecycleTarget(controls, reactor(10, 40, 1050000, 7600))
+assert(target == 1050000, "40% containment may use the conditional temperature leeway")
+controls = { rated = 1000000, lifecycleCeilings = {}, currentCycleCeilings = {}, lifecycleApplied = 1050000 }
+target = governor.lifecycleTarget(controls, reactor(10, 60, 1050000, 7751))
+assert(target == 1000000, "adaptive probing must always roll back above 7,750 C")
+
 -- Sustained excess containment permits a small field-input trim.
 controls.lifecycleFieldApplied = 1600000
 for _ = 1, 150 do governor.lifecycleFieldTarget(controls, reactor(10, 70, 1000000), 1600000) end
