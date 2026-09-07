@@ -46,4 +46,28 @@ controls.lifecycleFieldApplied = 1600000
 for _ = 1, 150 do governor.lifecycleFieldTarget(controls, reactor(10, 70, 1000000), 1600000) end
 assert(controls.lifecycleFieldApplied == 1568000, "stable high containment should trim field input by two percent")
 
+-- Late-cycle heat is expected and must not be mislabeled as an imminent
+-- meltdown while containment remains healthy. A cascade requires both a hot,
+-- rising core and a low, falling field for consecutive samples.
+local trend = {}
+for _, sample in ipairs({
+    reactor(80, 66, 20000000, 7145),
+    reactor(80, 60, 20000000, 7600),
+    reactor(80, 55, 20000000, 7900),
+}) do governor.updateMeltdownTrend(sample, trend) end
+assert(not governor.imminentMeltdown(reactor(80, 55, 20000000, 7900), trend),
+    "healthy late-cycle operation must not raise a meltdown alarm")
+trend = {}
+local cascade
+for _, sample in ipairs({
+    reactor(80, 30, 20000000, 7900),
+    reactor(80, 24, 20000000, 8060),
+    reactor(80, 23, 20000000, 8070),
+    reactor(80, 22, 20000000, 8080),
+}) do
+    governor.updateMeltdownTrend(sample, trend)
+    cascade = governor.imminentMeltdown(sample, trend)
+end
+assert(cascade, "a hot rising core with low falling containment must raise a meltdown alarm")
+
 print("draconic lifecycle governor tests passed")

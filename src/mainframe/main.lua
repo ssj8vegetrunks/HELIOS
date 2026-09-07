@@ -697,10 +697,10 @@ function mainframe.run(config)
                 math.min(30, tonumber(clean.payload.leaseSeconds) or 5))
             return true
         end
-        if not isFacilityCollector() then return false end
         if clean.source.role ~= "guardian" and clean.source.role ~= "facility" then
             return false
         end
+        local collector = isFacilityCollector()
         local nodeId = clean.source.nodeId
         local previous = facilities[nodeId] or {}
         facilities[nodeId] = {
@@ -718,13 +718,17 @@ function mainframe.run(config)
         -- Persist registration metadata, not the one-second telemetry stream.
         -- Live telemetry stays in memory to avoid needless disk churn.
         if clean.kind == "hello" then saveFacilities() end
-        local acknowledgement = facilityProtocol.acknowledge(clean, facilityIdentity,
-            facilitySequence + 1, "accepted", nil, network.now())
-        if acknowledgement then
-            facilitySequence = facilitySequence + 1
-            network.sendOn(facilityProtocol.rednetProtocol, sender, acknowledgement)
+        -- Every Mainframe may retain read-only facility telemetry. Only the
+        -- elected collector acknowledges packets or offers command authority.
+        if collector then
+            local acknowledgement = facilityProtocol.acknowledge(clean, facilityIdentity,
+                facilitySequence + 1, "accepted", nil, network.now())
+            if acknowledgement then
+                facilitySequence = facilitySequence + 1
+                network.sendOn(facilityProtocol.rednetProtocol, sender, acknowledgement)
+            end
         end
-        if clean.kind == "hello" then
+        if collector and clean.kind == "hello" then
             sendFacility("welcome", sender, {
                 siteId = facilitySiteId,
                 acceptedContract = facilityProtocol.name,

@@ -518,7 +518,7 @@ function boot.run(config, target)
         pause(0.35)
     end
     logo(target, config, firstBoot)
-    pause(firstBoot and 2.25 or 1.45)
+    pause(firstBoot and 4.25 or 3.45)
 
     if firstBoot then
         local parent = fs.getDir(MARKER)
@@ -4666,10 +4666,10 @@ function mainframe.run(config)
                 math.min(30, tonumber(clean.payload.leaseSeconds) or 5))
             return true
         end
-        if not isFacilityCollector() then return false end
         if clean.source.role ~= "guardian" and clean.source.role ~= "facility" then
             return false
         end
+        local collector = isFacilityCollector()
         local nodeId = clean.source.nodeId
         local previous = facilities[nodeId] or {}
         facilities[nodeId] = {
@@ -4687,13 +4687,17 @@ function mainframe.run(config)
         -- Persist registration metadata, not the one-second telemetry stream.
         -- Live telemetry stays in memory to avoid needless disk churn.
         if clean.kind == "hello" then saveFacilities() end
-        local acknowledgement = facilityProtocol.acknowledge(clean, facilityIdentity,
-            facilitySequence + 1, "accepted", nil, network.now())
-        if acknowledgement then
-            facilitySequence = facilitySequence + 1
-            network.sendOn(facilityProtocol.rednetProtocol, sender, acknowledgement)
+        -- Every Mainframe may retain read-only facility telemetry. Only the
+        -- elected collector acknowledges packets or offers command authority.
+        if collector then
+            local acknowledgement = facilityProtocol.acknowledge(clean, facilityIdentity,
+                facilitySequence + 1, "accepted", nil, network.now())
+            if acknowledgement then
+                facilitySequence = facilitySequence + 1
+                network.sendOn(facilityProtocol.rednetProtocol, sender, acknowledgement)
+            end
         end
-        if clean.kind == "hello" then
+        if collector and clean.kind == "hello" then
             sendFacility("welcome", sender, {
                 siteId = facilitySiteId,
                 acceptedContract = facilityProtocol.name,
@@ -10057,7 +10061,7 @@ local FIELD_TUNE_SAMPLES, FIELD_TUNE_RATIO = 150, .02
 local FIELD_RECOVERY_RATIO, MINIMUM_FIELD_INPUT = .05, 50000
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.6"
+local GUARDIAN_VERSION = "1.2.0-alpha.7"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -10263,7 +10267,20 @@ local function ensureStarted(b,c,status,reason,fieldTarget,telemetry)
   return true
 end
 local function pct(a,b) if tonumber(a) and tonumber(b) and tonumber(b)>0 then return tonumber(a)/tonumber(b)*100 end end
-local function imminentMeltdown(r)
+local meltdownTrend={risingTemperature=0,fallingField=0}
+local function updateMeltdownTrend(r,trend)
+  trend=trend or meltdownTrend
+  local field=pct(r and r.fieldStrength,r and r.maxFieldStrength)
+  local temperature=tonumber(r and r.temperature)
+  trend.risingTemperature=temperature and trend.temperature and temperature>trend.temperature and
+    (tonumber(trend.risingTemperature) or 0)+1 or 0
+  trend.fallingField=field and trend.field and field<trend.field and
+    (tonumber(trend.fallingField) or 0)+1 or 0
+  trend.temperature=temperature;trend.field=field
+  return trend
+end
+local function imminentMeltdown(r,trend)
+  trend=trend or meltdownTrend
   local status=string.lower(tostring(r and r.status or "unknown"))
   local normalized=status:gsub("[^%w]","")
   -- Draconic Evolution reports its irreversible terminal state as
@@ -10278,16 +10295,13 @@ local function imminentMeltdown(r)
   if not atRisk then return false end
   local field=pct(r.fieldStrength,r.maxFieldStrength)
   local temperature=tonumber(r.temperature)
-  local fuelRemaining=pct((tonumber(r.maxFuelConversion) or 0)-
-    (tonumber(r.fuelConversion) or 0),r.maxFuelConversion)
-  local reasons={}
-  -- These are announcement thresholds only. They never alter gates, modes, or
-  -- reactor state. Unrestricted remains genuinely unrestricted.
-  if field and field<=25 then reasons[#reasons+1]=string.format("field %.1f%%",field) end
-  if temperature and temperature>=7000 then reasons[#reasons+1]=string.format("core %.0f C",temperature) end
-  if fuelRemaining and fuelRemaining<=12 then reasons[#reasons+1]=string.format("fuel %.1f%%",fuelRemaining) end
-  if #reasons==0 then return false end
-  return true,"IMMINENT DRACONIC REACTOR MELTDOWN: "..table.concat(reasons,", ")
+  -- A hot core by itself is normal late-cycle operation. Announce a meltdown
+  -- cascade only when heat is climbing while containment is simultaneously
+  -- low and falling. Three consecutive control samples reject telemetry noise.
+  if not (field and field<25 and temperature and temperature>8050 and
+      (tonumber(trend.risingTemperature) or 0)>=3 and
+      (tonumber(trend.fallingField) or 0)>=3) then return false end
+  return true,string.format("IMMINENT DRACONIC REACTOR MELTDOWN: core %.0f C rising, field %.1f%% falling",temperature,field)
 end
 local function clamp(x) return math.max(0,math.min(1,tonumber(x) or 0)) end
 local function fmt(n)
@@ -10459,6 +10473,7 @@ end
 -- the operator's command stand, while warnings remain live.
 local function supervise(b,d,c)
   local r=d.reactor;local status=string.lower(tostring(r.status or "unknown"));local field=pct(r.fieldStrength,r.maxFieldStrength) or 0
+  updateMeltdownTrend(r)
   local live=status=="online" or status=="running"
   local containmentRequired=live or status=="stopping" or status=="cooling"
   local fuel=pct((tonumber(r.maxFuelConversion) or 0)-(tonumber(r.fuelConversion) or 0),r.maxFuelConversion) or 0;local temp=tonumber(r.temperature) or math.huge;local free=c.mode=="UNRESTRICTED"
@@ -10730,7 +10745,8 @@ local function drawComputer(t,d,c)
   line(19,"HELIOS link: "..(facilityConnected and "ONLINE" or (facilityNetwork and "WAITING" or "LOCAL ONLY")),facilityConnected and colors.lime or colors.gray)
 end
 if rawget(_G,"HELIOS_GUARDIAN_TEST") then
-  return {lifecycleTarget=lifecycleTarget,lifecycleFieldTarget=lifecycleFieldTarget,lifecycleCeiling=lifecycleCeiling}
+  return {lifecycleTarget=lifecycleTarget,lifecycleFieldTarget=lifecycleFieldTarget,lifecycleCeiling=lifecycleCeiling,
+    updateMeltdownTrend=updateMeltdownTrend,imminentMeltdown=imminentMeltdown}
 end
 local binding,page,controls,buttons=inspect(),"overview",load(),{}
 controls.inputControlVerified=false;controls.outputControlVerified=false;controls.gatesOwned=false;controls.telemetryStale=false
@@ -10928,10 +10944,13 @@ local function facilityWorker()
       if facilityCollectorId and now>=facilityCollectorLeaseUntil then
         releaseCollector()
       end
-      if facilityCollectorId then send("telemetry",snapshot(),facilityCollectorId) end
+      -- Broadcast read-only telemetry so Mainframes coming back from an
+      -- upgrade immediately refresh their cached registration. Only the
+      -- elected collector acknowledges it or gains emergency-command status.
+      send("telemetry",snapshot())
       heartbeat=os.startTimer(1)
     elseif event=="timer" and a==helloTimer then
-      if not facilityCollectorId then hello() end
+      hello()
       helloTimer=os.startTimer(5)
     elseif event=="rednet_message" and c==facilityProtocol.rednetProtocol then
       local message=facilityProtocol.validate(b)
