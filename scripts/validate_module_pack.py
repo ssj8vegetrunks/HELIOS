@@ -2,6 +2,7 @@
 """Validate the official HELIOS Module Pack manifest and referenced files."""
 
 import json
+import re
 from pathlib import Path
 
 
@@ -17,6 +18,13 @@ def main() -> None:
     assert isinstance(manifest.get("pack"), dict), "Missing pack metadata"
     assert manifest["pack"].get("version"), "Missing Module Pack version"
     assert manifest.get("compatible_core_versions"), "Missing compatible Core versions"
+    installer = (ROOT / "install.lua").read_text(encoding="utf-8")
+    version_match = re.search(r'^local VERSION = "([^"]+)"', installer, re.MULTILINE)
+    assert version_match, "Could not read HELIOS Core version from install.lua"
+    core_version = version_match.group(1)
+    assert core_version in manifest["compatible_core_versions"], (
+        f"Module Pack does not declare compatibility with HELIOS Core {core_version}"
+    )
 
     capabilities = set()
     module_ids = set()
