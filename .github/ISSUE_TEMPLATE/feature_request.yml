@@ -1,0 +1,43 @@
+name: Feature request
+description: Propose a HELIOS capability or interface improvement
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: Describe the limitation or workflow problem before proposing a solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - HELIOS Core
+        - Hardware module
+        - Graphical interface
+        - Advanced text interface
+        - Language or accessibility
+        - Networking or remote terminal
+        - Installer or documentation
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: safety
+    attributes:
+      label: Safety and failure behavior
+      description: What should HELIOS do if telemetry, networking, hardware control, or this feature fails?
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives or additional context

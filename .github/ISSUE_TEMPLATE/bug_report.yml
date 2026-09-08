@@ -1,0 +1,91 @@
+name: Bug report
+description: Report reproducible incorrect or unsafe HELIOS behavior
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for testing HELIOS. Back up your world and remove passwords, server addresses, tokens, and other private information before submitting.
+  - type: input
+    id: helios_version
+    attributes:
+      label: HELIOS version
+      description: Include the version shown on screen and the branch or commit when known.
+      placeholder: Core 1.6.0-alpha.19, testing/public-alpha
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Minecraft environment
+      description: Include the modpack, modpack version, Minecraft version, and CC:Tweaked version.
+      placeholder: ATM10 7.2, Minecraft ..., CC:Tweaked ...
+    validations:
+      required: true
+  - type: dropdown
+    id: role
+    attributes:
+      label: HELIOS role
+      options:
+        - Mainframe
+        - Remote terminal
+        - Draconic Guardian
+        - Probe
+        - Installer or updater
+        - Module or GUI development
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: hardware
+    attributes:
+      label: Relevant hardware
+      description: List computer ID, peripheral names/types, monitor size, and wiring relevant to the problem.
+      render: text
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1. Start HELIOS...
+        2. Open...
+        3. Select...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and exact error
+    validations:
+      required: true
+  - type: dropdown
+    id: restart
+    attributes:
+      label: Does a restart reproduce it?
+      options:
+        - "Yes"
+        - "No"
+        - Not tested
+        - The computer cannot be restarted normally
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Screenshots, Probe output, or additional context
+      description: Drag screenshots here. Use a code block for text output.
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety confirmation
+      options:
+        - label: I removed private information and have an independent shutdown method when testing live equipment.
+          required: true
