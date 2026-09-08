@@ -64,10 +64,29 @@ function mainframe.run(config)
     local facilitySiteId = tostring((config.network or {}).siteId or "default")
     local overseerCollectorLeaseUntil = 0
     local facilityFile = "/helios/data/facilities.lua"
+    local facilityRegistryLimit = 65536
+    local facilityEntryLimit = 256
     local facilities = {}
-    if fs.exists(facilityFile) then
-        local loadedOk, loaded = pcall(dofile, facilityFile)
-        if loadedOk and type(loaded) == "table" then facilities = loaded end
+    if fs.exists(facilityFile) and fs.getSize(facilityFile) <= facilityRegistryLimit then
+        local handle = fs.open(facilityFile, "r")
+        local contents = handle and handle.readAll()
+        if handle then handle.close() end
+        if contents then
+            sleep(0)
+            contents = contents:gsub("^%s*return%s+", "", 1)
+            local loaded = textutils.unserialize(contents)
+            if type(loaded) == "table" then
+                local accepted = 0
+                for nodeId, facility in pairs(loaded) do
+                    if accepted >= facilityEntryLimit then break end
+                    if type(nodeId) == "string" and type(facility) == "table" then
+                        facilities[nodeId] = facility
+                        accepted = accepted + 1
+                        if accepted % 8 == 0 then sleep(0) end
+                    end
+                end
+            end
+        end
     end
     local authorityState = authority.new(config.control.mainframeAuthority,
         os.getComputerID())

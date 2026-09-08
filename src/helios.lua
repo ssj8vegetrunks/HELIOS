@@ -125,15 +125,53 @@ if args[1] == "facilities" then
         error("Only the HELIOS mainframe maintains the facility registry.", 0)
     end
     local path = "/helios/data/facilities.lua"
-    local facilities = fs.exists(path) and dofile(path) or {}
+    local MAX_REGISTRY_BYTES, MAX_FACILITIES, YIELD_EVERY = 65536, 256, 8
+    local function watchdogYield(index)
+        if index % YIELD_EVERY == 0 then sleep(0) end
+    end
+    local function loadFacilities()
+        if not fs.exists(path) then return {} end
+        local size = fs.getSize(path)
+        if size > MAX_REGISTRY_BYTES then
+            error("Facility registry is too large (" .. tostring(size) ..
+                " bytes). Run 'helios facilities prune' after moving the file aside.", 0)
+        end
+        local handle, reason = fs.open(path, "r")
+        if not handle then error("Could not read facility registry: " .. tostring(reason), 0) end
+        local contents = handle.readAll()
+        handle.close()
+        sleep(0)
+        contents = contents:gsub("^%s*return%s+", "", 1)
+        local loaded = textutils.unserialize(contents)
+        if type(loaded) ~= "table" then error("Facility registry is malformed.", 0) end
+        local clean, keys = {}, {}
+        for nodeId, facility in pairs(loaded) do
+            if type(nodeId) == "string" and type(facility) == "table" then
+                keys[#keys + 1] = nodeId
+            end
+        end
+        table.sort(keys)
+        if #keys > MAX_FACILITIES then
+            error("Facility registry contains too many entries (maximum " ..
+                tostring(MAX_FACILITIES) .. ").", 0)
+        end
+        for index, nodeId in ipairs(keys) do
+            clean[nodeId] = loaded[nodeId]
+            watchdogYield(index)
+        end
+        return clean, keys
+    end
+    local facilities, facilityKeys = loadFacilities()
     if args[2] == "prune" then
         local now = os.epoch("utc") / 1000
         local removed = 0
-        for nodeId, facility in pairs(facilities) do
+        for index, nodeId in ipairs(facilityKeys) do
+            local facility = facilities[nodeId]
             if now - (tonumber(facility.lastSeen) or 0) > 30 then
                 facilities[nodeId] = nil
                 removed = removed + 1
             end
+            watchdogYield(index)
         end
         if not fs.exists("/helios/data") then fs.makeDir("/helios/data") end
         local handle, reason = fs.open(path, "w")
@@ -146,13 +184,15 @@ if args[1] == "facilities" then
         error("Usage: helios facilities [prune]", 0)
     end
     local count = 0
-    for nodeId, facility in pairs(facilities) do
+    for index, nodeId in ipairs(facilityKeys) do
+        local facility = facilities[nodeId]
         count = count + 1
         print(("%s  %s  %s %s  computer %s"):format(
             tostring(nodeId), tostring(facility.facilityType or "unknown"),
             tostring(facility.software or "unknown"),
             tostring(facility.softwareVersion or "unknown"),
             tostring(facility.id or "unknown")))
+        watchdogYield(index)
     end
     if count == 0 then print("No facilities have registered yet.") end
     return

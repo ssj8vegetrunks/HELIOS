@@ -1,7 +1,7 @@
 -- HELIOS single-file installer
 -- Manual-control alpha: guarded direct plant authority.
 
-local VERSION = "1.6.0-alpha.18"
+local VERSION = "1.6.0-alpha.19"
 local INSTALL_DIR = "/helios"
 local STAGE_DIR = "/.helios-install"
 local MODULE_PACK_BASE_URL = "https://raw.githubusercontent.com/ssj8vegetrunks/HELIOS/testing/public-alpha/module-pack"
@@ -2753,7 +2753,7 @@ return {
     name = "HELIOS Control Room",
     version = "1.0.0",
     apiVersion = 1,
-    compatibleCoreVersions = { "1.6.0-alpha.4", "1.6.0-alpha.5", "1.6.0-alpha.6", "1.6.0-alpha.7", "1.6.0-alpha.8", "1.6.0-alpha.9", "1.6.0-alpha.10", "1.6.0-alpha.11", "1.6.0-alpha.12", "1.6.0-alpha.13", "1.6.0-alpha.14", "1.6.0-alpha.15", "1.6.0-alpha.16", "1.6.0-alpha.17", "1.6.0-alpha.18" },
+    compatibleCoreVersions = { "1.6.0-alpha.4", "1.6.0-alpha.5", "1.6.0-alpha.6", "1.6.0-alpha.7", "1.6.0-alpha.8", "1.6.0-alpha.9", "1.6.0-alpha.10", "1.6.0-alpha.11", "1.6.0-alpha.12", "1.6.0-alpha.13", "1.6.0-alpha.14", "1.6.0-alpha.15", "1.6.0-alpha.16", "1.6.0-alpha.17", "1.6.0-alpha.18", "1.6.0-alpha.19" },
     entry = "renderer.lua",
     minimumWidth = 50,
     minimumHeight = 31,
@@ -3127,15 +3127,53 @@ if args[1] == "facilities" then
         error("Only the HELIOS mainframe maintains the facility registry.", 0)
     end
     local path = "/helios/data/facilities.lua"
-    local facilities = fs.exists(path) and dofile(path) or {}
+    local MAX_REGISTRY_BYTES, MAX_FACILITIES, YIELD_EVERY = 65536, 256, 8
+    local function watchdogYield(index)
+        if index % YIELD_EVERY == 0 then sleep(0) end
+    end
+    local function loadFacilities()
+        if not fs.exists(path) then return {} end
+        local size = fs.getSize(path)
+        if size > MAX_REGISTRY_BYTES then
+            error("Facility registry is too large (" .. tostring(size) ..
+                " bytes). Run 'helios facilities prune' after moving the file aside.", 0)
+        end
+        local handle, reason = fs.open(path, "r")
+        if not handle then error("Could not read facility registry: " .. tostring(reason), 0) end
+        local contents = handle.readAll()
+        handle.close()
+        sleep(0)
+        contents = contents:gsub("^%s*return%s+", "", 1)
+        local loaded = textutils.unserialize(contents)
+        if type(loaded) ~= "table" then error("Facility registry is malformed.", 0) end
+        local clean, keys = {}, {}
+        for nodeId, facility in pairs(loaded) do
+            if type(nodeId) == "string" and type(facility) == "table" then
+                keys[#keys + 1] = nodeId
+            end
+        end
+        table.sort(keys)
+        if #keys > MAX_FACILITIES then
+            error("Facility registry contains too many entries (maximum " ..
+                tostring(MAX_FACILITIES) .. ").", 0)
+        end
+        for index, nodeId in ipairs(keys) do
+            clean[nodeId] = loaded[nodeId]
+            watchdogYield(index)
+        end
+        return clean, keys
+    end
+    local facilities, facilityKeys = loadFacilities()
     if args[2] == "prune" then
         local now = os.epoch("utc") / 1000
         local removed = 0
-        for nodeId, facility in pairs(facilities) do
+        for index, nodeId in ipairs(facilityKeys) do
+            local facility = facilities[nodeId]
             if now - (tonumber(facility.lastSeen) or 0) > 30 then
                 facilities[nodeId] = nil
                 removed = removed + 1
             end
+            watchdogYield(index)
         end
         if not fs.exists("/helios/data") then fs.makeDir("/helios/data") end
         local handle, reason = fs.open(path, "w")
@@ -3148,13 +3186,15 @@ if args[1] == "facilities" then
         error("Usage: helios facilities [prune]", 0)
     end
     local count = 0
-    for nodeId, facility in pairs(facilities) do
+    for index, nodeId in ipairs(facilityKeys) do
+        local facility = facilities[nodeId]
         count = count + 1
         print(("%s  %s  %s %s  computer %s"):format(
             tostring(nodeId), tostring(facility.facilityType or "unknown"),
             tostring(facility.software or "unknown"),
             tostring(facility.softwareVersion or "unknown"),
             tostring(facility.id or "unknown")))
+        watchdogYield(index)
     end
     if count == 0 then print("No facilities have registered yet.") end
     return
@@ -4052,10 +4092,29 @@ function mainframe.run(config)
     local facilitySiteId = tostring((config.network or {}).siteId or "default")
     local overseerCollectorLeaseUntil = 0
     local facilityFile = "/helios/data/facilities.lua"
+    local facilityRegistryLimit = 65536
+    local facilityEntryLimit = 256
     local facilities = {}
-    if fs.exists(facilityFile) then
-        local loadedOk, loaded = pcall(dofile, facilityFile)
-        if loadedOk and type(loaded) == "table" then facilities = loaded end
+    if fs.exists(facilityFile) and fs.getSize(facilityFile) <= facilityRegistryLimit then
+        local handle = fs.open(facilityFile, "r")
+        local contents = handle and handle.readAll()
+        if handle then handle.close() end
+        if contents then
+            sleep(0)
+            contents = contents:gsub("^%s*return%s+", "", 1)
+            local loaded = textutils.unserialize(contents)
+            if type(loaded) == "table" then
+                local accepted = 0
+                for nodeId, facility in pairs(loaded) do
+                    if accepted >= facilityEntryLimit then break end
+                    if type(nodeId) == "string" and type(facility) == "table" then
+                        facilities[nodeId] = facility
+                        accepted = accepted + 1
+                        if accepted % 8 == 0 then sleep(0) end
+                    end
+                end
+            end
+        end
     end
     local authorityState = authority.new(config.control.mainframeAuthority,
         os.getComputerID())
