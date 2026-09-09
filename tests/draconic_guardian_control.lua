@@ -1,4 +1,5 @@
 local writes, calls = {}, {}
+local reactorFuelConversion, reactorField, reactorDrain = 10, 60, 100
 local overrides = { right = false, flow_gate_1 = false }
 -- The injector gate begins at the proven manual field-support limit. Guardian
 -- must adopt this rather than replacing it with a fixed bootstrap value.
@@ -39,8 +40,8 @@ peripheral = {
     call = function(name, method, argument)
         if method == "getReactorInfo" then return {
             status = "running", generationRate = math.min(overrideFlows.right, 5000000), temperature = 2000,
-            fieldStrength = 60, maxFieldStrength = 100, fieldDrainRate = 100,
-            fuelConversion = 10, maxFuelConversion = 1000,
+            fieldStrength = reactorField, maxFieldStrength = 100, fieldDrainRate = reactorDrain,
+            fuelConversion = reactorFuelConversion, maxFuelConversion = 1000,
             energySaturation = 1, maxEnergySaturation = 100,
         } end
         if method == "getFlow" then return name == "right" and math.min(overrideFlows.right, 5000000) or 0 end
@@ -60,11 +61,17 @@ local events = { { "monitor_touch", "top", 1, 33 } } -- start automatic commissi
 for _ = 1, 600 do events[#events + 1] = { "timer", 1 } end
 events[#events + 1] = { "monitor_touch", "top", 1, 33 } -- enable assisted manual
 events[#events + 1] = { "monitor_touch", "top", 1, 33 } -- select OFF
+events[#events + 1] = { "fuel_low" }
+events[#events + 1] = { "timer", 1 }
 events[#events + 1] = { "key", keys.q }
 os = {
     startTimer = function() return 1 end,
     pullEvent = function()
         local event = table.remove(events, 1)
+        if event[1] == "fuel_low" then
+            reactorFuelConversion, reactorField, reactorDrain = 950, 99, 200000
+            event = table.remove(events, 1)
+        end
         return table.unpack(event)
     end,
 }
@@ -72,14 +79,19 @@ os = {
 dofile("draconic_guardian.lua")
 
 local sawStop, sawCommissionFlow, sawBeyondFormerCap, sawAdoptedInjectorLimit = false, false, false, false
+local sawTaperedShutdown = false
 for _, entry in ipairs(calls) do if entry[2] == "stopReactor" then sawStop = true end end
 for _, entry in ipairs(writes) do if entry[1] == "right" and entry[2] == 50000 then sawCommissionFlow = true end end
 for _, entry in ipairs(writes) do if entry[1] == "right" and type(entry[2]) == "number" and entry[2] > 4000000 then sawBeyondFormerCap = true end end
 for _, entry in ipairs(writes) do if entry[1] == "flow_gate_1" and entry[2] == 1600000 then sawAdoptedInjectorLimit = true end end
+for _, entry in ipairs(writes) do
+    if entry[1] == "flow_gate_1" and entry[2] == 210000 then sawTaperedShutdown = true end
+end
 assert(sawStop, "manual OFF must request a controlled reactor stop")
 assert(sawCommissionFlow, "automatic commissioning must apply its conservative export")
 assert(sawBeyondFormerCap, "automatic calibration must not impose the former fixed 4M RF/t ceiling")
 assert(sawAdoptedInjectorLimit, "Guardian must preserve the existing injector field-support limit")
+assert(sawTaperedShutdown, "fuel shutdown must taper injector flow to field drain plus its safety margin")
 assert(overrides.right and overrides.flow_gate_1, "Guardian must acquire direct override of both gates")
 print("draconic guardian control tests passed")
 

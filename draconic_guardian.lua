@@ -30,9 +30,13 @@ local LIFECYCLE_LEEWAY_FIELD, LIFECYCLE_FIELD_DRIFT = 40, .5
 local LIFECYCLE_STEP_RATIO, LIFECYCLE_MIN_STEP = 1.02, 50000
 local FIELD_TUNE_SAMPLES, FIELD_TUNE_RATIO = 150, .02
 local FIELD_RECOVERY_RATIO, MINIMUM_FIELD_INPUT = .05, 50000
+-- During a controlled shutdown the containment drain falls with the core.
+-- Follow that drain instead of pinning the injector at its learned ceiling.
+-- A weakening field always wins over efficiency and restores full input.
+local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.7"
+local GUARDIAN_VERSION = "1.2.0-alpha.8"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -449,7 +453,21 @@ local function supervise(b,d,c)
   local containmentRequired=live or status=="stopping" or status=="cooling"
   local fuel=pct((tonumber(r.maxFuelConversion) or 0)-(tonumber(r.fuelConversion) or 0),r.maxFuelConversion) or 0;local temp=tonumber(r.temperature) or math.huge;local free=c.mode=="UNRESTRICTED"
   local injectorCap=positive(c.injectorBaseline) or 0
-  local function stop(reason,charge) gate(b.output,0);reactor(b.reactor,"stopReactor");if charge then reactor(b.reactor,"chargeReactor");gate(b.input,injectorCap) end;c.message="SAFETY INTERLOCK: "..reason;return true end
+  local function shutdownInput()
+    if not containmentRequired then return 0 end
+    if field<SHUTDOWN_FIELD_EMERGENCY or (tonumber(meltdownTrend.fallingField) or 0)>=2 then return injectorCap end
+    local drain=positive(r.fieldDrainRate)
+    if not drain then return injectorCap end
+    local margin=field>=SHUTDOWN_FIELD_TARGET and 1.05 or field>=75 and 1.15 or 1.25
+    return math.min(injectorCap,math.max(MINIMUM_FIELD_INPUT,math.ceil(drain*margin)))
+  end
+  local function stop(reason,charge)
+    gate(b.output,0);reactor(b.reactor,"stopReactor")
+    if charge then reactor(b.reactor,"chargeReactor") end
+    local input=charge and injectorCap or shutdownInput();gate(b.input,input)
+    c.message="SAFETY INTERLOCK: "..reason.."; shutdown injector "..fmt(input).." RF/t"
+    return true
+  end
   if not acquireGates(b,d,c) then
     c.initialRequested=false;c.startActivated=false;c.commissioning=false
     reactor(b.reactor,"stopReactor")
