@@ -1,12 +1,41 @@
 -- HELIOS single-file installer
 -- Manual-control alpha: guarded direct plant authority.
 
-local VERSION = "1.6.0-alpha.19"
+local VERSION = "1.6.0-alpha.20"
 local INSTALL_DIR = "/helios"
 local STAGE_DIR = "/.helios-install"
 local MODULE_PACK_BASE_URL = "https://raw.githubusercontent.com/ssj8vegetrunks/HELIOS/testing/public-alpha/module-pack"
 local installerLanguage = "en_us"
+local installerAccessibility = "standard"
 local installerTranslations = {
+    es_es = {
+        ["Installer"] = "Instalador", ["mainframe"] = "Sistema central",
+        ["terminal"] = "Terminal remoto", ["guardian"] = "Guardian Draconic",
+        ["profiler"] = "Perfilador Draconic", ["reactor"] = "Reactor",
+        ["turbine"] = "Turbina", ["battery"] = "Almacenamiento", ["all"] = "Todos los sistemas",
+        ["Location"] = "Ubicacion", ["Display"] = "Pantalla", ["installed successfully"] = "instalado correctamente",
+        ["Industrial Power Management Suite"] = "Sistema industrial de gestion energetica",
+        ["Please enter a number from the list."] = "Introduce un numero de la lista.",
+        ["Select an installation category:"] = "Selecciona una categoria de instalacion:",
+        ["Install Mainframe"] = "Instalar sistema central", ["Install Remote Terminal"] = "Instalar terminal remoto",
+        ["Modules"] = "Modulos", ["Select a module:"] = "Selecciona un modulo:",
+        ["Hardware Probe (run once, read-only)"] = "Sonda de hardware (una vez, solo lectura)",
+        ["Draconic Reactor Guardian"] = "Guardian del reactor Draconic",
+        ["Draconic Reactor Profiler (read-only)"] = "Perfilador Draconic (solo lectura)",
+        ["Checking HELIOS Network"] = "Comprobando la red HELIOS",
+        ["Looking for an existing mainframe..."] = "Buscando un sistema central existente...",
+        ["No existing HELIOS mainframe found."] = "No se encontro otro sistema central HELIOS.",
+        ["Remote Terminal Configuration"] = "Configuracion del terminal remoto",
+        ["Select the information this terminal will request:"] = "Selecciona la informacion que solicitara este terminal:",
+        ["Reactor"] = "Reactor", ["Turbine"] = "Turbina", ["Battery"] = "Almacenamiento",
+        ["All systems overview"] = "Vista de todos los sistemas", ["Ready to Install"] = "Listo para instalar",
+        ["Install HELIOS?"] = "Instalar HELIOS?", ["Installation cancelled."] = "Instalacion cancelada.",
+        ["Installation Complete"] = "Instalacion terminada",
+        ["HELIOS will start automatically after reboot."] = "HELIOS se iniciara automaticamente despues de reiniciar.",
+        ["Run now with: helios"] = "Ejecutar ahora con: helios",
+        ["Check setup with: helios status"] = "Comprobar con: helios status",
+        ["HELIOS installation failed:"] = "Fallo la instalacion de HELIOS:",
+    },
     de_de = {
         ["Installer"] = "Installationsprogramm",
         ["mainframe"] = "Hauptrechner", ["terminal"] = "Entferntes Terminal",
@@ -165,11 +194,12 @@ end
 local function selectInstallerLanguage(existingLanguage)
     term.setBackgroundColor(colors.black);term.setTextColor(colors.white);term.clear();term.setCursorPos(1, 1)
     nativePrint("HELIOS")
-    nativePrint("Language / Langue / Sprache")
+    nativePrint("Language / Idioma / Langue / Sprache")
     local choices = {
         { id = "en_us", name = "English (US)" },
         { id = "fr_ca", name = "Francais (Canada)" },
         { id = "de_de", name = "Deutsch" },
+        { id = "es_es", name = "Espanol" },
     }
     for index, choice in ipairs(choices) do
         local current = choice.id == existingLanguage and " *" or ""
@@ -181,7 +211,29 @@ local function selectInstallerLanguage(existingLanguage)
         if answer == "p" then installerLanguage = "en_pi";return end
         local selected = tonumber(answer)
         if selected and choices[selected] then installerLanguage = choices[selected].id;return end
-        term.setTextColor(colors.red);nativePrint("1 / 2 / 3");term.setTextColor(colors.white)
+        term.setTextColor(colors.red);nativePrint("1 / 2 / 3 / 4");term.setTextColor(colors.white)
+    end
+end
+
+local function selectAccessibility(existingProfile)
+    local choices = {
+        { id="standard", name="Standard" },
+        { id="deuteranopia", name="Deuteranopia" },
+        { id="protanopia", name="Protanopia" },
+        { id="tritanopia", name="Tritanopia" },
+        { id="high_contrast", name="High contrast" },
+    }
+    nativePrint("")
+    nativePrint("Accessibility colour profile")
+    for index, choice in ipairs(choices) do
+        nativePrint(("  [%d] %s%s"):format(index, choice.name,
+            choice.id == existingProfile and " *" or ""))
+    end
+    while true do
+        term.setTextColor(colors.yellow);write("> ");term.setTextColor(colors.white)
+        local selected = tonumber(read())
+        if selected and choices[selected] then installerAccessibility=choices[selected].id;return end
+        term.setTextColor(colors.red);nativePrint("1 / 2 / 3 / 4 / 5");term.setTextColor(colors.white)
     end
 end
 
@@ -409,6 +461,102 @@ local function installStageInPlace()
 end
 
 FILES = {
+    ["core/accessibility.lua"] = [=[
+local accessibility = {}
+
+local PROFILES = { "standard", "deuteranopia", "protanopia", "tritanopia", "high_contrast" }
+local VALID = {}
+for _, id in ipairs(PROFILES) do VALID[id] = true end
+
+-- CC:Tweaked's palette is configurable per terminal. These palettes preserve
+-- HELIOS's semantic colour names while separating warning, fault, information,
+-- and healthy states for common colour-vision deficiencies.
+local PALETTES = {
+    standard = {
+        white=0xF0F0F0, orange=0xF2B233, magenta=0xE57FD8, lightBlue=0x99B2F2,
+        yellow=0xDEDE6C, lime=0x7FCC19, pink=0xF2B2CC, gray=0x4C4C4C,
+        lightGray=0x999999, cyan=0x4C99B2, purple=0xB266E5, blue=0x3366CC,
+        brown=0x7F664C, green=0x57A64E, red=0xCC4C4C, black=0x111111,
+    },
+    deuteranopia = {
+        red=0xD55E00, orange=0xE69F00, yellow=0xF0E442, lime=0x56B4E9,
+        green=0x0072B2, cyan=0x56B4E9, blue=0x0072B2, magenta=0xCC79A7,
+    },
+    protanopia = {
+        red=0xCC79A7, orange=0xE69F00, yellow=0xF0E442, lime=0x56B4E9,
+        green=0x0072B2, cyan=0x56B4E9, blue=0x0072B2, magenta=0xCC79A7,
+    },
+    tritanopia = {
+        red=0xD55E00, orange=0xCC79A7, yellow=0xE69F00, lime=0x009E73,
+        green=0x009E73, cyan=0x56B4E9, blue=0x0072B2, magenta=0xCC79A7,
+    },
+    high_contrast = {
+        white=0xFFFFFF, lightGray=0xD0D0D0, gray=0x707070, black=0x000000,
+        red=0xFF4040, orange=0xFFAA00, yellow=0xFFFF00, lime=0x40FF40,
+        green=0x00C060, cyan=0x00FFFF, lightBlue=0x80C0FF, blue=0x4080FF,
+        purple=0xC060FF, magenta=0xFF60FF, pink=0xFF90C0, brown=0xB08050,
+    },
+}
+
+local function settings(config)
+    local ui = type(config) == "table" and type(config.ui) == "table" and config.ui or {}
+    local profile = VALID[ui.accessibilityProfile] and ui.accessibilityProfile or "standard"
+    return profile, ui.statusSymbols ~= false
+end
+
+function accessibility.profiles()
+    local result = {}
+    for index, id in ipairs(PROFILES) do result[index] = id end
+    return result
+end
+
+function accessibility.valid(id) return VALID[id] == true end
+
+function accessibility.apply(target, config)
+    if not target or type(target.setPaletteColor) ~= "function" then return false end
+    local profile = settings(config)
+    local palette = {}
+    for name, rgb in pairs(PALETTES.standard) do palette[name] = rgb end
+    if profile ~= "standard" then
+        for name, rgb in pairs(PALETTES[profile]) do palette[name] = rgb end
+    end
+    for name, rgb in pairs(palette) do
+        if colors[name] then pcall(target.setPaletteColor, colors[name], rgb) end
+    end
+    return true
+end
+
+function accessibility.symbols(config)
+    local _, enabled = settings(config)
+    return enabled
+end
+
+function accessibility.marker(level, config)
+    if not accessibility.symbols(config) then return "" end
+    local markers = {
+        critical="[X]", fault="[X]", warning="[!]", caution="[!]",
+        healthy="[+]", ready="[+]", information="[i]", inactive="[-]",
+    }
+    return markers[tostring(level or ""):lower()] or "[*]"
+end
+
+function accessibility.levelForColour(colour)
+    if colour == colors.red then return "critical" end
+    if colour == colors.orange or colour == colors.yellow then return "warning" end
+    if colour == colors.lime or colour == colors.green then return "healthy" end
+    if colour == colors.gray or colour == colors.lightGray then return "inactive" end
+    return "information"
+end
+
+function accessibility.decorate(value, level, config)
+    value = tostring(value or "")
+    if not accessibility.symbols(config) or value:match("^%[[X!+i%*%-]%]%s") then return value end
+    return accessibility.marker(level, config) .. " " .. value
+end
+
+return accessibility
+]=],
+
     ["core/boot.lua"] = [=[
 local boot = {}
 
@@ -571,6 +719,12 @@ function config.load()
     loaded.ui.showPeripheralNames = loaded.ui.showPeripheralNames == true
     loaded.ui.monitorTextScale = tonumber(loaded.ui.monitorTextScale) or 0.5
     loaded.ui.renderer = type(loaded.ui.renderer) == "string" and loaded.ui.renderer or "default"
+    local accessibilityProfiles = { standard=true, deuteranopia=true, protanopia=true,
+        tritanopia=true, high_contrast=true }
+    loaded.ui.accessibilityProfile = accessibilityProfiles[loaded.ui.accessibilityProfile] and
+        loaded.ui.accessibilityProfile or "standard"
+    if loaded.ui.statusSymbols == nil then loaded.ui.statusSymbols = true end
+    loaded.ui.statusSymbols = loaded.ui.statusSymbols ~= false
     loaded.ui.language = type(loaded.ui.language) == "string" and
         loaded.ui.language:match("^[a-z][a-z]_[a-z][a-z]$") and loaded.ui.language or "en_us"
     loaded.control = loaded.control or {}
@@ -1135,6 +1289,9 @@ return protocol
 
     ["core/gui.lua"] = [=[
 local gui = {}
+local accessibilityConfig
+
+function gui.configure(config) accessibilityConfig = config end
 
 local function textLength(value)
     local _, count = tostring(value or ""):gsub("[^\128-\191]", "")
@@ -1199,8 +1356,9 @@ function gui.progress(x, y, width, percent, foreground, background)
     width = math.max(1, math.floor(tonumber(width) or 1))
     percent = clamp(percent, 0, 100)
     local filled = math.floor(width * percent / 100 + 0.5)
-    gui.text(x, y, string.rep(" ", filled), colors.white, foreground or colors.lime)
-    gui.text(x + filled, y, string.rep(" ", width - filled), colors.white,
+    local patterned = accessibilityConfig and accessibilityConfig.ui and accessibilityConfig.ui.statusSymbols ~= false
+    gui.text(x, y, string.rep(patterned and "=" or " ", filled), colors.white, foreground or colors.lime)
+    gui.text(x + filled, y, string.rep(patterned and "." or " ", width - filled), colors.white,
         background or colors.gray)
     return filled
 end
@@ -1979,6 +2137,16 @@ local ui = {}
 local idConflicts = {}
 local systemVersion
 local criticalAlarm = false
+local accessibilityConfig
+local accessibility
+
+function ui.configure(config)
+    accessibilityConfig = config
+    if fs and fs.exists and fs.exists("/helios/core/accessibility.lua") then
+        local ok, loaded = pcall(dofile, "/helios/core/accessibility.lua")
+        if ok then accessibility = loaded end
+    end
+end
 
 function ui.setVersion(version)
     systemVersion = version and tostring(version) or nil
@@ -2102,6 +2270,9 @@ function ui.status(label, value, colour)
     term.setTextColor(colors.lightGray)
     write(string.sub(prefix, 1, width))
     term.setTextColor(colour or colors.white)
+    if accessibility and colour then
+        value = accessibility.decorate(value, accessibility.levelForColour(colour), accessibilityConfig)
+    end
     local x = select(1, term.getCursorPos())
     print(string.sub(tostring(value), 1, math.max(0, width - x + 1)))
     term.setTextColor(colors.white)
@@ -2378,6 +2549,8 @@ return guardian
 
     ["draconic/profiler.lua"] = [=[
 local config = dofile("/helios/config.lua")
+local accessibility = dofile("/helios/core/accessibility.lua")
+accessibility.apply(term.current(), config)
 local engine = dofile("/helios/draconic/profiler_engine.lua")
 local language = dofile("/helios/core/i18n.lua").new(config)
 local function tr(key, values, fallback) return language.get(key, values, fallback) end
@@ -2439,6 +2612,7 @@ for _, name in ipairs(peripheral.getNames()) do
     if monitor then break end
 end
 if monitor and type(monitor.setTextScale) == "function" then pcall(monitor.setTextScale, 0.5) end
+if monitor then accessibility.apply(monitor, config) end
 
 local function fmt(value)
     value = tonumber(value)
@@ -2753,7 +2927,7 @@ return {
     name = "HELIOS Control Room",
     version = "1.0.0",
     apiVersion = 1,
-    compatibleCoreVersions = { "1.6.0-alpha.4", "1.6.0-alpha.5", "1.6.0-alpha.6", "1.6.0-alpha.7", "1.6.0-alpha.8", "1.6.0-alpha.9", "1.6.0-alpha.10", "1.6.0-alpha.11", "1.6.0-alpha.12", "1.6.0-alpha.13", "1.6.0-alpha.14", "1.6.0-alpha.15", "1.6.0-alpha.16", "1.6.0-alpha.17", "1.6.0-alpha.18", "1.6.0-alpha.19" },
+    compatibleCoreVersions = { "1.6.0-alpha.4", "1.6.0-alpha.5", "1.6.0-alpha.6", "1.6.0-alpha.7", "1.6.0-alpha.8", "1.6.0-alpha.9", "1.6.0-alpha.10", "1.6.0-alpha.11", "1.6.0-alpha.12", "1.6.0-alpha.13", "1.6.0-alpha.14", "1.6.0-alpha.15", "1.6.0-alpha.16", "1.6.0-alpha.17", "1.6.0-alpha.18", "1.6.0-alpha.19", "1.6.0-alpha.20" },
     entry = "renderer.lua",
     minimumWidth = 50,
     minimumHeight = 31,
@@ -2822,6 +2996,11 @@ function renderer.render(snapshot, state, services)
     local alarm = snapshot.alarm
     local alarmLevel = alarm and tonumber(alarm.level) or 0
     local status = alarm and (alarmLevel >= 3 and tr("dashboard.fault", "FAULT") or tr("dashboard.warning", "WARNING")) or tr("dashboard.system_ready", "SYSTEM READY")
+    if services.accessibility then
+        status = services.accessibility.decorate(status,
+            alarm and (alarmLevel >= 3 and "critical" or "warning") or "healthy",
+            services.accessibilityConfig)
+    end
     gui.text(1, 2, " " .. status .. " ", colors.black,
         alarm and (alarmLevel >= 3 and colors.red or colors.orange) or colors.lime)
     local buttons, x = {}, 1
@@ -3021,6 +3200,36 @@ if args[1] == "language" then
         print("HELIOS language set to " .. wanted .. ". Restart HELIOS to apply it.")
     else
         error("Usage: helios language [list|set <language_id>]", 0)
+    end
+    return
+end
+
+if args[1] == "accessibility" then
+    local service = dofile("/helios/core/accessibility.lua")
+    local action = args[2] or "list"
+    if action == "list" then
+        for _, profile in ipairs(service.profiles()) do
+            print((profile == config.ui.accessibilityProfile and "* " or "  ") .. profile)
+        end
+        print("Status symbols: " .. (config.ui.statusSymbols and "enabled" or "disabled"))
+    elseif action == "set" then
+        local profile = tostring(args[3] or "")
+        if not service.valid(profile) then error("Unknown accessibility profile: " .. profile, 0) end
+        config.ui.accessibilityProfile = profile
+        local ok, reason = dofile("/helios/core/config.lua").save(config)
+        if not ok then error("Could not save HELIOS configuration: " .. tostring(reason), 0) end
+        print("HELIOS accessibility profile set to " .. profile .. ". Restart HELIOS to apply it.")
+    elseif action == "symbols" then
+        local wanted = tostring(args[3] or ""):lower()
+        if wanted ~= "on" and wanted ~= "off" then
+            error("Usage: helios accessibility symbols <on|off>", 0)
+        end
+        config.ui.statusSymbols = wanted == "on"
+        local ok, reason = dofile("/helios/core/config.lua").save(config)
+        if not ok then error("Could not save HELIOS configuration: " .. tostring(reason), 0) end
+        print("HELIOS status symbols " .. (config.ui.statusSymbols and "enabled." or "disabled."))
+    else
+        error("Usage: helios accessibility [list|set <profile>|symbols <on|off>]", 0)
     end
     return
 end
@@ -3559,6 +3768,29 @@ return {
         ["guardian.automatic"] = "AUTOMATIC SAFE SAILING",
         ["guardian.assisted"] = "CAPTAIN ASSISTED - HARD INTERLOCKS ARMED",
         ["guardian.unrestricted"] = "CAPTAIN UNCHAINED - AUTOMATIC HANDS DISMISSED",
+        ["guardian.core"] = "BEAST", ["guardian.field"] = "SHIELD",
+        ["guardian.saturation_short"] = "SAT",
+        ["guardian.reactor_telemetry"] = "BEAST'S READINGS",
+        ["guardian.gate_control"] = "GATE RIGGING", ["guardian.export"] = "Plunder",
+        ["guardian.gate_roles"] = "modem=shield; {output}=plunder",
+        ["guardian.auto_commission"] = "CHART SAFE LIMIT",
+        ["guardian.commission_hint"] = "Starts at 50k RF/t; rises while the shield holds at 17% or more.",
+        ["guardian.initialize"] = "AWAKEN THE BEAST", ["guardian.safe_shutdown"] = "SAFE BERTHING",
+        ["guardian.enable_assisted"] = "CAPTAIN ASSISTED", ["guardian.recalibrate"] = "RECHART LIMIT",
+        ["guardian.recovery_complete"] = "Recovery complete; plunder gate remains closed",
+        ["guardian.recovery_active"] = "Recovery underway: plunder closed while the shield rebuilds",
+        ["guardian.commission_wait"] = "Chartin' safe limits: awaitin' the beast to awaken",
+        ["guardian.commission_edge"] = "Reached the 17% shield edge; plunder closed. Last safe limit {ceiling} RF/t",
+        ["guardian.commission_settle"] = "Steadyin' {trial} RF/t: beast yields {generation} RF/t ({sample}/{total})",
+        ["guardian.commission_complete"] = "Chart complete: verified plunder limit {ceiling} RF/t",
+        ["guardian.commission_testing"] = "Testin' {trial} RF/t: beast yields {generation} RF/t ({sample}/{total})",
+        ["guardian.commission_proved"] = "Proved {trial} RF/t; settin' course for {next} RF/t",
+        ["guardian.calibrating"] = "Chartin' {trial} RF/t: steady watch {sample}/{total}",
+        ["guardian.fresh_core"] = "Fresh fuel aboard; returnin' to the proven course",
+        ["profiler.trend_header"] = "COURSE                        30 SEC       5 MIN",
+        ["profiler.field_per_minute"] = "Shield %/min",
+        ["profiler.core_per_minute"] = "Beast C/min",
+        ["profiler.saturation_per_minute"] = "Saturation %/min",
     },
 }
 ]=],
@@ -3734,6 +3966,132 @@ return {
         ["profiler.saturation_per_minute"] = "Saturation %/min",
     },
 }
+]=],
+
+    ["lang/es_es.lua"] = [=[
+local english = dofile("/helios/lang/en_us.lua")
+local strings = {}
+for key, value in pairs(english.strings) do strings[key] = value end
+
+local translated = {
+    ["common.online"]="EN LINEA", ["common.waiting"]="ESPERANDO", ["common.unknown"]="DESCONOCIDO",
+    ["common.read_only"]="SOLO LECTURA", ["common.quit"]="Q salir", ["common.back"]="VOLVER",
+    ["common.state"]="Estado", ["common.generation"]="Generacion", ["common.core_temperature"]="Temperatura del nucleo",
+    ["common.field_strength"]="Fuerza del campo", ["common.saturation"]="Saturacion",
+    ["common.fuel_conversion"]="Conversion de combustible", ["common.telemetry_lost"]="TELEMETRIA PERDIDA",
+    ["common.system"]="Sistema", ["common.status"]="Estado", ["common.type"]="Tipo", ["common.link"]="Enlace",
+    ["common.output"]="Salida", ["common.input"]="Entrada", ["common.stored"]="Almacenado",
+    ["common.capacity"]="Capacidad", ["common.charge"]="Carga", ["common.driver"]="Controlador",
+    ["common.telemetry"]="Telemetria", ["common.governor"]="Regulador", ["common.rotor_speed"]="Velocidad del rotor",
+    ["common.energy_buffer"]="Reserva de energia", ["common.power_output"]="Salida de energia",
+    ["common.field_gate"]="Compuerta de campo", ["common.export_gate"]="Compuerta de salida",
+    ["common.guardian"]="Guardian", ["common.version"]="Version", ["common.fuel"]="Combustible",
+    ["common.buffer"]="Reserva", ["common.demand"]="Demanda", ["common.inductor"]="Inductor",
+    ["common.net"]="Neto", ["common.steam_production"]="Produccion de vapor", ["common.waste"]="Residuo",
+    ["common.dispatch_mode"]="Modo de despacho", ["common.power_dispatch_requested"]="Despacho de energia solicitado",
+    ["common.previous"]="ANTERIOR", ["common.next"]="SIGUIENTE",
+    ["dashboard.control_room"]="HELIOS // SALA DE CONTROL", ["dashboard.system_ready"]="SISTEMA LISTO",
+    ["dashboard.fault"]="FALLO", ["dashboard.warning"]="ADVERTENCIA", ["dashboard.power_storage"]="ENERGIA ALMACENADA",
+    ["dashboard.steam_production"]="PRODUCCION DE VAPOR", ["dashboard.power_production"]="PRODUCCION DE ENERGIA",
+    ["dashboard.net_power_flow"]="FLUJO NETO DE ENERGIA", ["dashboard.activity"]="ACTIVIDAD DE HELIOS",
+    ["dashboard.no_devices"]="NO HAY DISPOSITIVOS", ["dashboard.storage_reserve"]="Reserva de energia {percent}%",
+    ["dashboard.system_readiness"]="ESTADO DEL SISTEMA", ["dashboard.power_reserve"]="RESERVA DE ENERGIA",
+    ["dashboard.graphical_only"]="Solo monitorizacion grafica", ["dashboard.manual_advanced"]="Control manual: interfaz de texto AVANZADA",
+    ["dashboard.screen_title"]="HELIOS // {title}", ["dashboard.central_power_management"]="Gestion central de energia",
+    ["dashboard.computer_id"]="ID del ordenador", ["dashboard.attached_hardware"]="Hardware conectado",
+    ["dashboard.monitor_output"]="Salida de monitor", ["dashboard.remote_terminals"]="Terminales remotos",
+    ["dashboard.discovery"]="Deteccion", ["dashboard.control"]="Control", ["dashboard.alarms"]="Alarmas",
+    ["dashboard.turbine"]="Turbina", ["dashboard.storage"]="Almacenamiento",
+    ["dashboard.turbine_subtitle"]="Telemetria activa y plan del regulador",
+    ["dashboard.energy_storage"]="ALMACENAMIENTO DE ENERGIA", ["dashboard.storage_subtitle"]="Telemetria universal de solo lectura",
+    ["dashboard.flow_plan"]="Flujo real/fijado/plan", ["dashboard.tanks_in_out"]="Depositos entrada / salida",
+    ["dashboard.full_in"]="Entrada llena", ["dashboard.max_io"]="E/S maxima", ["dashboard.matrix"]="Matriz",
+    ["dashboard.matrix_value"]="{cells} celdas / {providers} proveedores", ["dashboard.cyanite"]="CIANITA",
+    ["dashboard.more_devices"]="+ {count} mas (ejecuta: helios scan)", ["dashboard.gui"]="GUI",
+    ["dashboard.keyboard_help"]="Teclado: B GUI | V/G/E/C/A/R/S | Q salir",
+    ["dashboard.device_counts"]="REACTORES  {reactors}   TURBINAS  {turbines}   ALMACENAMIENTO  {storage}",
+    ["dashboard.plant_overview"]="VISTA GENERAL DE LA PLANTA",
+    ["remote.screen_title"]="HELIOS // REMOTO {title}", ["remote.searching_mainframe"]="BUSCANDO SISTEMA CENTRAL",
+    ["remote.combined_storage"]="ALMACENAMIENTO COMBINADO", ["remote.monitoring_read_only"]="MONITORIZACION REMOTA - SOLO LECTURA",
+    ["remote.no_reactors"]="NO HAY REACTORES", ["remote.no_turbines"]="NO HAY TURBINAS",
+    ["remote.no_storage"]="NO HAY ALMACENAMIENTO", ["remote.text_title"]="REMOTO {title}",
+    ["remote.telemetry_subtitle"]="Telemetria del sistema central en solo lectura", ["remote.mainframe_link"]="Enlace central",
+    ["remote.combined_charge"]="Carga combinada", ["remote.test_speaker"]="PROBAR ALTAVOZ",
+    ["remote.exit_hint"]="Q sale desde el teclado del terminal", ["remote.alarm_silenced_mainframe"]="Alarma silenciada en el sistema central",
+    ["remote.local_speaker_silenced"]="Altavoz local silenciado", ["remote.silence_local"]="SILENCIAR LOCAL",
+    ["remote.mode"]="Modo", ["remote.fuel_use"]="Combustible / uso", ["remote.fuel_case_temperature"]="Temp combustible/carcasa",
+    ["remote.steam_average_target"]="Vapor prom/objetivo", ["remote.coolant_hot"]="Refrigerante / caliente",
+    ["remote.rods_range_exposed"]="Rango barras / expuestas", ["remote.terminal_title"]="TERMINAL REMOTO",
+    ["remote.restricted_subtitle"]="Pantalla restringida por el sistema central", ["remote.display_assignment"]="Pantalla asignada",
+    ["remote.no_control_authority"]="Este terminal no tiene autoridad de control.",
+    ["remote.speaker_hint"]="X prueba el altavoz local.", ["remote.return_main"]="VOLVER A PRINCIPAL",
+    ["value.active"]="ACTIVO", ["value.offline"]="DESCONECTADO", ["value.warning"]="ADVERTENCIA",
+    ["value.calibrating"]="CALIBRANDO", ["value.starting"]="INICIANDO", ["value.searching"]="BUSCANDO",
+    ["value.no_modem"]="SIN MODEM", ["value.id_conflict_telemetry_untrusted"]="CONFLICTO DE ID - TELEMETRIA NO FIABLE",
+    ["value.link_lost_data_stale"]="ENLACE PERDIDO - DATOS ANTIGUOS", ["value.ready"]="LISTO",
+    ["value.running"]="FUNCIONANDO", ["value.stable"]="ESTABLE", ["value.hold"]="MANTENER",
+    ["value.charging"]="CARGANDO", ["value.draining"]="DESCARGANDO", ["value.engaged"]="ACOPLADO",
+    ["value.disengaged"]="DESACOPLADO", ["value.monitoring"]="MONITORIZANDO", ["value.standby"]="EN ESPERA",
+    ["value.dispatched"]="DESPACHADO", ["value.stale"]="ANTIGUO", ["value.learning"]="APRENDIENDO",
+    ["value.fault"]="FALLO", ["value.automatic"]="AUTOMATICO", ["value.manual"]="MANUAL",
+    ["value.calibrated_steam_reactor_is_not_currently_required"]="El reactor de vapor calibrado no es necesario ahora",
+    ["value.storage_demand_assigned_to_this_power_reactor"]="Demanda de almacenamiento asignada a este reactor",
+    ["value.rotor_is_inside_the_target_deadband"]="El rotor esta dentro del margen objetivo",
+    ["value.waiting_for_governor_update"]="Esperando actualizacion del regulador", ["value.link_stale"]="ENLACE ANTIGUO",
+    ["value.automatic_preparing_steam"]="AUTOMATICO / PREPARANDO VAPOR", ["value.automatic_governors_active"]="AUTOMATICO / REGULADORES ACTIVOS",
+    ["value.automatic_waiting_for_plant"]="AUTOMATICO / ESPERANDO PLANTA", ["value.automatic_no_controlled_plant"]="AUTOMATICO / SIN PLANTA CONTROLADA",
+    ["value.automatic_holding_rpm"]="AUTOMATICO / MANTENIENDO {rpm} RPM",
+    ["value.holding_rods_for_steam"]="Manteniendo {rods} barras expuestas para {steam} mB/t",
+    ["value.manual_gates_applied"]="Compuertas manuales: campo {field}, salida {export} RF/t",
+    ["value.generating"]="GENERANDO", ["value.learned"]="APRENDIDO", ["value.steam"]="VAPOR",
+    ["value.mirrored"]="DUPLICADO", ["value.none"]="NINGUNO", ["value.known"]="CONOCIDO",
+    ["value.clear"]="DESPEJADO", ["value.disabled"]="DESACTIVADO", ["value.ready_standby"]="LISTO / EN ESPERA",
+    ["value.true"]="SI", ["value.false"]="NO", ["value.reactor"]="REACTOR", ["value.turbine"]="TURBINA",
+    ["value.battery"]="ALMACENAMIENTO", ["value.monitor"]="MONITOR", ["value.all"]="TODO",
+    ["nav.home"]="INICIO", ["nav.overview"]="RESUMEN", ["nav.reactors"]="REACTORES",
+    ["nav.turbines"]="TURBINAS", ["nav.power"]="ENERGIA", ["nav.advanced"]="AVANZADO",
+    ["nav.settings"]="AJUSTES", ["nav.raw_data"]="DATOS CRUDOS", ["nav.setup"]="CONFIGURACION",
+    ["nav.manual_gates"]="COMPUERTAS MANUALES", ["alarm.critical"]="CRITICO",
+    ["alarm.guardian_critical"]="El Guardian informa de una alarma critica", ["alarm.scram"]="PARADA",
+    ["profiler.title"]="HELIOS // PERFILADOR DRACONIC  {version}", ["profiler.guardian_status"]="Guardian {id}  {status}",
+    ["profiler.wireless_modem"]="Modem inalambrico: {name}", ["profiler.subscription_wait"]="Enviando solicitudes de suscripcion de solo lectura.",
+    ["profiler.confirm_wireless"]="Confirma que el Guardian tambien tiene modem inalambrico.",
+    ["profiler.operating_point"]="PUNTO DE OPERACION ACTUAL", ["profiler.field_input_drain"]="Entrada/drenaje de campo",
+    ["profiler.trend"]="TENDENCIA", ["profiler.output_bracket"]="RANGO DE SALIDA: {output} RF/t",
+    ["profiler.observed_stable"]="Observado: {observed}s   Estable: {stable}s",
+    ["profiler.field_range"]="Rango de campo: {minimum} - {maximum}", ["profiler.core_range"]="Rango del nucleo: {minimum} - {maximum} C",
+    ["profiler.fuel_range"]="Rango de combustible: {minimum} - {maximum}",
+    ["profiler.footer"]="SOLO LECTURA | Guardian {version} | Q salir", ["profiler.waiting"]="Esperando telemetria del Guardian",
+    ["profiler.link_stale"]="Sin telemetria reciente del Guardian", ["profiler.reactor_wait"]="Esperando un estado de operacion en linea",
+    ["profiler.settling"]="El rango de salida cambio recientemente", ["profiler.observing"]="Creando tendencia en caliente",
+    ["profiler.deteriorating"]="El campo baja o la temperatura sube", ["profiler.stable"]="El rango de salida se mantiene estable",
+    ["profiler.improving"]="La contencion o temperatura sigue mejorando", ["profiler.unsettled"]="La tendencia no se ha estabilizado",
+    ["guardian.title"]="HELIOS // GUARDIAN DRACONIC  {version}", ["guardian.automatic"]="SUPERVISION AUTOMATICA SEGURA",
+    ["guardian.assisted"]="MANUAL ASISTIDO - INTERBLOQUEOS ACTIVOS",
+    ["guardian.unrestricted"]="CONTROL SIN RESTRICCIONES - INTERVENCION AUTOMATICA DESACTIVADA",
+    ["guardian.core"]="NUCLEO", ["guardian.field"]="CAMPO", ["guardian.saturation_short"]="SAT",
+    ["guardian.reactor_telemetry"]="TELEMETRIA DEL REACTOR", ["guardian.gate_control"]="CONTROL DE COMPUERTAS",
+    ["guardian.export"]="Salida", ["guardian.gate_roles"]="modem=campo; {output}=salida",
+    ["guardian.auto_commission"]="CALIBRACION AUTO", ["guardian.commission_hint"]="Empieza en 50k RF/t; sube mientras el campo permanece al 17% o mas.",
+    ["guardian.initialize"]="INICIALIZAR Y ACTIVAR", ["guardian.safe_shutdown"]="APAGADO SEGURO",
+    ["guardian.enable_assisted"]="ACTIVAR MANUAL ASISTIDO", ["guardian.recalibrate"]="RECALIBRAR LIMITE",
+    ["guardian.recovery_complete"]="Recuperacion completa; la salida sigue cerrada",
+    ["guardian.recovery_active"]="Recuperacion de calibracion: salida cerrada mientras vuelve la contencion",
+    ["guardian.commission_wait"]="Calibracion automatica: esperando que el reactor este EN LINEA",
+    ["guardian.commission_edge"]="Calibracion alcanzo el borde de campo del 17%; salida cerrada. Limite verificado {ceiling} RF/t",
+    ["guardian.commission_settle"]="Esperando estabilizar {trial} RF/t: generacion {generation} RF/t ({sample}/{total})",
+    ["guardian.commission_complete"]="Calibracion completa: limite verificado {ceiling} RF/t",
+    ["guardian.commission_testing"]="Probando {trial} RF/t: generacion {generation} RF/t ({sample}/{total})",
+    ["guardian.commission_proved"]="Calibracion comprobo {trial} RF/t; avanzando a {next} RF/t",
+    ["guardian.calibrating"]="Calibrando {trial} RF/t: muestra estable {sample}/{total}",
+    ["guardian.fresh_core"]="Nuevo ciclo de combustible detectado; volviendo a la base calibrada",
+    ["profiler.trend_header"]="TENDENCIA                     30 SEG       5 MIN",
+    ["profiler.field_per_minute"]="Campo %/min", ["profiler.core_per_minute"]="Nucleo C/min",
+    ["profiler.saturation_per_minute"]="Saturacion %/min",
+}
+for key, value in pairs(translated) do strings[key] = value end
+
+return { id="es_es", name="Espanol", strings=strings }
 ]=],
 
     ["lang/fr_ca.lua"] = [=[
@@ -4032,15 +4390,19 @@ local mainframe = {}
 function mainframe.run(config)
     local display = dofile("/helios/core/display.lua")
     display.start(config)
+    local accessibility = dofile("/helios/core/accessibility.lua")
+    accessibility.apply(term.current(), config)
     if fs.exists("/helios/core/boot.lua") then
         dofile("/helios/core/boot.lua").run(config)
     end
     local ui = dofile("/helios/core/ui.lua")
+    ui.configure(config)
     ui.setVersion(config.version)
     local language = dofile("/helios/core/i18n.lua").new(config)
     local function tr(key, values, fallback) return language.get(key, values, fallback) end
     local function tv(value) return language.value(value) end
     local gui = dofile("/helios/core/gui.lua")
+    gui.configure(config)
     local guiLoader = dofile("/helios/core/gui_loader.lua")
     local uiContract = dofile("/helios/core/ui_contract.lua")
     local configStore = dofile("/helios/core/config.lua")
@@ -5634,6 +5996,7 @@ function mainframe.run(config)
 
     local function settings()
         local buttons = {}
+        local accessibilityProfiles = accessibility.profiles()
         local function changeTimeout(direction)
             local currentIndex = 1
             for index, timeout in ipairs(timeoutChoices) do
@@ -5657,6 +6020,9 @@ function mainframe.run(config)
             ui.status("Maintenance timeout", math.floor(config.discovery.maintenanceTimeout / 60) .. " minutes")
             ui.status("Current mode", modeName(), maintenance and colors.orange or colors.white)
             ui.status("Peripheral names", config.ui.showPeripheralNames and "SHOWN" or "HIDDEN")
+            ui.status("Colour profile", string.upper(config.ui.accessibilityProfile:gsub("_", " ")), colors.cyan)
+            ui.status("Status symbols", config.ui.statusSymbols and "ENABLED" or "DISABLED",
+                config.ui.statusSymbols and colors.lime or colors.gray)
             ui.status("Power display", config.power.unit .. " / " .. string.upper(config.power.numberFormat))
             local selectedGui = guiLoader.resolve(config.ui.renderer, config.version)
             ui.status("Graphical interface", selectedGui and selectedGui.name or
@@ -5685,6 +6051,10 @@ function mainframe.run(config)
             buttons.alarms = ui.inlineButton("ALARM SETTINGS", colors.cyan)
             write(" ")
             buttons.gui = ui.inlineButton("GUI MODULE", colors.cyan)
+            print("")
+            buttons.palette = ui.inlineButton("COLOUR PROFILE", colors.cyan)
+            write(" ")
+            buttons.symbols = ui.inlineButton("STATUS SYMBOLS", colors.cyan)
             print("")
             buttons.back = ui.inlineButton("BACK", colors.cyan)
             print("")
@@ -5719,6 +6089,16 @@ function mainframe.run(config)
                 powerSettings()
             elseif (event == "key" and value == keys.a) or ui.hit(buttons.alarms, touchX, touchY) then
                 alarmSettings()
+            elseif ui.hit(buttons.palette, touchX, touchY) then
+                local current = 1
+                for index, profile in ipairs(accessibilityProfiles) do
+                    if profile == config.ui.accessibilityProfile then current = index break end
+                end
+                config.ui.accessibilityProfile = accessibilityProfiles[(current % #accessibilityProfiles) + 1]
+                saveConfig(); accessibility.apply(term.current(), config)
+            elseif ui.hit(buttons.symbols, touchX, touchY) then
+                config.ui.statusSymbols = not config.ui.statusSymbols
+                saveConfig(); ui.configure(config); gui.configure(config)
             elseif (event == "key" and value == keys.g) or ui.hit(buttons.gui, touchX, touchY) then
                 local modules = guiLoader.scan(config.version)
                 local index = 1
@@ -6757,6 +7137,7 @@ function mainframe.run(config)
                 display.useMonitors()
                 local ok, rendered = pcall(customRenderer.render, snapshotFor("all"), customState, {
                     gui = gui, powerFormat = powerFormat, allowEmergency = true, i18n = language,
+                    accessibility = accessibility, accessibilityConfig = config,
                 })
                 if ok then customButtons = rendered or {} else customRenderer = nil end
                 display.useNative()
@@ -9346,15 +9727,19 @@ local terminal = {}
 function terminal.run(config)
     local display = dofile("/helios/core/display.lua")
     display.start(config)
+    local accessibility = dofile("/helios/core/accessibility.lua")
+    accessibility.apply(term.current(), config)
     if fs.exists("/helios/core/boot.lua") then
         dofile("/helios/core/boot.lua").run(config)
     end
     local ui = dofile("/helios/core/ui.lua")
+    ui.configure(config)
     ui.setVersion(config.version)
     local language = dofile("/helios/core/i18n.lua").new(config)
     local function tr(key, values, fallback) return language.get(key, values, fallback) end
     local function tv(value) return language.value(value) end
     local gui = dofile("/helios/core/gui.lua")
+    gui.configure(config)
     local guiLoader = dofile("/helios/core/gui_loader.lua")
     local configStore = dofile("/helios/core/config.lua")
     local network = dofile("/helios/core/network.lua")
@@ -9843,6 +10228,7 @@ function terminal.run(config)
         elseif customRenderer and snapshot then
             local ok, result = pcall(customRenderer.render, snapshot, customState, {
                 gui = gui, powerFormat = powerFormat, i18n = language,
+                accessibility = accessibility, accessibilityConfig = config,
             })
             if ok then customButtons = result or {} else customRenderer = nil; renderGraphical() end
         else
@@ -10148,10 +10534,13 @@ local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
 local SETTINGS_PENDING,SETTINGS_BACKUP=SETTINGS..".new",SETTINGS..".bak"
-local language
+local language,guardianConfig,accessibility
 if fs.exists("/helios/core/i18n.lua") and fs.exists("/helios/config.lua") then
-  local ok,service=pcall(function() return dofile("/helios/core/i18n.lua").new(dofile("/helios/config.lua")) end)
+  local okConfig,loadedConfig=pcall(dofile,"/helios/config.lua");if okConfig then guardianConfig=loadedConfig end
+  local ok,service=pcall(function() return dofile("/helios/core/i18n.lua").new(guardianConfig) end)
   if ok then language=service end
+  local okAccess,loadedAccess=pcall(dofile,"/helios/core/accessibility.lua")
+  if okAccess then accessibility=loadedAccess;accessibility.apply(term.current(),guardianConfig) end
 end
 local function tr(key,values,fallback) return language and language.get(key,values,fallback) or fallback end
 local facilityNetwork,facilityProtocol,facilityIdentity,facilitySequence
@@ -10160,7 +10549,7 @@ local facilityCollectorId,facilityCollectorRole,facilityCollectorPriority=nil,ni
 local facilityCollectorLeaseUntil=0
 local facilitySiteId="default"
 if fs.exists("/helios/config.lua") then
-  local okConfig,guardianConfig=pcall(dofile,"/helios/config.lua")
+  local okConfig=type(guardianConfig)=="table"
   if okConfig and type(guardianConfig)=="table" and type(guardianConfig.network)=="table" and
      type(guardianConfig.network.siteId)=="string" and guardianConfig.network.siteId~="" then
     facilitySiteId=guardianConfig.network.siteId
@@ -10845,6 +11234,7 @@ if rawget(_G,"HELIOS_GUARDIAN_TEST") then
     updateMeltdownTrend=updateMeltdownTrend,imminentMeltdown=imminentMeltdown}
 end
 local binding,page,controls,buttons=inspect(),"overview",load(),{}
+if accessibility and binding and binding.target then accessibility.apply(binding.target,guardianConfig) end
 controls.inputControlVerified=false;controls.outputControlVerified=false;controls.gatesOwned=false;controls.telemetryStale=false
 local computer=term.current();local target=binding.monitor and peripheral.wrap(binding.monitor) or computer;compactMonitor(target,binding.monitor~=nil)
 if fs.exists("/helios/core/boot.lua") and fs.exists("/helios/core/config.lua") then
@@ -10944,6 +11334,7 @@ local function inputWorker()
       end
     elseif e=="peripheral" or e=="peripheral_detach" then
       binding=inspect()
+      if accessibility and binding and binding.target then accessibility.apply(binding.target,guardianConfig) end
       target=binding.monitor and peripheral.wrap(binding.monitor) or computer
       compactMonitor(target,binding.monitor~=nil)
       gateApplied={};gateCommands={};reactorCommands={}
@@ -11164,7 +11555,7 @@ end
     return true
 end
 
-local function buildConfig(role, display, existing, profilerGuardianId, selectedLanguage)
+local function buildConfig(role, display, existing, profilerGuardianId, selectedLanguage, selectedAccessibility)
     existing = type(existing) == "table" and existing or {}
     local discovery = type(existing.discovery) == "table" and existing.discovery or {}
     local alarms = type(existing.alarms) == "table" and existing.alarms or {}
@@ -11197,6 +11588,9 @@ local function buildConfig(role, display, existing, profilerGuardianId, selected
             showPeripheralNames = uiSettings.showPeripheralNames == true,
             monitorTextScale = tonumber(uiSettings.monitorTextScale) or 0.5,
             renderer = type(uiSettings.renderer) == "string" and uiSettings.renderer or "default",
+            accessibilityProfile = type(selectedAccessibility) == "string" and selectedAccessibility or
+                type(uiSettings.accessibilityProfile) == "string" and uiSettings.accessibilityProfile or "standard",
+            statusSymbols = uiSettings.statusSymbols ~= false,
             language = type(selectedLanguage) == "string" and selectedLanguage or
                 type(uiSettings.language) == "string" and
                 uiSettings.language:match("^[a-z][a-z]_[a-z][a-z]$") and
@@ -11340,6 +11734,7 @@ local function runInstaller()
         if ok and type(loaded) == "table" then existingConfig = loaded end
     end
     selectInstallerLanguage(existingConfig and existingConfig.ui and existingConfig.ui.language)
+    selectAccessibility(existingConfig and existingConfig.ui and existingConfig.ui.accessibilityProfile)
     title(installerText("Installer") .. " " .. VERSION)
     local selection = choose("Select an installation category:", {
         { label = "Install Mainframe", value = "mainframe" },
@@ -11419,7 +11814,7 @@ local function runInstaller()
         return
     end
 
-    local configText = buildConfig(role, display, existingConfig, profilerGuardianId, installerLanguage)
+    local configText = buildConfig(role, display, existingConfig, profilerGuardianId, installerLanguage, installerAccessibility)
     local requiredBytes = embeddedInstallBytes(configText, role)
     local freeSpace = fs.getFreeSpace("/")
     local lowSpaceUpgrade = type(freeSpace) == "number" and freeSpace < requiredBytes

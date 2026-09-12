@@ -4,15 +4,19 @@ local terminal = {}
 function terminal.run(config)
     local display = dofile("/helios/core/display.lua")
     display.start(config)
+    local accessibility = dofile("/helios/core/accessibility.lua")
+    accessibility.apply(term.current(), config)
     if fs.exists("/helios/core/boot.lua") then
         dofile("/helios/core/boot.lua").run(config)
     end
     local ui = dofile("/helios/core/ui.lua")
+    ui.configure(config)
     ui.setVersion(config.version)
     local language = dofile("/helios/core/i18n.lua").new(config)
     local function tr(key, values, fallback) return language.get(key, values, fallback) end
     local function tv(value) return language.value(value) end
     local gui = dofile("/helios/core/gui.lua")
+    gui.configure(config)
     local guiLoader = dofile("/helios/core/gui_loader.lua")
     local configStore = dofile("/helios/core/config.lua")
     local network = dofile("/helios/core/network.lua")
@@ -501,6 +505,7 @@ function terminal.run(config)
         elseif customRenderer and snapshot then
             local ok, result = pcall(customRenderer.render, snapshot, customState, {
                 gui = gui, powerFormat = powerFormat, i18n = language,
+                accessibility = accessibility, accessibilityConfig = config,
             })
             if ok then customButtons = result or {} else customRenderer = nil; renderGraphical() end
         else

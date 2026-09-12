@@ -32,6 +32,12 @@ function config.load()
     loaded.ui.showPeripheralNames = loaded.ui.showPeripheralNames == true
     loaded.ui.monitorTextScale = tonumber(loaded.ui.monitorTextScale) or 0.5
     loaded.ui.renderer = type(loaded.ui.renderer) == "string" and loaded.ui.renderer or "default"
+    local accessibilityProfiles = { standard=true, deuteranopia=true, protanopia=true,
+        tritanopia=true, high_contrast=true }
+    loaded.ui.accessibilityProfile = accessibilityProfiles[loaded.ui.accessibilityProfile] and
+        loaded.ui.accessibilityProfile or "standard"
+    if loaded.ui.statusSymbols == nil then loaded.ui.statusSymbols = true end
+    loaded.ui.statusSymbols = loaded.ui.statusSymbols ~= false
     loaded.ui.language = type(loaded.ui.language) == "string" and
         loaded.ui.language:match("^[a-z][a-z]_[a-z][a-z]$") and loaded.ui.language or "en_us"
     loaded.control = loaded.control or {}

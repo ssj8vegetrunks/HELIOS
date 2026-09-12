@@ -3,6 +3,16 @@ local ui = {}
 local idConflicts = {}
 local systemVersion
 local criticalAlarm = false
+local accessibilityConfig
+local accessibility
+
+function ui.configure(config)
+    accessibilityConfig = config
+    if fs and fs.exists and fs.exists("/helios/core/accessibility.lua") then
+        local ok, loaded = pcall(dofile, "/helios/core/accessibility.lua")
+        if ok then accessibility = loaded end
+    end
+end
 
 function ui.setVersion(version)
     systemVersion = version and tostring(version) or nil
@@ -126,6 +136,9 @@ function ui.status(label, value, colour)
     term.setTextColor(colors.lightGray)
     write(string.sub(prefix, 1, width))
     term.setTextColor(colour or colors.white)
+    if accessibility and colour then
+        value = accessibility.decorate(value, accessibility.levelForColour(colour), accessibilityConfig)
+    end
     local x = select(1, term.getCursorPos())
     print(string.sub(tostring(value), 1, math.max(0, width - x + 1)))
     term.setTextColor(colors.white)

@@ -1,6 +1,8 @@
 # HELIOS language packs
 
 HELIOS language packs are data-only Lua tables stored in `/helios/lang/`.
+Official packs currently include English (US), Canadian French, German,
+Spanish, and the optional Pirate translation.
 English (`en_us`) is always installed and is the fallback for every missing
 translation. Canadian French (`fr_ca`) and German (`de_de`) are the supported
 installer choices in this release. A damaged, incomplete, or absent selected pack therefore

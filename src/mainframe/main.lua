@@ -4,15 +4,19 @@ local mainframe = {}
 function mainframe.run(config)
     local display = dofile("/helios/core/display.lua")
     display.start(config)
+    local accessibility = dofile("/helios/core/accessibility.lua")
+    accessibility.apply(term.current(), config)
     if fs.exists("/helios/core/boot.lua") then
         dofile("/helios/core/boot.lua").run(config)
     end
     local ui = dofile("/helios/core/ui.lua")
+    ui.configure(config)
     ui.setVersion(config.version)
     local language = dofile("/helios/core/i18n.lua").new(config)
     local function tr(key, values, fallback) return language.get(key, values, fallback) end
     local function tv(value) return language.value(value) end
     local gui = dofile("/helios/core/gui.lua")
+    gui.configure(config)
     local guiLoader = dofile("/helios/core/gui_loader.lua")
     local uiContract = dofile("/helios/core/ui_contract.lua")
     local configStore = dofile("/helios/core/config.lua")
@@ -1606,6 +1610,7 @@ function mainframe.run(config)
 
     local function settings()
         local buttons = {}
+        local accessibilityProfiles = accessibility.profiles()
         local function changeTimeout(direction)
             local currentIndex = 1
             for index, timeout in ipairs(timeoutChoices) do
@@ -1629,6 +1634,9 @@ function mainframe.run(config)
             ui.status("Maintenance timeout", math.floor(config.discovery.maintenanceTimeout / 60) .. " minutes")
             ui.status("Current mode", modeName(), maintenance and colors.orange or colors.white)
             ui.status("Peripheral names", config.ui.showPeripheralNames and "SHOWN" or "HIDDEN")
+            ui.status("Colour profile", string.upper(config.ui.accessibilityProfile:gsub("_", " ")), colors.cyan)
+            ui.status("Status symbols", config.ui.statusSymbols and "ENABLED" or "DISABLED",
+                config.ui.statusSymbols and colors.lime or colors.gray)
             ui.status("Power display", config.power.unit .. " / " .. string.upper(config.power.numberFormat))
             local selectedGui = guiLoader.resolve(config.ui.renderer, config.version)
             ui.status("Graphical interface", selectedGui and selectedGui.name or
@@ -1657,6 +1665,10 @@ function mainframe.run(config)
             buttons.alarms = ui.inlineButton("ALARM SETTINGS", colors.cyan)
             write(" ")
             buttons.gui = ui.inlineButton("GUI MODULE", colors.cyan)
+            print("")
+            buttons.palette = ui.inlineButton("COLOUR PROFILE", colors.cyan)
+            write(" ")
+            buttons.symbols = ui.inlineButton("STATUS SYMBOLS", colors.cyan)
             print("")
             buttons.back = ui.inlineButton("BACK", colors.cyan)
             print("")
@@ -1691,6 +1703,16 @@ function mainframe.run(config)
                 powerSettings()
             elseif (event == "key" and value == keys.a) or ui.hit(buttons.alarms, touchX, touchY) then
                 alarmSettings()
+            elseif ui.hit(buttons.palette, touchX, touchY) then
+                local current = 1
+                for index, profile in ipairs(accessibilityProfiles) do
+                    if profile == config.ui.accessibilityProfile then current = index break end
+                end
+                config.ui.accessibilityProfile = accessibilityProfiles[(current % #accessibilityProfiles) + 1]
+                saveConfig(); accessibility.apply(term.current(), config)
+            elseif ui.hit(buttons.symbols, touchX, touchY) then
+                config.ui.statusSymbols = not config.ui.statusSymbols
+                saveConfig(); ui.configure(config); gui.configure(config)
             elseif (event == "key" and value == keys.g) or ui.hit(buttons.gui, touchX, touchY) then
                 local modules = guiLoader.scan(config.version)
                 local index = 1
@@ -2729,6 +2751,7 @@ function mainframe.run(config)
                 display.useMonitors()
                 local ok, rendered = pcall(customRenderer.render, snapshotFor("all"), customState, {
                     gui = gui, powerFormat = powerFormat, allowEmergency = true, i18n = language,
+                    accessibility = accessibility, accessibilityConfig = config,
                 })
                 if ok then customButtons = rendered or {} else customRenderer = nil end
                 display.useNative()

@@ -10,6 +10,8 @@
 
 ## Detailed references
 
+- [Accessibility](ACCESSIBILITY.md)
+
 - [Architecture](ARCHITECTURE.md)
 - [Control and safety](CONTROL.md)
 - [GUI behavior](GUI.md)

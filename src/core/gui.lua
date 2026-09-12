@@ -1,4 +1,7 @@
 local gui = {}
+local accessibilityConfig
+
+function gui.configure(config) accessibilityConfig = config end
 
 local function textLength(value)
     local _, count = tostring(value or ""):gsub("[^\128-\191]", "")
@@ -63,8 +66,9 @@ function gui.progress(x, y, width, percent, foreground, background)
     width = math.max(1, math.floor(tonumber(width) or 1))
     percent = clamp(percent, 0, 100)
     local filled = math.floor(width * percent / 100 + 0.5)
-    gui.text(x, y, string.rep(" ", filled), colors.white, foreground or colors.lime)
-    gui.text(x + filled, y, string.rep(" ", width - filled), colors.white,
+    local patterned = accessibilityConfig and accessibilityConfig.ui and accessibilityConfig.ui.statusSymbols ~= false
+    gui.text(x, y, string.rep(patterned and "=" or " ", filled), colors.white, foreground or colors.lime)
+    gui.text(x + filled, y, string.rep(patterned and "." or " ", width - filled), colors.white,
         background or colors.gray)
     return filled
 end

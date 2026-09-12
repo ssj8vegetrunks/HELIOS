@@ -6,6 +6,10 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 
 ## Module dependencies
 
+### `core/accessibility.lua`
+
+- No HELIOS module dependencies detected.
+
 ### `core/boot.lua`
 
 - No HELIOS module dependencies detected.
@@ -68,6 +72,7 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 
 ### `draconic/profiler.lua`
 
+- depends on → `core/accessibility.lua`
 - depends on → `core/i18n.lua`
 - depends on → `draconic/profiler_engine.lua`
 
@@ -85,6 +90,7 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 
 ### `helios.lua`
 
+- depends on → `core/accessibility.lua`
 - depends on → `core/config.lua`
 - depends on → `core/gui_loader.lua`
 - depends on → `core/i18n.lua`
@@ -114,6 +120,10 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 
 - No HELIOS module dependencies detected.
 
+### `lang/es_es.lua`
+
+- depends on → `lang/en_us.lua`
+
 ### `lang/fr_ca.lua`
 
 - No HELIOS module dependencies detected.
@@ -124,6 +134,7 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 
 ### `mainframe/main.lua`
 
+- depends on → `core/accessibility.lua`
 - depends on → `core/boot.lua`
 - depends on → `core/config.lua`
 - depends on → `core/display.lua`
@@ -159,6 +170,7 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 
 ### `terminal/main.lua`
 
+- depends on → `core/accessibility.lua`
 - depends on → `core/boot.lua`
 - depends on → `core/config.lua`
 - depends on → `core/display.lua`
@@ -192,6 +204,13 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 - No HELIOS module dependencies detected.
 
 ## Reverse dependencies / blast radius
+
+### `core/accessibility.lua`
+
+- used by ← `draconic/profiler.lua`
+- used by ← `helios.lua`
+- used by ← `mainframe/main.lua`
+- used by ← `terminal/main.lua`
 
 ### `core/boot.lua`
 
@@ -300,6 +319,10 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 - No HELIOS modules directly depend on this module.
 
 ### `lang/en_us.lua`
+
+- used by ← `lang/es_es.lua`
+
+### `lang/es_es.lua`
 
 - No HELIOS modules directly depend on this module.
 

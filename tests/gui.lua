@@ -16,11 +16,14 @@ term = {
 }
 
 local gui = dofile("src/core/gui.lua")
+gui.configure({ ui = { statusSymbols = true } })
 local button = gui.button(2, 3, "POWER", colors.white, colors.gray)
 assert(gui.hit(button, 2, 3) and gui.hit(button, 8, 3), "button bounds must be touchable")
 assert(not gui.hit(button, 9, 3), "button hitbox must end with visible button")
 assert(gui.progress(1, 5, 10, 50, colors.lime, colors.gray) == 5,
     "progress bar must fill the requested percentage")
+assert(cells["5:1"] == "=" and cells["5:6"] == ".",
+    "accessible progress bars must use fill and empty patterns")
 assert(gui.rpmGauge(1, 7, 21, 900) >= 8, "RPM marker must map into the 900 band")
 assert(gui.rpmGauge(1, 8, 21, 1800) >= 16, "RPM marker must map into the 1800 band")
 

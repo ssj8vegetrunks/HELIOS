@@ -1,4 +1,6 @@
 local config = dofile("/helios/config.lua")
+local accessibility = dofile("/helios/core/accessibility.lua")
+accessibility.apply(term.current(), config)
 local engine = dofile("/helios/draconic/profiler_engine.lua")
 local language = dofile("/helios/core/i18n.lua").new(config)
 local function tr(key, values, fallback) return language.get(key, values, fallback) end
@@ -60,6 +62,7 @@ for _, name in ipairs(peripheral.getNames()) do
     if monitor then break end
 end
 if monitor and type(monitor.setTextScale) == "function" then pcall(monitor.setTextScale, 0.5) end
+if monitor then accessibility.apply(monitor, config) end
 
 local function fmt(value)
     value = tonumber(value)

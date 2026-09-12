@@ -58,6 +58,11 @@ function renderer.render(snapshot, state, services)
     local alarm = snapshot.alarm
     local alarmLevel = alarm and tonumber(alarm.level) or 0
     local status = alarm and (alarmLevel >= 3 and tr("dashboard.fault", "FAULT") or tr("dashboard.warning", "WARNING")) or tr("dashboard.system_ready", "SYSTEM READY")
+    if services.accessibility then
+        status = services.accessibility.decorate(status,
+            alarm and (alarmLevel >= 3 and "critical" or "warning") or "healthy",
+            services.accessibilityConfig)
+    end
     gui.text(1, 2, " " .. status .. " ", colors.black,
         alarm and (alarmLevel >= 3 and colors.red or colors.orange) or colors.lime)
     local buttons, x = {}, 1

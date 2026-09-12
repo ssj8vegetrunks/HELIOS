@@ -41,10 +41,13 @@ local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
 local SETTINGS_PENDING,SETTINGS_BACKUP=SETTINGS..".new",SETTINGS..".bak"
-local language
+local language,guardianConfig,accessibility
 if fs.exists("/helios/core/i18n.lua") and fs.exists("/helios/config.lua") then
-  local ok,service=pcall(function() return dofile("/helios/core/i18n.lua").new(dofile("/helios/config.lua")) end)
+  local okConfig,loadedConfig=pcall(dofile,"/helios/config.lua");if okConfig then guardianConfig=loadedConfig end
+  local ok,service=pcall(function() return dofile("/helios/core/i18n.lua").new(guardianConfig) end)
   if ok then language=service end
+  local okAccess,loadedAccess=pcall(dofile,"/helios/core/accessibility.lua")
+  if okAccess then accessibility=loadedAccess;accessibility.apply(term.current(),guardianConfig) end
 end
 local function tr(key,values,fallback) return language and language.get(key,values,fallback) or fallback end
 local facilityNetwork,facilityProtocol,facilityIdentity,facilitySequence
@@ -53,7 +56,7 @@ local facilityCollectorId,facilityCollectorRole,facilityCollectorPriority=nil,ni
 local facilityCollectorLeaseUntil=0
 local facilitySiteId="default"
 if fs.exists("/helios/config.lua") then
-  local okConfig,guardianConfig=pcall(dofile,"/helios/config.lua")
+  local okConfig=type(guardianConfig)=="table"
   if okConfig and type(guardianConfig)=="table" and type(guardianConfig.network)=="table" and
      type(guardianConfig.network.siteId)=="string" and guardianConfig.network.siteId~="" then
     facilitySiteId=guardianConfig.network.siteId
@@ -738,6 +741,7 @@ if rawget(_G,"HELIOS_GUARDIAN_TEST") then
     updateMeltdownTrend=updateMeltdownTrend,imminentMeltdown=imminentMeltdown}
 end
 local binding,page,controls,buttons=inspect(),"overview",load(),{}
+if accessibility and binding and binding.target then accessibility.apply(binding.target,guardianConfig) end
 controls.inputControlVerified=false;controls.outputControlVerified=false;controls.gatesOwned=false;controls.telemetryStale=false
 local computer=term.current();local target=binding.monitor and peripheral.wrap(binding.monitor) or computer;compactMonitor(target,binding.monitor~=nil)
 if fs.exists("/helios/core/boot.lua") and fs.exists("/helios/core/config.lua") then
@@ -837,6 +841,7 @@ local function inputWorker()
       end
     elseif e=="peripheral" or e=="peripheral_detach" then
       binding=inspect()
+      if accessibility and binding and binding.target then accessibility.apply(binding.target,guardianConfig) end
       target=binding.monitor and peripheral.wrap(binding.monitor) or computer
       compactMonitor(target,binding.monitor~=nil)
       gateApplied={};gateCommands={};reactorCommands={}

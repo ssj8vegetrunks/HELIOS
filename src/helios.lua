@@ -23,6 +23,36 @@ if args[1] == "language" then
     return
 end
 
+if args[1] == "accessibility" then
+    local service = dofile("/helios/core/accessibility.lua")
+    local action = args[2] or "list"
+    if action == "list" then
+        for _, profile in ipairs(service.profiles()) do
+            print((profile == config.ui.accessibilityProfile and "* " or "  ") .. profile)
+        end
+        print("Status symbols: " .. (config.ui.statusSymbols and "enabled" or "disabled"))
+    elseif action == "set" then
+        local profile = tostring(args[3] or "")
+        if not service.valid(profile) then error("Unknown accessibility profile: " .. profile, 0) end
+        config.ui.accessibilityProfile = profile
+        local ok, reason = dofile("/helios/core/config.lua").save(config)
+        if not ok then error("Could not save HELIOS configuration: " .. tostring(reason), 0) end
+        print("HELIOS accessibility profile set to " .. profile .. ". Restart HELIOS to apply it.")
+    elseif action == "symbols" then
+        local wanted = tostring(args[3] or ""):lower()
+        if wanted ~= "on" and wanted ~= "off" then
+            error("Usage: helios accessibility symbols <on|off>", 0)
+        end
+        config.ui.statusSymbols = wanted == "on"
+        local ok, reason = dofile("/helios/core/config.lua").save(config)
+        if not ok then error("Could not save HELIOS configuration: " .. tostring(reason), 0) end
+        print("HELIOS status symbols " .. (config.ui.statusSymbols and "enabled." or "disabled."))
+    else
+        error("Usage: helios accessibility [list|set <profile>|symbols <on|off>]", 0)
+    end
+    return
+end
+
 if args[1] == nil and config.role == "guardian" then
     dofile("/helios/draconic/controller.lua")
     return
