@@ -1,7 +1,7 @@
 -- HELIOS single-file installer
 -- Manual-control alpha: guarded direct plant authority.
 
-local VERSION = "1.6.0-alpha.22"
+local VERSION = "1.6.0-alpha.23"
 local INSTALL_DIR = "/helios"
 local STAGE_DIR = "/.helios-install"
 local MODULE_PACK_BASE_URL = "https://raw.githubusercontent.com/ssj8vegetrunks/HELIOS/testing/public-alpha/module-pack"
@@ -240,7 +240,7 @@ local function selectAccessibility(existingProfile)
     end
 end
 
-local title
+local title, confirm
 
 local function hasModem()
     for _, name in ipairs(peripheral.getNames()) do
@@ -338,7 +338,7 @@ local function choose(prompt, options, hiddenOptions)
     end
 end
 
-local function confirm(prompt)
+confirm = function(prompt)
     write(installerText(prompt) .. " [Y/N] ")
     local answer = read():lower()
     return answer == "y" or answer == "yes" or
@@ -3150,7 +3150,7 @@ return {
     name = "HELIOS Control Room",
     version = "1.0.0",
     apiVersion = 1,
-    compatibleCoreVersions = { "1.6.0-alpha.4", "1.6.0-alpha.5", "1.6.0-alpha.6", "1.6.0-alpha.7", "1.6.0-alpha.8", "1.6.0-alpha.9", "1.6.0-alpha.10", "1.6.0-alpha.11", "1.6.0-alpha.12", "1.6.0-alpha.13", "1.6.0-alpha.14", "1.6.0-alpha.15", "1.6.0-alpha.16", "1.6.0-alpha.17", "1.6.0-alpha.18", "1.6.0-alpha.19", "1.6.0-alpha.20", "1.6.0-alpha.21", "1.6.0-alpha.22" },
+    compatibleCoreVersions = { "1.6.0-alpha.4", "1.6.0-alpha.5", "1.6.0-alpha.6", "1.6.0-alpha.7", "1.6.0-alpha.8", "1.6.0-alpha.9", "1.6.0-alpha.10", "1.6.0-alpha.11", "1.6.0-alpha.12", "1.6.0-alpha.13", "1.6.0-alpha.14", "1.6.0-alpha.15", "1.6.0-alpha.16", "1.6.0-alpha.17", "1.6.0-alpha.18", "1.6.0-alpha.19", "1.6.0-alpha.20", "1.6.0-alpha.21", "1.6.0-alpha.22", "1.6.0-alpha.23" },
     entry = "renderer.lua",
     minimumWidth = 50,
     minimumHeight = 31,
