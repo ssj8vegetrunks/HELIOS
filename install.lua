@@ -1,12 +1,12 @@
 -- HELIOS single-file installer
 -- Manual-control alpha: guarded direct plant authority.
 
-local VERSION = "1.6.0-alpha.25"
+local VERSION = "1.6.0-alpha.26"
 local INSTALL_DIR = "/helios"
 local STAGE_DIR = "/.helios-install"
 local MODULE_PACK_BASE_URL = "https://raw.githubusercontent.com/ssj8vegetrunks/HELIOS/testing/public-alpha/module-pack"
 local installerLanguage = "en_us"
-local installerAccessibility = "standard"
+local installerAccessibility = "high_contrast"
 local installerNetworkEnabled = false
 local installerNetworkKey = ""
 local FILES
@@ -220,23 +220,26 @@ end
 
 local function selectAccessibility(existingProfile)
     local choices = {
-        { id="standard", name="Standard" },
+        { id="high_contrast", name="High contrast (HELIOS default)" },
+        { id="standard", name="Classic" },
         { id="deuteranopia", name="Deuteranopia" },
         { id="protanopia", name="Protanopia" },
         { id="tritanopia", name="Tritanopia" },
-        { id="high_contrast", name="High contrast" },
     }
+    local activeProfile = type(existingProfile) == "string" and existingProfile or installerAccessibility
     nativePrint("")
     nativePrint("Accessibility colour profile")
     for index, choice in ipairs(choices) do
         nativePrint(("  [%d] %s%s"):format(index, choice.name,
-            choice.id == existingProfile and " *" or ""))
+            choice.id == activeProfile and " *" or ""))
     end
     while true do
         term.setTextColor(colors.yellow);write("> ");term.setTextColor(colors.white)
-        local selected = tonumber(read())
+        local answer = read()
+        if answer == "" then installerAccessibility=activeProfile;return end
+        local selected = tonumber(answer)
         if selected and choices[selected] then installerAccessibility=choices[selected].id;return end
-        term.setTextColor(colors.red);nativePrint("1 / 2 / 3 / 4 / 5");term.setTextColor(colors.white)
+        term.setTextColor(colors.red);nativePrint("1 / 2 / 3 / 4 / 5, or Enter for *");term.setTextColor(colors.white)
     end
 end
 
@@ -3150,7 +3153,7 @@ return {
     name = "HELIOS Control Room",
     version = "1.0.0",
     apiVersion = 1,
-    compatibleCoreVersions = { "1.6.0-alpha.4", "1.6.0-alpha.5", "1.6.0-alpha.6", "1.6.0-alpha.7", "1.6.0-alpha.8", "1.6.0-alpha.9", "1.6.0-alpha.10", "1.6.0-alpha.11", "1.6.0-alpha.12", "1.6.0-alpha.13", "1.6.0-alpha.14", "1.6.0-alpha.15", "1.6.0-alpha.16", "1.6.0-alpha.17", "1.6.0-alpha.18", "1.6.0-alpha.19", "1.6.0-alpha.20", "1.6.0-alpha.21", "1.6.0-alpha.22", "1.6.0-alpha.23", "1.6.0-alpha.24", "1.6.0-alpha.25" },
+    compatibleCoreVersions = { "1.6.0-alpha.4", "1.6.0-alpha.5", "1.6.0-alpha.6", "1.6.0-alpha.7", "1.6.0-alpha.8", "1.6.0-alpha.9", "1.6.0-alpha.10", "1.6.0-alpha.11", "1.6.0-alpha.12", "1.6.0-alpha.13", "1.6.0-alpha.14", "1.6.0-alpha.15", "1.6.0-alpha.16", "1.6.0-alpha.17", "1.6.0-alpha.18", "1.6.0-alpha.19", "1.6.0-alpha.20", "1.6.0-alpha.21", "1.6.0-alpha.22", "1.6.0-alpha.23", "1.6.0-alpha.24", "1.6.0-alpha.25", "1.6.0-alpha.26" },
     entry = "renderer.lua",
     minimumWidth = 50,
     minimumHeight = 31,
@@ -12032,7 +12035,7 @@ local function buildConfig(role, display, existing, profilerGuardianId, selected
             monitorTextScale = tonumber(uiSettings.monitorTextScale) or 0.5,
             renderer = type(uiSettings.renderer) == "string" and uiSettings.renderer or "default",
             accessibilityProfile = type(selectedAccessibility) == "string" and selectedAccessibility or
-                type(uiSettings.accessibilityProfile) == "string" and uiSettings.accessibilityProfile or "standard",
+                type(uiSettings.accessibilityProfile) == "string" and uiSettings.accessibilityProfile or "high_contrast",
             statusSymbols = uiSettings.statusSymbols ~= false,
             language = type(selectedLanguage) == "string" and selectedLanguage or
                 type(uiSettings.language) == "string" and

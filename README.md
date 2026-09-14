@@ -40,8 +40,9 @@ Start with the [tester guide](docs/TESTING.md), [site map](docs/SITE_MAP.md),
 [accessibility guide](docs/ACCESSIBILITY.md),
 or [module template](module-template/README.md).
 
-Core `1.6.0-alpha.25` includes English (`en_us`), Canadian French (`fr_ca`), Spanish (`es_es`), and
+Core `1.6.0-alpha.26` includes English (`en_us`), Canadian French (`fr_ca`), Spanish (`es_es`), and
 German (`de_de`). English remains the automatic fallback for incomplete packs.
+Fresh installations use HELIOS High Contrast by default; upgrades preserve the user's selected palette.
 
 > Public Alpha means the interfaces are testable, not yet final. Please include
 > HELIOS/Core version, computer role, peripheral names, reproduction steps, and
