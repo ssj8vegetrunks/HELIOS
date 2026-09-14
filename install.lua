@@ -1,12 +1,15 @@
 -- HELIOS single-file installer
 -- Manual-control alpha: guarded direct plant authority.
 
-local VERSION = "1.6.0-alpha.20"
+local VERSION = "1.6.0-alpha.21"
 local INSTALL_DIR = "/helios"
 local STAGE_DIR = "/.helios-install"
 local MODULE_PACK_BASE_URL = "https://raw.githubusercontent.com/ssj8vegetrunks/HELIOS/testing/public-alpha/module-pack"
 local installerLanguage = "en_us"
 local installerAccessibility = "standard"
+local installerNetworkEnabled = false
+local installerNetworkKey = ""
+local FILES
 local installerTranslations = {
     es_es = {
         ["Installer"] = "Instalador", ["mainframe"] = "Sistema central",
@@ -237,6 +240,63 @@ local function selectAccessibility(existingProfile)
     end
 end
 
+local title
+
+local function hasModem()
+    for _, name in ipairs(peripheral.getNames()) do
+        for _, peripheralType in ipairs({ peripheral.getType(name) }) do
+            if peripheralType == "modem" then return true end
+        end
+    end
+    return false
+end
+
+local function generatedNetworkKey()
+    local seed = table.concat({ tostring(os.getComputerID()), tostring(os.epoch("utc")),
+        tostring(os.clock()), tostring(math.random(1, 2147483647)) }, ":")
+    local result = 2166136261
+    for index = 1, #seed do
+        result = bit32.bxor(result, string.byte(seed, index))
+        result = bit32.band(result + bit32.lshift(result, 1) + bit32.lshift(result, 4) +
+            bit32.lshift(result, 7) + bit32.lshift(result, 8) + bit32.lshift(result, 24), 0xffffffff)
+    end
+    return ("HLS-%08X-%04X"):format(result, math.random(0, 65535))
+end
+
+local function selectNetworkSecurity(role, existing)
+    local previous = type(existing) == "table" and type(existing.network) == "table" and
+        existing.network or {}
+    if previous.securityEnabled == true and type(previous.securityKey) == "string" and
+       #previous.securityKey >= 8 then
+        installerNetworkEnabled, installerNetworkKey = true, previous.securityKey
+        return
+    end
+    if existing or not hasModem() then return end
+    title("Network Protection")
+    print("A modem was detected.")
+    print("Protection keeps other HELIOS networks from pairing with this one.")
+    print("Every Mainframe, terminal, Guardian and Profiler must use the same key.")
+    print("")
+    if not confirm("Enable HELIOS network protection?") then return end
+    installerNetworkEnabled = true
+    print("")
+    if role == "mainframe" then
+        print("Enter a key (8-128 characters), or leave blank to generate one:")
+        installerNetworkKey = read("*")
+        if installerNetworkKey == "" then
+            installerNetworkKey = generatedNetworkKey()
+            print("Generated pairing key: " .. installerNetworkKey)
+            print("Write this down; other HELIOS computers require it.")
+        end
+    else
+        print("Enter the Mainframe's HELIOS network key:")
+        installerNetworkKey = read("*")
+    end
+    if #installerNetworkKey < 8 or #installerNetworkKey > 128 then
+        error("HELIOS network keys must contain 8-128 characters.", 0)
+    end
+end
+
 local function clear()
     term.setBackgroundColor(colors.black)
     term.setTextColor(colors.white)
@@ -244,7 +304,7 @@ local function clear()
     term.setCursorPos(1, 1)
 end
 
-local function title(subtitle)
+title = function(subtitle)
     clear()
     term.setTextColor(colors.yellow)
     print("HELIOS")
@@ -300,6 +360,15 @@ local function findExistingMainframe(timeout)
         end
     end
 
+    local security
+    if installerNetworkEnabled and FILES and FILES["core/network_security.lua"] then
+        local chunk = loadstring(FILES["core/network_security.lua"], "@network_security.lua")
+        if chunk then security = chunk() end
+    end
+    local securityConfig = { network = {
+        securityEnabled = installerNetworkEnabled,
+        securityKey = installerNetworkKey,
+    } }
     local timer = os.startTimer(timeout or 3)
     local found
     while not found do
@@ -307,7 +376,9 @@ local function findExistingMainframe(timeout)
         if event == "timer" and sender == timer then break end
         if event == "rednet_message" and protocol == "helios.v1" and
            sender ~= os.getComputerID() and type(message) == "table" and
-           message.helios == true and message.kind == "mainframe_presence" then
+           message.helios == true and message.kind == "mainframe_presence" and
+           (not installerNetworkEnabled or (security and
+               security.verify(message, securityConfig, "helios.v1"))) then
             found = sender
         end
     end
@@ -424,8 +495,6 @@ local function removeOldBackups()
         end
     end
 end
-
-local FILES
 
 local function embeddedInstallBytes(configText, role)
     local bytes = #configText
@@ -856,6 +925,10 @@ function config.load()
     loaded.network = loaded.network or {}
     loaded.network.siteId = type(loaded.network.siteId) == "string" and
         loaded.network.siteId ~= "" and loaded.network.siteId or "default"
+    loaded.network.securityEnabled = loaded.network.securityEnabled == true
+    loaded.network.securityKey = type(loaded.network.securityKey) == "string" and
+        loaded.network.securityKey or ""
+    if #loaded.network.securityKey < 8 then loaded.network.securityEnabled = false end
     return loaded
 end
 
@@ -1993,10 +2066,39 @@ return manager
 
     ["core/network.lua"] = [=[
 local network = {}
+local config
+local security
 
 -- @section MODEM AND REDNET TRANSPORT
 network.protocol = "helios.v1"
 local PEER_FILE = "/helios/data/terminals.lua"
+
+function network.configure(value)
+    config = value
+    local path = "/helios/core/network_security.lua"
+    if fs and fs.exists and fs.exists(path) then
+        local ok, loaded = pcall(dofile, path)
+        if ok then security = loaded end
+    end
+end
+
+local function protect(protocol, message)
+    if not security then return message end
+    return security.sign(message, config, protocol)
+end
+
+function network.accept(protocol, message)
+    if not security then return true end
+    return security.verify(message, config, protocol, network.now())
+end
+
+function network.networkId()
+    return security and security.networkId(config) or "OPEN"
+end
+
+function network.securityEnabled()
+    return security and security.enabled(config) or false
+end
 
 local function hasType(name, wanted)
     for _, peripheralType in ipairs({ peripheral.getType(name) }) do
@@ -2021,14 +2123,18 @@ end
 function network.sendOn(protocol, target, message)
     if type(protocol) ~= "string" or protocol == "" or
        type(target) ~= "number" or type(message) ~= "table" then return false end
-    return rednet.send(target, message, protocol)
+    local secured = protect(protocol, message)
+    if not secured then return false end
+    return rednet.send(target, secured, protocol)
 end
 
 function network.broadcastOn(protocol, message)
     if type(protocol) ~= "string" or protocol == "" or type(message) ~= "table" then
         return false
     end
-    rednet.broadcast(message, protocol)
+    local secured = protect(protocol, message)
+    if not secured then return false end
+    rednet.broadcast(secured, protocol)
     return true
 end
 
@@ -2077,6 +2183,119 @@ function network.savePeers(peers)
 end
 
 return network
+]=],
+
+    ["core/network_security.lua"] = [=[
+local security = {}
+
+-- CC:Tweaked has no portable cryptographic API. This keyed 128-bit integrity
+-- tag isolates ordinary multiplayer networks and rejects casual cross-control.
+-- Server-side computer/peripheral permissions remain the hard security boundary.
+
+local function validKey(value)
+    return type(value) == "string" and #value >= 8 and #value <= 128
+end
+
+local function canonical(value, seen)
+    local kind = type(value)
+    if kind == "nil" then return "n" end
+    if kind == "boolean" then return value and "b1" or "b0" end
+    if kind == "number" then return "d" .. string.format("%.17g", value) end
+    if kind == "string" then return "s" .. #value .. ":" .. value end
+    if kind ~= "table" then return nil, "unsupported value" end
+    seen = seen or {}
+    if seen[value] then return nil, "cyclic value" end
+    seen[value] = true
+    local entries = {}
+    for key, item in pairs(value) do
+        if key ~= "networkAuth" then
+            local encodedKey, keyError = canonical(key, seen)
+            if not encodedKey then seen[value] = nil return nil, keyError end
+            local encodedItem, itemError = canonical(item, seen)
+            if not encodedItem then seen[value] = nil return nil, itemError end
+            entries[#entries + 1] = encodedKey .. "=" .. encodedItem
+        end
+    end
+    table.sort(entries)
+    seen[value] = nil
+    return "t" .. #entries .. ":{" .. table.concat(entries, ";") .. "}"
+end
+
+local function mix(text, seed)
+    local hash = seed
+    for index = 1, #text do
+        hash = bit32.bxor(hash, string.byte(text, index))
+        hash = bit32.band(hash + bit32.lshift(hash, 1) + bit32.lshift(hash, 4) +
+            bit32.lshift(hash, 7) + bit32.lshift(hash, 8) + bit32.lshift(hash, 24), 0xffffffff)
+        hash = bit32.bxor(hash, bit32.rrotate(hash, (index % 23) + 1))
+    end
+    hash = bit32.bxor(hash, bit32.rshift(hash, 16))
+    hash = bit32.bxor(hash, bit32.lshift(hash, 13))
+    hash = bit32.bxor(hash, bit32.rshift(hash, 17))
+    return bit32.bxor(hash, bit32.lshift(hash, 5))
+end
+
+local function digest(key, text)
+    local values = {
+        mix(key .. "\0" .. text .. "\1" .. key, 0x811c9dc5),
+        mix(key .. "\2" .. text .. "\3" .. key, 0x9e3779b9),
+        mix(text .. "\4" .. key .. "\5" .. text, 0x85ebca6b),
+        mix(key .. "\6" .. text .. "\7" .. string.reverse(key), 0xc2b2ae35),
+    }
+    return string.format("%08x%08x%08x%08x", values[1], values[2], values[3], values[4])
+end
+
+function security.enabled(config)
+    local network = type(config) == "table" and config.network or nil
+    return type(network) == "table" and network.securityEnabled == true and validKey(network.securityKey)
+end
+
+function security.networkId(config)
+    if not security.enabled(config) then return "OPEN" end
+    return string.sub(digest(config.network.securityKey, "HELIOS NETWORK ID"), 1, 12):upper()
+end
+
+function security.sign(message, config, protocol)
+    if not security.enabled(config) then return message end
+    if type(message) ~= "table" then return nil, "message must be a table" end
+    message.networkId = security.networkId(config)
+    message.networkProtocol = tostring(protocol or "")
+    message.networkSentAt = os.epoch("utc") / 1000
+    message.networkNonce = table.concat({ tostring(os.getComputerID()), tostring(message.networkSentAt),
+        tostring(math.random(1, 2147483647)) }, ":")
+    local encoded, reason = canonical(message)
+    if not encoded then return nil, reason end
+    message.networkAuth = digest(config.network.securityKey, encoded)
+    return message
+end
+
+function security.verify(message, config, protocol, now)
+    if not security.enabled(config) then return true end
+    if type(message) ~= "table" or type(message.networkAuth) ~= "string" or
+       message.networkId ~= security.networkId(config) or message.networkProtocol ~= tostring(protocol or "") then
+        return false, "network identity mismatch"
+    end
+    local sentAt = tonumber(message.networkSentAt)
+    now = tonumber(now) or os.epoch("utc") / 1000
+    if not sentAt or math.abs(now - sentAt) > 30 then return false, "network message expired" end
+    local encoded, reason = canonical(message)
+    if not encoded then return false, reason end
+    if digest(config.network.securityKey, encoded) ~= message.networkAuth then
+        return false, "network authentication failed"
+    end
+    return true
+end
+
+function security.generateKey()
+    local seed = table.concat({ tostring(os.getComputerID()), tostring(os.epoch("utc")),
+        tostring(os.clock()), tostring(math.random(1, 2147483647)) }, ":")
+    local raw = digest(seed, "HELIOS GENERATED NETWORK KEY")
+    return "HLS-" .. string.sub(raw, 1, 6):upper() .. "-" .. string.sub(raw, 7, 12):upper()
+end
+
+function security.validKey(value) return validKey(value) end
+
+return security
 ]=],
 
     ["core/power_format.lua"] = [=[
@@ -2562,6 +2781,7 @@ local PROFILE_FILE = DATA_DIR .. "/operating_profiles.lua"
 local SESSION_FILE = DATA_DIR .. "/current_session.lua"
 local guardianId = tonumber((config.network or {}).guardianId)
 if not guardianId then error("Profiler Guardian computer ID is not configured", 0) end
+local networkSecurity = dofile("/helios/core/network_security.lua")
 
 local function wirelessModem()
     local names = peripheral.getNames()
@@ -2697,14 +2917,16 @@ local function redraw()
 end
 
 local function subscribe()
-    modem.transmit(REQUEST_CHANNEL, TELEMETRY_CHANNEL, {
+    local message = {
         heliosProfiler = true,
         version = 1,
         kind = "subscribe",
         profilerId = os.getComputerID(),
         targetGuardianId = guardianId,
         sentAt = os.epoch("utc") / 1000,
-    })
+    }
+    message = networkSecurity.sign(message, config, "helios.profiler.v1")
+    if message then modem.transmit(REQUEST_CHANNEL, TELEMETRY_CHANNEL, message) end
     lastSubscribeAt = os.epoch("utc") / 1000
 end
 
@@ -2719,7 +2941,8 @@ while true do
     elseif event == "modem_message" and a == modemName and channel == TELEMETRY_CHANNEL and
            type(message) == "table" and message.heliosProfiler == true and
            message.kind == "telemetry" and tonumber(message.guardianId) == guardianId and
-           tonumber(message.targetProfilerId) == os.getComputerID() and type(message.payload) == "table" then
+           tonumber(message.targetProfilerId) == os.getComputerID() and type(message.payload) == "table" and
+           networkSecurity.verify(message, config, "helios.profiler.v1") then
         local now = os.epoch("utc") / 1000
         latest, latestAt, guardianVersion = message.payload, now, message.guardianVersion
         local sample = engine.add(trend, latest, now)
@@ -2927,7 +3150,7 @@ return {
     name = "HELIOS Control Room",
     version = "1.0.0",
     apiVersion = 1,
-    compatibleCoreVersions = { "1.6.0-alpha.4", "1.6.0-alpha.5", "1.6.0-alpha.6", "1.6.0-alpha.7", "1.6.0-alpha.8", "1.6.0-alpha.9", "1.6.0-alpha.10", "1.6.0-alpha.11", "1.6.0-alpha.12", "1.6.0-alpha.13", "1.6.0-alpha.14", "1.6.0-alpha.15", "1.6.0-alpha.16", "1.6.0-alpha.17", "1.6.0-alpha.18", "1.6.0-alpha.19", "1.6.0-alpha.20" },
+    compatibleCoreVersions = { "1.6.0-alpha.4", "1.6.0-alpha.5", "1.6.0-alpha.6", "1.6.0-alpha.7", "1.6.0-alpha.8", "1.6.0-alpha.9", "1.6.0-alpha.10", "1.6.0-alpha.11", "1.6.0-alpha.12", "1.6.0-alpha.13", "1.6.0-alpha.14", "1.6.0-alpha.15", "1.6.0-alpha.16", "1.6.0-alpha.17", "1.6.0-alpha.18", "1.6.0-alpha.19", "1.6.0-alpha.20", "1.6.0-alpha.21" },
     entry = "renderer.lua",
     minimumWidth = 50,
     minimumHeight = 31,
@@ -3182,6 +3405,47 @@ return renderer
 -- @section PROGRAM ENTRYPOINT
 local args = { ... }
 local config = dofile("/helios/core/config.lua").load()
+
+if args[1] == "network" then
+    local security = dofile("/helios/core/network_security.lua")
+    local action = args[2] or "status"
+    config.network = config.network or {}
+    local function save()
+        local ok, reason = dofile("/helios/core/config.lua").save(config)
+        if not ok then error("Could not save HELIOS configuration: " .. tostring(reason), 0) end
+    end
+    local function readKey(prompt)
+        print(prompt);write("> ")
+        local value = read("*")
+        if not security.validKey(value) then error("Network keys must contain 8-128 characters.", 0) end
+        return value
+    end
+    if action == "status" then
+        print("Network protection: " .. (security.enabled(config) and "ENABLED" or "DISABLED"))
+        print("Network code: " .. security.networkId(config))
+        print("Site: " .. tostring(config.network.siteId or "default"))
+    elseif action == "enable" then
+        config.network.securityKey = readKey("Enter the shared HELIOS network key:")
+        config.network.securityEnabled = true;save()
+        print("Network protection enabled. Network code: " .. security.networkId(config))
+        print("Restart HELIOS to reconnect using the protected network.")
+    elseif action == "generate" then
+        config.network.securityKey = security.generateKey();config.network.securityEnabled = true;save()
+        print("Generated pairing key: " .. config.network.securityKey)
+        print("Network code: " .. security.networkId(config))
+        print("Copy the pairing key to every HELIOS computer, then restart them.")
+    elseif action == "key" then
+        config.network.securityKey = readKey("Enter the replacement HELIOS network key:")
+        config.network.securityEnabled = true;save()
+        print("Network key replaced. Restart every HELIOS computer.")
+    elseif action == "disable" then
+        config.network.securityEnabled = false;save()
+        print("Network protection disabled. Restart HELIOS to use the open network.")
+    else
+        error("Usage: helios network [status|enable|generate|key|disable]", 0)
+    end
+    return
+end
 
 if args[1] == "language" then
     local i18n = dofile("/helios/core/i18n.lua")
@@ -4419,6 +4683,8 @@ function mainframe.run(config)
     if not storageAdapter then error(storageModuleError, 0) end
     local powerFormat = dofile("/helios/core/power_format.lua")
     local network = dofile("/helios/core/network.lua")
+    network.configure(config)
+    local networkSecurity = dofile("/helios/core/network_security.lua")
     local facilityProtocol = dofile("/helios/core/facility_protocol.lua")
     local authority = dofile("/helios/core/mainframe_authority.lua")
     local devices = {}
@@ -5098,6 +5364,7 @@ function mainframe.run(config)
     end
 
     local function handleFacility(sender, message)
+        if not network.accept(facilityProtocol.rednetProtocol, message) then return false end
         local accepted, clean = facilityProtocol.acceptSequence(facilityTracker, message)
         if not accepted then return false end
         if clean.payload.siteId ~= facilitySiteId then return false end
@@ -5156,7 +5423,8 @@ function mainframe.run(config)
         if protocol == facilityProtocol.rednetProtocol then
             return handleFacility(sender, message)
         end
-        if protocol ~= network.protocol or not network.valid(message) then return false end
+        if protocol ~= network.protocol or not network.accept(protocol, message) or
+           not network.valid(message) then return false end
         if message.kind == "mainframe_presence" then
             local changed = authority.observe(authorityState, sender, message, network.now())
             if changed then
@@ -5997,6 +6265,61 @@ function mainframe.run(config)
     local function settings()
         local buttons = {}
         local accessibilityProfiles = accessibility.profiles()
+        local function networkingSettings()
+            local networkButtons = {}
+            local notice
+            while true do
+                ui.header("NETWORKING", "Multiplayer network isolation")
+                ui.status("Protection", networkSecurity.enabled(config) and "ENABLED" or "DISABLED",
+                    networkSecurity.enabled(config) and colors.lime or colors.gray)
+                ui.status("Network code", networkSecurity.networkId(config), colors.cyan)
+                ui.status("Site", tostring(config.network.siteId or "default"))
+                print("")
+                ui.line("All HELIOS computers must use the same key.", colors.lightGray)
+                ui.line("The key is stored locally and is never displayed here.", colors.lightGray)
+                ui.line("Server permissions remain the strongest protection.", colors.gray)
+                if notice then ui.status("Result", notice, colors.orange) end
+                print("")
+                networkButtons.toggle = ui.button(networkSecurity.enabled(config) and
+                    "DISABLE PROTECTION" or "ENABLE PROTECTION", colors.orange)
+                networkButtons.key = ui.button("ENTER / REPLACE KEY", colors.cyan)
+                networkButtons.generate = ui.button("GENERATE NEW KEY", colors.cyan)
+                networkButtons.back = ui.button("BACK", colors.cyan)
+                local event, value, message, protocol = os.pullEvent()
+                local x, y = ui.eventPoint(event, value, message, protocol)
+                if (event == "key" and value == keys.b) or ui.hit(networkButtons.back, x, y) then
+                    return
+                elseif ui.hit(networkButtons.toggle, x, y) then
+                    if networkSecurity.enabled(config) then
+                        config.network.securityEnabled = false
+                        notice = "Protection disabled; restart all HELIOS computers"
+                    elseif networkSecurity.validKey(config.network.securityKey) then
+                        config.network.securityEnabled = true
+                        notice = "Protection enabled; restart all HELIOS computers"
+                    else
+                        notice = "Enter or generate a key before enabling protection"
+                    end
+                    saveConfig();network.configure(config)
+                elseif ui.hit(networkButtons.key, x, y) then
+                    ui.prepare();print("Enter the shared HELIOS key (8-128 characters):");write("> ")
+                    local key = read("*")
+                    if networkSecurity.validKey(key) then
+                        config.network.securityKey = key;config.network.securityEnabled = true
+                        saveConfig();network.configure(config)
+                        notice = "Key saved; restart every HELIOS computer"
+                    else notice = "Key rejected: 8-128 characters required" end
+                elseif ui.hit(networkButtons.generate, x, y) then
+                    local key = networkSecurity.generateKey()
+                    ui.prepare();term.setTextColor(colors.yellow)
+                    print("NEW HELIOS PAIRING KEY");term.setTextColor(colors.white);print("");print(key);print("")
+                    print("Write this down. Press ENTER after copying it.");read()
+                    config.network.securityKey = key;config.network.securityEnabled = true
+                    saveConfig();network.configure(config)
+                    notice = "New key saved; restart every HELIOS computer"
+                elseif event == "rednet_message" then handleNetwork(value, message, protocol)
+                end
+            end
+        end
         local function changeTimeout(direction)
             local currentIndex = 1
             for index, timeout in ipairs(timeoutChoices) do
@@ -6056,8 +6379,12 @@ function mainframe.run(config)
             write(" ")
             buttons.symbols = ui.inlineButton("STATUS SYMBOLS", colors.cyan)
             print("")
+            buttons.network = ui.inlineButton("NETWORKING", colors.cyan)
+            write(" ")
             buttons.back = ui.inlineButton("BACK", colors.cyan)
-            print("")
+            -- BACK occupies the last row on a 19-line mirrored terminal. Do not
+            -- print a trailing newline here: CC:Tweaked would scroll the visible
+            -- page up while leaving every recorded touch target one row lower.
         end
 
         while true do
@@ -6099,6 +6426,8 @@ function mainframe.run(config)
             elseif ui.hit(buttons.symbols, touchX, touchY) then
                 config.ui.statusSymbols = not config.ui.statusSymbols
                 saveConfig(); ui.configure(config); gui.configure(config)
+            elseif ui.hit(buttons.network, touchX, touchY) then
+                networkingSettings()
             elseif (event == "key" and value == keys.g) or ui.hit(buttons.gui, touchX, touchY) then
                 local modules = guiLoader.scan(config.version)
                 local index = 1
@@ -9743,6 +10072,7 @@ function terminal.run(config)
     local guiLoader = dofile("/helios/core/gui_loader.lua")
     local configStore = dofile("/helios/core/config.lua")
     local network = dofile("/helios/core/network.lua")
+    network.configure(config)
     local powerFormat = dofile("/helios/core/power_format.lua")
     local modemCount = network.openAll()
     local snapshot
@@ -10297,11 +10627,12 @@ function terminal.run(config)
             end
             render()
         elseif event == "rednet_message" and protocol == network.protocol and
-               network.valid(message, "integrity") then
+               network.accept(protocol, message) and network.valid(message, "integrity") then
             idConflicts = type(message.idConflicts) == "table" and message.idConflicts or {}
             render()
         elseif event == "rednet_message" and protocol == network.protocol and
-               network.valid(message, "snapshot") and (not mainframeId or value == mainframeId) then
+               network.accept(protocol, message) and network.valid(message, "snapshot") and
+               (not mainframeId or value == mainframeId) then
             if not mainframeId then
                 mainframeId = value
                 config.mainframeId = value
@@ -10560,6 +10891,7 @@ if fs.exists("/helios/core/network.lua") and fs.exists("/helios/core/facility_pr
   local okProtocol,loadedProtocol=pcall(dofile,"/helios/core/facility_protocol.lua")
   if okNetwork and okProtocol then
     facilityNetwork,facilityProtocol=loadedNetwork,loadedProtocol
+    facilityNetwork.configure(guardianConfig)
     facilityNetwork.openAll()
     facilityIdentity=facilityProtocol.identity({
       nodeId="guardian:draconic-"..tostring(os.getComputerID()),
@@ -11440,7 +11772,7 @@ local function facilityWorker()
       hello()
       helloTimer=os.startTimer(5)
     elseif event=="rednet_message" and c==facilityProtocol.rednetProtocol then
-      local message=facilityProtocol.validate(b)
+      local message=facilityNetwork.accept(c,b) and facilityProtocol.validate(b) or nil
       if message and message.payload.siteId==facilitySiteId then
         local role=message.source.role
         local priority=tonumber(message.payload.collectorPriority) or (role=="overseer" and 100 or 50)
@@ -11485,6 +11817,10 @@ local function profilerWorker()
   end
   if not modem then while true do os.pullEvent("guardian_profiler_wireless_disabled") end end
   modem.open(PROFILER_REQUEST_CHANNEL)
+  local profilerSecurity
+  if fs.exists("/helios/core/network_security.lua") then
+    local ok,loaded=pcall(dofile,"/helios/core/network_security.lua");if ok then profilerSecurity=loaded end
+  end
   local profilerId,leaseUntil
   local timer=os.startTimer(1)
   local function snapshot()
@@ -11509,15 +11845,18 @@ local function profilerWorker()
     if event=="modem_message" and a==modemName and channel==PROFILER_REQUEST_CHANNEL and
        type(message)=="table" and message.heliosProfiler==true and message.version==1 and
        message.kind=="subscribe" and tonumber(message.targetGuardianId)==os.getComputerID() and
-       tonumber(message.profilerId) then
+       tonumber(message.profilerId) and
+       (not profilerSecurity or profilerSecurity.verify(message,guardianConfig,"helios.profiler.v1")) then
       profilerId=tonumber(message.profilerId);leaseUntil=os.epoch("utc")/1000+10
     elseif event=="timer" and a==timer then
       local now=os.epoch("utc")/1000
       if profilerId and leaseUntil and now<leaseUntil then
-        modem.transmit(PROFILER_TELEMETRY_CHANNEL,PROFILER_REQUEST_CHANNEL,{
+        local outgoing={
           heliosProfiler=true,version=1,kind="telemetry",guardianId=os.getComputerID(),
           guardianVersion=GUARDIAN_VERSION,targetProfilerId=profilerId,sentAt=now,payload=snapshot(),
-        })
+        }
+        if profilerSecurity then outgoing=profilerSecurity.sign(outgoing,guardianConfig,"helios.profiler.v1") end
+        if outgoing then modem.transmit(PROFILER_TELEMETRY_CHANNEL,PROFILER_REQUEST_CHANNEL,outgoing) end
       elseif leaseUntil and now>=leaseUntil then profilerId,leaseUntil=nil,nil end
       timer=os.startTimer(1)
     elseif event=="peripheral_detach" and a==modemName then
@@ -11722,6 +12061,9 @@ local function buildConfig(role, display, existing, profilerGuardianId, selected
                 networkSettings.siteId ~= "" and networkSettings.siteId or "default",
             guardianId = role == "profiler" and tonumber(profilerGuardianId) or
                 tonumber(networkSettings.guardianId),
+            securityEnabled = installerNetworkEnabled or networkSettings.securityEnabled == true,
+            securityKey = installerNetworkKey ~= "" and installerNetworkKey or
+                (type(networkSettings.securityKey) == "string" and networkSettings.securityKey or ""),
         },
     }
     return "return " .. textutils.serialize(merged)
@@ -11766,6 +12108,8 @@ local function runInstaller()
         installLabel = module == "guardian" and installerText("Draconic Reactor Guardian") or
             installerText("Draconic Reactor Profiler (read-only)")
     end
+
+    selectNetworkSecurity(role, existingConfig)
 
     if role == "mainframe" and not (existingConfig and existingConfig.role == "mainframe") then
         title("Checking HELIOS Network")

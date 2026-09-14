@@ -107,12 +107,25 @@ write(" ")
 local closeButton = ui.inlineButton("CLOSE", colors.cyan)
 
 assert(scrollCount == 0, "calibration action rows must not scroll the display")
+
 assert(deleteButton.y == 16 and recalibrateButton.y == 16,
     "first calibration action row has incorrect hitboxes")
 assert(saveButton.y == 17 and closeButton.y == 17,
     "second calibration action row has incorrect hitboxes")
 assert(ui.hit(closeButton, closeButton.x1, 17),
     "visible close action does not match its touch target")
+
+-- Settings ends on row 19. Both controls stay inline because a trailing
+-- print() here would scroll their visible labels away from these hitboxes.
+rows, cursorX, cursorY, scrollCount = {}, 1, 19, 0
+local networkingButton = ui.inlineButton("NETWORKING", colors.cyan)
+write(" ")
+local backButton = ui.inlineButton("BACK", colors.cyan)
+assert(scrollCount == 0 and networkingButton.y == 19 and backButton.y == 19,
+    "settings footer controls must remain aligned on the final row")
+assert(ui.hit(networkingButton, networkingButton.x1, 19) and
+    ui.hit(backButton, backButton.x1, 19),
+    "settings footer touch targets must match their visible controls")
 
 print, write = realPrint, realWrite
 print("ui tests passed")

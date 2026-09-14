@@ -33,6 +33,8 @@ function mainframe.run(config)
     if not storageAdapter then error(storageModuleError, 0) end
     local powerFormat = dofile("/helios/core/power_format.lua")
     local network = dofile("/helios/core/network.lua")
+    network.configure(config)
+    local networkSecurity = dofile("/helios/core/network_security.lua")
     local facilityProtocol = dofile("/helios/core/facility_protocol.lua")
     local authority = dofile("/helios/core/mainframe_authority.lua")
     local devices = {}
@@ -712,6 +714,7 @@ function mainframe.run(config)
     end
 
     local function handleFacility(sender, message)
+        if not network.accept(facilityProtocol.rednetProtocol, message) then return false end
         local accepted, clean = facilityProtocol.acceptSequence(facilityTracker, message)
         if not accepted then return false end
         if clean.payload.siteId ~= facilitySiteId then return false end
@@ -770,7 +773,8 @@ function mainframe.run(config)
         if protocol == facilityProtocol.rednetProtocol then
             return handleFacility(sender, message)
         end
-        if protocol ~= network.protocol or not network.valid(message) then return false end
+        if protocol ~= network.protocol or not network.accept(protocol, message) or
+           not network.valid(message) then return false end
         if message.kind == "mainframe_presence" then
             local changed = authority.observe(authorityState, sender, message, network.now())
             if changed then
@@ -1611,6 +1615,61 @@ function mainframe.run(config)
     local function settings()
         local buttons = {}
         local accessibilityProfiles = accessibility.profiles()
+        local function networkingSettings()
+            local networkButtons = {}
+            local notice
+            while true do
+                ui.header("NETWORKING", "Multiplayer network isolation")
+                ui.status("Protection", networkSecurity.enabled(config) and "ENABLED" or "DISABLED",
+                    networkSecurity.enabled(config) and colors.lime or colors.gray)
+                ui.status("Network code", networkSecurity.networkId(config), colors.cyan)
+                ui.status("Site", tostring(config.network.siteId or "default"))
+                print("")
+                ui.line("All HELIOS computers must use the same key.", colors.lightGray)
+                ui.line("The key is stored locally and is never displayed here.", colors.lightGray)
+                ui.line("Server permissions remain the strongest protection.", colors.gray)
+                if notice then ui.status("Result", notice, colors.orange) end
+                print("")
+                networkButtons.toggle = ui.button(networkSecurity.enabled(config) and
+                    "DISABLE PROTECTION" or "ENABLE PROTECTION", colors.orange)
+                networkButtons.key = ui.button("ENTER / REPLACE KEY", colors.cyan)
+                networkButtons.generate = ui.button("GENERATE NEW KEY", colors.cyan)
+                networkButtons.back = ui.button("BACK", colors.cyan)
+                local event, value, message, protocol = os.pullEvent()
+                local x, y = ui.eventPoint(event, value, message, protocol)
+                if (event == "key" and value == keys.b) or ui.hit(networkButtons.back, x, y) then
+                    return
+                elseif ui.hit(networkButtons.toggle, x, y) then
+                    if networkSecurity.enabled(config) then
+                        config.network.securityEnabled = false
+                        notice = "Protection disabled; restart all HELIOS computers"
+                    elseif networkSecurity.validKey(config.network.securityKey) then
+                        config.network.securityEnabled = true
+                        notice = "Protection enabled; restart all HELIOS computers"
+                    else
+                        notice = "Enter or generate a key before enabling protection"
+                    end
+                    saveConfig();network.configure(config)
+                elseif ui.hit(networkButtons.key, x, y) then
+                    ui.prepare();print("Enter the shared HELIOS key (8-128 characters):");write("> ")
+                    local key = read("*")
+                    if networkSecurity.validKey(key) then
+                        config.network.securityKey = key;config.network.securityEnabled = true
+                        saveConfig();network.configure(config)
+                        notice = "Key saved; restart every HELIOS computer"
+                    else notice = "Key rejected: 8-128 characters required" end
+                elseif ui.hit(networkButtons.generate, x, y) then
+                    local key = networkSecurity.generateKey()
+                    ui.prepare();term.setTextColor(colors.yellow)
+                    print("NEW HELIOS PAIRING KEY");term.setTextColor(colors.white);print("");print(key);print("")
+                    print("Write this down. Press ENTER after copying it.");read()
+                    config.network.securityKey = key;config.network.securityEnabled = true
+                    saveConfig();network.configure(config)
+                    notice = "New key saved; restart every HELIOS computer"
+                elseif event == "rednet_message" then handleNetwork(value, message, protocol)
+                end
+            end
+        end
         local function changeTimeout(direction)
             local currentIndex = 1
             for index, timeout in ipairs(timeoutChoices) do
@@ -1670,8 +1729,12 @@ function mainframe.run(config)
             write(" ")
             buttons.symbols = ui.inlineButton("STATUS SYMBOLS", colors.cyan)
             print("")
+            buttons.network = ui.inlineButton("NETWORKING", colors.cyan)
+            write(" ")
             buttons.back = ui.inlineButton("BACK", colors.cyan)
-            print("")
+            -- BACK occupies the last row on a 19-line mirrored terminal. Do not
+            -- print a trailing newline here: CC:Tweaked would scroll the visible
+            -- page up while leaving every recorded touch target one row lower.
         end
 
         while true do
@@ -1713,6 +1776,8 @@ function mainframe.run(config)
             elseif ui.hit(buttons.symbols, touchX, touchY) then
                 config.ui.statusSymbols = not config.ui.statusSymbols
                 saveConfig(); ui.configure(config); gui.configure(config)
+            elseif ui.hit(buttons.network, touchX, touchY) then
+                networkingSettings()
             elseif (event == "key" and value == keys.g) or ui.hit(buttons.gui, touchX, touchY) then
                 local modules = guiLoader.scan(config.version)
                 local index = 1

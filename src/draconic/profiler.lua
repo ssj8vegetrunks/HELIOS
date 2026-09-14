@@ -12,6 +12,7 @@ local PROFILE_FILE = DATA_DIR .. "/operating_profiles.lua"
 local SESSION_FILE = DATA_DIR .. "/current_session.lua"
 local guardianId = tonumber((config.network or {}).guardianId)
 if not guardianId then error("Profiler Guardian computer ID is not configured", 0) end
+local networkSecurity = dofile("/helios/core/network_security.lua")
 
 local function wirelessModem()
     local names = peripheral.getNames()
@@ -147,14 +148,16 @@ local function redraw()
 end
 
 local function subscribe()
-    modem.transmit(REQUEST_CHANNEL, TELEMETRY_CHANNEL, {
+    local message = {
         heliosProfiler = true,
         version = 1,
         kind = "subscribe",
         profilerId = os.getComputerID(),
         targetGuardianId = guardianId,
         sentAt = os.epoch("utc") / 1000,
-    })
+    }
+    message = networkSecurity.sign(message, config, "helios.profiler.v1")
+    if message then modem.transmit(REQUEST_CHANNEL, TELEMETRY_CHANNEL, message) end
     lastSubscribeAt = os.epoch("utc") / 1000
 end
 
@@ -169,7 +172,8 @@ while true do
     elseif event == "modem_message" and a == modemName and channel == TELEMETRY_CHANNEL and
            type(message) == "table" and message.heliosProfiler == true and
            message.kind == "telemetry" and tonumber(message.guardianId) == guardianId and
-           tonumber(message.targetProfilerId) == os.getComputerID() and type(message.payload) == "table" then
+           tonumber(message.targetProfilerId) == os.getComputerID() and type(message.payload) == "table" and
+           networkSecurity.verify(message, config, "helios.profiler.v1") then
         local now = os.epoch("utc") / 1000
         latest, latestAt, guardianVersion = message.payload, now, message.guardianVersion
         local sample = engine.add(trend, latest, now)

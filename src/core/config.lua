@@ -169,6 +169,10 @@ function config.load()
     loaded.network = loaded.network or {}
     loaded.network.siteId = type(loaded.network.siteId) == "string" and
         loaded.network.siteId ~= "" and loaded.network.siteId or "default"
+    loaded.network.securityEnabled = loaded.network.securityEnabled == true
+    loaded.network.securityKey = type(loaded.network.securityKey) == "string" and
+        loaded.network.securityKey or ""
+    if #loaded.network.securityKey < 8 then loaded.network.securityEnabled = false end
     return loaded
 end
 

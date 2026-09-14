@@ -1,8 +1,37 @@
 local network = {}
+local config
+local security
 
 -- @section MODEM AND REDNET TRANSPORT
 network.protocol = "helios.v1"
 local PEER_FILE = "/helios/data/terminals.lua"
+
+function network.configure(value)
+    config = value
+    local path = "/helios/core/network_security.lua"
+    if fs and fs.exists and fs.exists(path) then
+        local ok, loaded = pcall(dofile, path)
+        if ok then security = loaded end
+    end
+end
+
+local function protect(protocol, message)
+    if not security then return message end
+    return security.sign(message, config, protocol)
+end
+
+function network.accept(protocol, message)
+    if not security then return true end
+    return security.verify(message, config, protocol, network.now())
+end
+
+function network.networkId()
+    return security and security.networkId(config) or "OPEN"
+end
+
+function network.securityEnabled()
+    return security and security.enabled(config) or false
+end
 
 local function hasType(name, wanted)
     for _, peripheralType in ipairs({ peripheral.getType(name) }) do
@@ -27,14 +56,18 @@ end
 function network.sendOn(protocol, target, message)
     if type(protocol) ~= "string" or protocol == "" or
        type(target) ~= "number" or type(message) ~= "table" then return false end
-    return rednet.send(target, message, protocol)
+    local secured = protect(protocol, message)
+    if not secured then return false end
+    return rednet.send(target, secured, protocol)
 end
 
 function network.broadcastOn(protocol, message)
     if type(protocol) ~= "string" or protocol == "" or type(message) ~= "table" then
         return false
     end
-    rednet.broadcast(message, protocol)
+    local secured = protect(protocol, message)
+    if not secured then return false end
+    rednet.broadcast(secured, protocol)
     return true
 end
 

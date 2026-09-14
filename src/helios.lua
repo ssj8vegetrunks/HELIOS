@@ -2,6 +2,47 @@
 local args = { ... }
 local config = dofile("/helios/core/config.lua").load()
 
+if args[1] == "network" then
+    local security = dofile("/helios/core/network_security.lua")
+    local action = args[2] or "status"
+    config.network = config.network or {}
+    local function save()
+        local ok, reason = dofile("/helios/core/config.lua").save(config)
+        if not ok then error("Could not save HELIOS configuration: " .. tostring(reason), 0) end
+    end
+    local function readKey(prompt)
+        print(prompt);write("> ")
+        local value = read("*")
+        if not security.validKey(value) then error("Network keys must contain 8-128 characters.", 0) end
+        return value
+    end
+    if action == "status" then
+        print("Network protection: " .. (security.enabled(config) and "ENABLED" or "DISABLED"))
+        print("Network code: " .. security.networkId(config))
+        print("Site: " .. tostring(config.network.siteId or "default"))
+    elseif action == "enable" then
+        config.network.securityKey = readKey("Enter the shared HELIOS network key:")
+        config.network.securityEnabled = true;save()
+        print("Network protection enabled. Network code: " .. security.networkId(config))
+        print("Restart HELIOS to reconnect using the protected network.")
+    elseif action == "generate" then
+        config.network.securityKey = security.generateKey();config.network.securityEnabled = true;save()
+        print("Generated pairing key: " .. config.network.securityKey)
+        print("Network code: " .. security.networkId(config))
+        print("Copy the pairing key to every HELIOS computer, then restart them.")
+    elseif action == "key" then
+        config.network.securityKey = readKey("Enter the replacement HELIOS network key:")
+        config.network.securityEnabled = true;save()
+        print("Network key replaced. Restart every HELIOS computer.")
+    elseif action == "disable" then
+        config.network.securityEnabled = false;save()
+        print("Network protection disabled. Restart HELIOS to use the open network.")
+    else
+        error("Usage: helios network [status|enable|generate|key|disable]", 0)
+    end
+    return
+end
+
 if args[1] == "language" then
     local i18n = dofile("/helios/core/i18n.lua")
     local action = args[2] or "list"

@@ -20,6 +20,7 @@ function terminal.run(config)
     local guiLoader = dofile("/helios/core/gui_loader.lua")
     local configStore = dofile("/helios/core/config.lua")
     local network = dofile("/helios/core/network.lua")
+    network.configure(config)
     local powerFormat = dofile("/helios/core/power_format.lua")
     local modemCount = network.openAll()
     local snapshot
@@ -574,11 +575,12 @@ function terminal.run(config)
             end
             render()
         elseif event == "rednet_message" and protocol == network.protocol and
-               network.valid(message, "integrity") then
+               network.accept(protocol, message) and network.valid(message, "integrity") then
             idConflicts = type(message.idConflicts) == "table" and message.idConflicts or {}
             render()
         elseif event == "rednet_message" and protocol == network.protocol and
-               network.valid(message, "snapshot") and (not mainframeId or value == mainframeId) then
+               network.accept(protocol, message) and network.valid(message, "snapshot") and
+               (not mainframeId or value == mainframeId) then
             if not mainframeId then
                 mainframeId = value
                 config.mainframeId = value

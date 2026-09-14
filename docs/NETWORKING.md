@@ -7,7 +7,41 @@ may share a modem, but they must not share message semantics.
 
 `helios.v1` connects a HELIOS Mainframe to read-only Remote terminals. It
 provides discovery, assignments, telemetry snapshots, alarms, and duplicate-ID
-protection. It remains unchanged during facility-network development.
+protection.
+
+## Optional multiplayer isolation
+
+Core Alpha 21 adds opt-in shared-key isolation across `helios.v1`,
+`helios.facility.v1`, and the local Profiler link. Protection is disabled by
+default so trusted single-player and peaceful-server installations retain their
+existing zero-configuration behaviour.
+
+When enabled, every HELIOS computer in one installation must use the same
+8-128 character key. The key produces a short, non-secret network code used to
+identify matching installations; the key itself is not transmitted. Packets
+also carry a keyed integrity tag, protocol binding, timestamp, and nonce.
+Packets from open networks, different keys, different HELIOS protocols, expired
+messages, and packets changed in transit are rejected before application logic.
+
+Configure this through **Settings > Networking** on a Mainframe or with:
+
+```text
+helios network status
+helios network generate
+helios network enable
+helios network key
+helios network disable
+```
+
+The installer offers protection when it detects a modem on a fresh install and
+preserves the existing choice during upgrades. Generated pairing keys must be
+copied to every Mainframe, Remote terminal, Guardian, and Profiler in the same
+HELIOS network.
+
+This application-level isolation prevents accidental and casual cross-network
+pairing. CC:Tweaked provides no portable cryptographic API, so server-side claim,
+computer, and peripheral permissions remain the security boundary against a
+determined hostile player with packet-sniffing or filesystem access.
 
 ## Facility network Alpha 1
 

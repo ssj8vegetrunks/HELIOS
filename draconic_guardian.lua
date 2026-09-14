@@ -67,6 +67,7 @@ if fs.exists("/helios/core/network.lua") and fs.exists("/helios/core/facility_pr
   local okProtocol,loadedProtocol=pcall(dofile,"/helios/core/facility_protocol.lua")
   if okNetwork and okProtocol then
     facilityNetwork,facilityProtocol=loadedNetwork,loadedProtocol
+    facilityNetwork.configure(guardianConfig)
     facilityNetwork.openAll()
     facilityIdentity=facilityProtocol.identity({
       nodeId="guardian:draconic-"..tostring(os.getComputerID()),
@@ -947,7 +948,7 @@ local function facilityWorker()
       hello()
       helloTimer=os.startTimer(5)
     elseif event=="rednet_message" and c==facilityProtocol.rednetProtocol then
-      local message=facilityProtocol.validate(b)
+      local message=facilityNetwork.accept(c,b) and facilityProtocol.validate(b) or nil
       if message and message.payload.siteId==facilitySiteId then
         local role=message.source.role
         local priority=tonumber(message.payload.collectorPriority) or (role=="overseer" and 100 or 50)
@@ -992,6 +993,10 @@ local function profilerWorker()
   end
   if not modem then while true do os.pullEvent("guardian_profiler_wireless_disabled") end end
   modem.open(PROFILER_REQUEST_CHANNEL)
+  local profilerSecurity
+  if fs.exists("/helios/core/network_security.lua") then
+    local ok,loaded=pcall(dofile,"/helios/core/network_security.lua");if ok then profilerSecurity=loaded end
+  end
   local profilerId,leaseUntil
   local timer=os.startTimer(1)
   local function snapshot()
@@ -1016,15 +1021,18 @@ local function profilerWorker()
     if event=="modem_message" and a==modemName and channel==PROFILER_REQUEST_CHANNEL and
        type(message)=="table" and message.heliosProfiler==true and message.version==1 and
        message.kind=="subscribe" and tonumber(message.targetGuardianId)==os.getComputerID() and
-       tonumber(message.profilerId) then
+       tonumber(message.profilerId) and
+       (not profilerSecurity or profilerSecurity.verify(message,guardianConfig,"helios.profiler.v1")) then
       profilerId=tonumber(message.profilerId);leaseUntil=os.epoch("utc")/1000+10
     elseif event=="timer" and a==timer then
       local now=os.epoch("utc")/1000
       if profilerId and leaseUntil and now<leaseUntil then
-        modem.transmit(PROFILER_TELEMETRY_CHANNEL,PROFILER_REQUEST_CHANNEL,{
+        local outgoing={
           heliosProfiler=true,version=1,kind="telemetry",guardianId=os.getComputerID(),
           guardianVersion=GUARDIAN_VERSION,targetProfilerId=profilerId,sentAt=now,payload=snapshot(),
-        })
+        }
+        if profilerSecurity then outgoing=profilerSecurity.sign(outgoing,guardianConfig,"helios.profiler.v1") end
+        if outgoing then modem.transmit(PROFILER_TELEMETRY_CHANNEL,PROFILER_REQUEST_CHANNEL,outgoing) end
       elseif leaseUntil and now>=leaseUntil then profilerId,leaseUntil=nil,nil end
       timer=os.startTimer(1)
     elseif event=="peripheral_detach" and a==modemName then
