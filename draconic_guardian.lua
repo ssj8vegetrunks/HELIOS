@@ -36,7 +36,7 @@ local FIELD_RECOVERY_RATIO, MINIMUM_FIELD_INPUT = .05, 50000
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.10"
+local GUARDIAN_VERSION = "1.2.0-alpha.11"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -606,7 +606,22 @@ end
 local function draw(t,b,d,page,c,bs)
   local w,h=t.getSize();t.setBackgroundColor(colors.black);t.setTextColor(colors.white);t.clear();text(t,1,1,tr("guardian.title",{version=GUARDIAN_VERSION},"HELIOS // DRACONIC GUARDIAN  "..GUARDIAN_VERSION),colors.yellow)
   local banner=c.mode=="UNRESTRICTED" and tr("guardian.unrestricted",nil,"UNRESTRICTED CONTROL - AUTOMATIC INTERVENTION DISABLED") or c.mode=="ASSISTED" and tr("guardian.assisted",nil,"ASSISTED MANUAL - HARD SAFETY INTERLOCKS ACTIVE") or tr("guardian.automatic",nil,"AUTOMATIC SAFE SUPERVISION")
+  if accessibility then banner=accessibility.decorate(banner,c.mode=="UNRESTRICTED" and "critical" or c.mode=="ASSISTED" and "warning" or "healthy",guardianConfig) end
   text(t,1,2,banner,c.mode=="UNRESTRICTED" and colors.red or colors.lime);text(t,1,3,"["..tr("nav.overview",nil,"OVERVIEW").."] ["..tr("nav.raw_data",nil,"RAW DATA").."] ["..tr("nav.setup",nil,"SETUP").."] ["..tr("nav.manual_gates",nil,"MANUAL GATES").."]",colors.cyan)
+  text(t,1,4,"[ACCESSIBILITY]",colors.cyan)
+  if page=="accessibility" then
+    local uiConfig=type(guardianConfig)=="table" and guardianConfig.ui or {}
+    text(t,1,6,"ACCESSIBILITY & LANGUAGE",colors.yellow)
+    text(t,1,8,"Language: "..string.upper(tostring(uiConfig.language or "en_us")),colors.white)
+    text(t,1,9,"Colour profile: "..string.upper(tostring(uiConfig.accessibilityProfile or "standard"):gsub("_"," ")),colors.cyan)
+    text(t,1,10,"Status symbols: "..(uiConfig.statusSymbols==false and "DISABLED" or "ENABLED"),uiConfig.statusSymbols==false and colors.gray or colors.lime)
+    bs[#bs+1]=button(t,1,13,"LANGUAGE",colors.cyan)
+    bs[#bs+1]=button(t,18,13,"COLOUR PROFILE",colors.cyan)
+    bs[#bs+1]=button(t,42,13,"STATUS SYMBOLS",colors.cyan)
+    bs[#bs+1]=button(t,1,16,"BACK",colors.lightGray)
+    text(t,1,19,"Changes apply immediately to this computer and the wired monitor.",colors.lightGray)
+    return
+  end
   if not b.ready then text(t,1,5,"SETUP INVALID",colors.red);for i,v in ipairs(b.reasons) do text(t,1,5+i,"- "..v) end;return end
   if not d then text(t,1,5,"TELEMETRY LOST",colors.red);return end
   local critical,criticalMessage=imminentMeltdown(d.reactor)
@@ -717,7 +732,9 @@ local function drawComputer(t,d,c)
     t.setCursorPos(1,y);t.setTextColor(color or colors.white);t.write(string.sub(tostring(s or ""),1,w))
   end
   line(1,"HELIOS DRACONIC GUARDIAN "..GUARDIAN_VERSION,colors.yellow)
-  line(2,"Mode: "..tostring(c.mode).."  Request: "..tostring(c.request),c.mode=="UNRESTRICTED" and colors.red or colors.lime)
+  local modeLine="Mode: "..tostring(c.mode).."  Request: "..tostring(c.request)
+  if accessibility then modeLine=accessibility.decorate(modeLine,c.mode=="UNRESTRICTED" and "critical" or "healthy",guardianConfig) end
+  line(2,modeLine,c.mode=="UNRESTRICTED" and colors.red or colors.lime)
   if d and d.reactor then
     local r=d.reactor
     local critical,criticalMessage=imminentMeltdown(r)
@@ -734,6 +751,7 @@ local function drawComputer(t,d,c)
   line(13,"Export: n/N 1k | h/H 10k | e/E 100k | x/X 1M")
   line(14,"Lowercase - | uppercase +")
   line(15,"p apply manual | o save Overdrive | q quit")
+  line(16,"t accessibility")
   line(17,"Manual field "..fmt(c.manualField or 0).."  export "..fmt(c.manualExport or 0),colors.cyan)
   line(18,"Guardian: "..tostring(c.message),colors.lightGray)
   line(19,"HELIOS link: "..(facilityConnected and "ONLINE" or (facilityNetwork and "WAITING" or "LOCAL ONLY")),facilityConnected and colors.lime or colors.gray)
@@ -750,6 +768,21 @@ if fs.exists("/helios/core/boot.lua") and fs.exists("/helios/core/config.lua") t
   local ok,guardianConfig=pcall(function() return dofile("/helios/core/config.lua").load() end)
   if ok then dofile("/helios/core/boot.lua").run(guardianConfig,target) end
 end
+local function savePresentation()
+  if type(guardianConfig)~="table" or not fs.exists("/helios/core/config.lua") then return false end
+  local ok,module=pcall(dofile,"/helios/core/config.lua")
+  if not ok or type(module)~="table" or type(module.save)~="function" then return false end
+  local saved=module.save(guardianConfig)
+  if not saved then return false end
+  local okLanguage,service=pcall(function() return dofile("/helios/core/i18n.lua").new(guardianConfig) end)
+  if okLanguage then language=service end
+  if accessibility then accessibility.apply(computer,guardianConfig);if target~=computer then accessibility.apply(target,guardianConfig) end end
+  return true
+end
+local function cycleValue(values,current)
+  for index,value in ipairs(values) do if value==current then return values[index%#values+1] end end
+  return values[1]
+end
 local function beginCalibration()
   controls.commissioning=true;controls.commissionFlow=COMMISSION_START_FLOW;controls.commissionSamples=0;controls.commissionShortfallSamples=0;controls.commissionSettleSamples=0;controls.commissionLastSafe=nil;controls.recovery=false;controls.commissioned=false;controls.rated=nil;controls.lifecycleCeilings={};controls.currentCycleCeilings={};controls.lifecycleApplied=nil;controls.lifecycleFieldApplied=nil;controls.lifecycleSamples=0;controls.lifecycleBandKey=nil;controls.lastFuelConversion=nil;controls.request="OFF"
   controls.initialRequested=true;controls.startActivated=false;controls.message="Automatic calibration requested by operator"
@@ -761,6 +794,18 @@ local function act(choice,d)
   if (choice=="AUTO COMMISSION" or choice=="RECALIBRATE CEILING") and controls.gatesOwned then beginCalibration()
   elseif choice=="INITIALIZE & ACTIVATE" and controls.gatesOwned then controls.initialRequested=true;controls.startActivated=false;controls.message="Initial start requested by operator"
   elseif choice=="SAFE SHUTDOWN" then controls.request="OFF";controls.initialRequested=false;controls.startActivated=false;controls.message="Operator safe shutdown requested"
+  elseif choice=="LANGUAGE" and type(guardianConfig)=="table" then
+    local available={};local ok,module=pcall(dofile,"/helios/core/i18n.lua")
+    if ok and type(module.available)=="function" then for _,pack in ipairs(module.available()) do available[#available+1]=pack.id end end
+    if #available==0 then available={"en_us"} end
+    guardianConfig.ui=guardianConfig.ui or {};guardianConfig.ui.language=cycleValue(available,guardianConfig.ui.language)
+    controls.message=savePresentation() and "Language changed" or "Could not save language setting"
+  elseif choice=="COLOUR PROFILE" and accessibility and type(guardianConfig)=="table" then
+    guardianConfig.ui=guardianConfig.ui or {};guardianConfig.ui.accessibilityProfile=cycleValue(accessibility.profiles(),guardianConfig.ui.accessibilityProfile)
+    controls.message=savePresentation() and "Colour profile changed" or "Could not save colour profile"
+  elseif choice=="STATUS SYMBOLS" and type(guardianConfig)=="table" then
+    guardianConfig.ui=guardianConfig.ui or {};guardianConfig.ui.statusSymbols=guardianConfig.ui.statusSymbols==false
+    controls.message=savePresentation() and "Status symbols changed" or "Could not save status symbols"
   elseif choice=="ENABLE ASSISTED MANUAL" then controls.mode="ASSISTED";controls.request="OFF";controls.message="Assisted manual enabled at OFF"
   elseif choice=="ARM UNRESTRICTED" then controls.arm=1;controls.message="Unrestricted arming started"
   elseif choice=="CANCEL" then controls.arm=0;controls.message="Unrestricted arming cancelled"
@@ -829,6 +874,7 @@ local function inputWorker()
   while true do
     local e,a,b,c=os.pullEvent()
     if e=="char" then
+      if a=="t" then page="accessibility";requestDraw() end
       if a=="q" then
         enqueue("SAFE SHUTDOWN")
         controls.message="Quit requested: applying fail-safe hold"
@@ -841,19 +887,20 @@ local function inputWorker()
         controls.message="Quit requested: applying fail-safe hold"
         return
       end
-      if a==keys.one then page="overview" elseif a==keys.two then page="raw" elseif a==keys.three then page="setup" elseif a==keys.four then page="gates" end
+      if a==keys.one then page="overview" elseif a==keys.two then page="raw" elseif a==keys.three then page="setup" elseif a==keys.four then page="gates" elseif keys.five and a==keys.five then page="accessibility" end
       requestDraw()
     elseif e=="monitor_touch" and binding.monitor and a==binding.monitor then
       if c==3 then page=b<=10 and "overview" or b<=21 and "raw" or b<=29 and "setup" or "gates";requestDraw()
+      elseif c==4 and b<=15 then page="accessibility";requestDraw()
       else
         local choice=hit(buttons,b,c)
         if choice=="BACK" then page="overview";requestDraw() else enqueue(choice) end
       end
     elseif e=="peripheral" or e=="peripheral_detach" then
       binding=inspect()
-      if accessibility and binding and binding.target then accessibility.apply(binding.target,guardianConfig) end
       target=binding.monitor and peripheral.wrap(binding.monitor) or computer
       compactMonitor(target,binding.monitor~=nil)
+      if accessibility then accessibility.apply(computer,guardianConfig);if target~=computer then accessibility.apply(target,guardianConfig) end end
       gateApplied={};gateCommands={};reactorCommands={}
       controls.inputControlVerified=false;controls.outputControlVerified=false;controls.gatesOwned=false
       data=nil
