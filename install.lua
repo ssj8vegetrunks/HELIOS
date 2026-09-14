@@ -1,7 +1,7 @@
 -- HELIOS single-file installer
 -- Manual-control alpha: guarded direct plant authority.
 
-local VERSION = "1.6.0-alpha.23"
+local VERSION = "1.6.0-alpha.24"
 local INSTALL_DIR = "/helios"
 local STAGE_DIR = "/.helios-install"
 local MODULE_PACK_BASE_URL = "https://raw.githubusercontent.com/ssj8vegetrunks/HELIOS/testing/public-alpha/module-pack"
@@ -3150,7 +3150,7 @@ return {
     name = "HELIOS Control Room",
     version = "1.0.0",
     apiVersion = 1,
-    compatibleCoreVersions = { "1.6.0-alpha.4", "1.6.0-alpha.5", "1.6.0-alpha.6", "1.6.0-alpha.7", "1.6.0-alpha.8", "1.6.0-alpha.9", "1.6.0-alpha.10", "1.6.0-alpha.11", "1.6.0-alpha.12", "1.6.0-alpha.13", "1.6.0-alpha.14", "1.6.0-alpha.15", "1.6.0-alpha.16", "1.6.0-alpha.17", "1.6.0-alpha.18", "1.6.0-alpha.19", "1.6.0-alpha.20", "1.6.0-alpha.21", "1.6.0-alpha.22", "1.6.0-alpha.23" },
+    compatibleCoreVersions = { "1.6.0-alpha.4", "1.6.0-alpha.5", "1.6.0-alpha.6", "1.6.0-alpha.7", "1.6.0-alpha.8", "1.6.0-alpha.9", "1.6.0-alpha.10", "1.6.0-alpha.11", "1.6.0-alpha.12", "1.6.0-alpha.13", "1.6.0-alpha.14", "1.6.0-alpha.15", "1.6.0-alpha.16", "1.6.0-alpha.17", "1.6.0-alpha.18", "1.6.0-alpha.19", "1.6.0-alpha.20", "1.6.0-alpha.21", "1.6.0-alpha.22", "1.6.0-alpha.23", "1.6.0-alpha.24" },
     entry = "renderer.lua",
     minimumWidth = 50,
     minimumHeight = 31,
@@ -10860,7 +10860,7 @@ local FIELD_RECOVERY_RATIO, MINIMUM_FIELD_INPUT = .05, 50000
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.9"
+local GUARDIAN_VERSION = "1.2.0-alpha.10"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -10911,7 +10911,7 @@ end
 local function sort(t) table.sort(t, function(a,b) return tostring(a) < tostring(b) end); return t end
 local function localSides() local r = {}; for _, s in ipairs(rs.getSides()) do if peripheral.isPresent(s) then r[s] = true end end; return r end
 local function inspect()
-  local p, localReactors, remoteReactors, directGates, exportGates, modems, monitors = localSides(), {}, {}, {}, {}, {}, {}
+  local p, localReactors, remoteReactors, directGates, exportGates, modems, remoteMonitors = localSides(), {}, {}, {}, {}, {}, {}
   for side in pairs(p) do
     if hasType(side, "draconic_reactor") then localReactors[#localReactors+1] = side end
     if hasType(side, "flow_gate") then
@@ -10921,16 +10921,16 @@ local function inspect()
       if side == "left" or side == "right" then exportGates[#exportGates+1] = side end
     end
     if hasType(side, "modem") then modems[#modems+1] = side end
-    if hasType(side, "monitor") then monitors[#monitors+1] = side end
   end
   local inputs = {}; for _, n in ipairs(peripheral.getNames()) do
     if not p[n] then
       if hasType(n,"draconic_reactor") then remoteReactors[#remoteReactors+1]=n end
       if hasType(n,"flow_gate") then inputs[#inputs+1]=n end
+      if hasType(n,"monitor") then remoteMonitors[#remoteMonitors+1]=n end
     end
   end
   local reactors={};for _,n in ipairs(localReactors) do reactors[#reactors+1]=n end;for _,n in ipairs(remoteReactors) do reactors[#reactors+1]=n end
-  sort(reactors);sort(directGates);sort(exportGates);sort(modems);sort(monitors);sort(inputs)
+  sort(reactors);sort(directGates);sort(exportGates);sort(modems);sort(remoteMonitors);sort(inputs)
   local why={}; if #reactors~=1 then why[#why+1]="Require exactly one reactor component (direct or wired)" end
   if #exportGates~=1 then why[#why+1]="Require exactly one local export gate on LEFT or RIGHT (never both)" end
   if #directGates~=#exportGates then why[#why+1]="No other Flux Gate may be directly attached to the Guardian" end
@@ -10938,7 +10938,8 @@ local function inspect()
   -- The sole remote gate reachable through the wired modem is always the
   -- injector-feed gate. Guardian uses it only to sustain field strength.
   if #inputs~=1 then why[#why+1]="Require exactly one modem-connected injector field gate" end
-  return {ready=#why==0,reasons=why,reactor=reactors[1],output=exportGates[1],modem=modems[1],monitor=monitors[1],input=inputs[1]}
+  return {ready=#why==0,reasons=why,reactor=reactors[1],output=exportGates[1],modem=modems[1],
+    monitor=#remoteMonitors==1 and remoteMonitors[1] or nil,monitorCount=#remoteMonitors,input=inputs[1]}
 end
 local function call(n,m,...)
   if not n then return nil,"missing" end
@@ -11434,7 +11435,7 @@ local function draw(t,b,d,page,c,bs)
   if not d then text(t,1,5,"TELEMETRY LOST",colors.red);return end
   local critical,criticalMessage=imminentMeltdown(d.reactor)
   if critical then replaceLine(t,2,criticalMessage,colors.red) end
-  if page=="setup" then text(t,1,5,"FIXED GATE TOPOLOGY VALID",colors.lime);text(t,1,7,"Reactor component: "..b.reactor);text(t,1,8,"Export gate (LEFT/RIGHT): "..b.output);text(t,1,9,"Injector field gate (MODEM): "..b.input);text(t,1,10,"Wired modem: "..b.modem);text(t,1,12,"Export and containment roles are fixed; Guardian will not infer them.",colors.orange);return end
+  if page=="setup" then text(t,1,5,"FIXED GATE TOPOLOGY VALID",colors.lime);text(t,1,7,"Reactor component: "..b.reactor);text(t,1,8,"Export gate (LEFT/RIGHT): "..b.output);text(t,1,9,"Injector field gate (MODEM): "..b.input);text(t,1,10,"Wired modem: "..b.modem);text(t,1,11,"Wired monitor: "..(b.monitor or ((b.monitorCount or 0)>1 and "MULTIPLE - NOT CLAIMED" or "OPTIONAL / NOT FOUND")),(b.monitorCount or 0)>1 and colors.orange or colors.lightGray);text(t,1,13,"Export and containment roles are fixed; Guardian will not infer them.",colors.orange);return end
   if page=="raw" then text(t,1,5,"RAW DRACONIC TELEMETRY",colors.cyan);local ks={};for k in pairs(d.reactor) do ks[#ks+1]=tostring(k) end;sort(ks);for i,k in ipairs(ks) do if i+6<h then text(t,1,i+6,k..": "..tostring(d.reactor[k])) end end;return end
   if page=="gates" then
     text(t,1,5,"MANUAL GATES // unrestricted only",c.mode=="UNRESTRICTED" and colors.red or colors.orange)

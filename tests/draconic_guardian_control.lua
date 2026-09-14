@@ -1,4 +1,4 @@
-local writes, calls = {}, {}
+local writes, calls, wrappedNames = {}, {}, {}
 local reactorFuelConversion, reactorField, reactorDrain = 10, 60, 100
 local overrides = { right = false, flow_gate_1 = false }
 -- The injector gate begins at the proven manual field-support limit. Guardian
@@ -33,14 +33,14 @@ peripheral = {
     -- The reactor is intentionally reached through the wired CC network,
     -- while the export gate remains directly on the computer's right side.
     isPresent = function(side) return side == "right" or side == "bottom" or side == "top" end,
-    getNames = function() return { "right", "bottom", "top", "draconic_reactor_2", "flow_gate_1" } end,
+    getNames = function() return { "right", "bottom", "top", "draconic_reactor_2", "flow_gate_1", "monitor_0" } end,
     getType = function(name)
         if name == "draconic_reactor_2" then return "draconic_reactor" end
         if name == "right" or name == "flow_gate_1" then return "flow_gate" end
-        if name == "top" then return "monitor" end
+        if name == "top" or name == "monitor_0" then return "monitor" end
         return "modem"
     end,
-    wrap = function() return monitorTarget end,
+    wrap = function(name) wrappedNames[name] = true; return monitorTarget end,
     call = function(name, method, argument)
         if method == "getReactorInfo" then return {
             status = "running", generationRate = math.min(overrideFlows.right, 5000000), temperature = 2000,
@@ -101,5 +101,6 @@ assert(overrides.right and overrides.flow_gate_1, "Guardian must acquire direct 
 assert(overrideFlows.right == 0, "Guardian exit must leave reactor export closed")
 assert(overrideFlows.flow_gate_1 == 1600000,
     "Guardian exit must leave the injector at its full learned containment limit")
+assert(wrappedNames.monitor_0, "Guardian must claim the monitor on its wired peripheral network")
 print("draconic guardian control tests passed")
 
