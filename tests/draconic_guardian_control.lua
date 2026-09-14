@@ -21,6 +21,10 @@ keys = { q = 1, one = 2, two = 3, three = 4, m = 5, o = 6, n = 7, d = 8, x = 9, 
 rs = { getSides = function() return { "back", "right", "bottom", "top" } end }
 fs = {
     exists = function() return false end,
+    getDir = function() return "" end,
+    makeDir = function() end,
+    move = function() end,
+    delete = function() end,
     open = function() return { write = function() end, close = function() end } end,
 }
 textutils = { serialize = function() return "{}" end }
@@ -65,6 +69,7 @@ events[#events + 1] = { "fuel_low" }
 events[#events + 1] = { "timer", 1 }
 events[#events + 1] = { "key", keys.q }
 os = {
+    clock = function() return 1 end,
     startTimer = function() return 1 end,
     pullEvent = function()
         local event = table.remove(events, 1)
@@ -93,5 +98,8 @@ assert(sawBeyondFormerCap, "automatic calibration must not impose the former fix
 assert(sawAdoptedInjectorLimit, "Guardian must preserve the existing injector field-support limit")
 assert(sawTaperedShutdown, "fuel shutdown must taper injector flow to field drain plus its safety margin")
 assert(overrides.right and overrides.flow_gate_1, "Guardian must acquire direct override of both gates")
+assert(overrideFlows.right == 0, "Guardian exit must leave reactor export closed")
+assert(overrideFlows.flow_gate_1 == 1600000,
+    "Guardian exit must leave the injector at its full learned containment limit")
 print("draconic guardian control tests passed")
 

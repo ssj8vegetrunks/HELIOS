@@ -1,7 +1,7 @@
 -- HELIOS single-file installer
 -- Manual-control alpha: guarded direct plant authority.
 
-local VERSION = "1.6.0-alpha.21"
+local VERSION = "1.6.0-alpha.22"
 local INSTALL_DIR = "/helios"
 local STAGE_DIR = "/.helios-install"
 local MODULE_PACK_BASE_URL = "https://raw.githubusercontent.com/ssj8vegetrunks/HELIOS/testing/public-alpha/module-pack"
@@ -3150,7 +3150,7 @@ return {
     name = "HELIOS Control Room",
     version = "1.0.0",
     apiVersion = 1,
-    compatibleCoreVersions = { "1.6.0-alpha.4", "1.6.0-alpha.5", "1.6.0-alpha.6", "1.6.0-alpha.7", "1.6.0-alpha.8", "1.6.0-alpha.9", "1.6.0-alpha.10", "1.6.0-alpha.11", "1.6.0-alpha.12", "1.6.0-alpha.13", "1.6.0-alpha.14", "1.6.0-alpha.15", "1.6.0-alpha.16", "1.6.0-alpha.17", "1.6.0-alpha.18", "1.6.0-alpha.19", "1.6.0-alpha.20", "1.6.0-alpha.21" },
+    compatibleCoreVersions = { "1.6.0-alpha.4", "1.6.0-alpha.5", "1.6.0-alpha.6", "1.6.0-alpha.7", "1.6.0-alpha.8", "1.6.0-alpha.9", "1.6.0-alpha.10", "1.6.0-alpha.11", "1.6.0-alpha.12", "1.6.0-alpha.13", "1.6.0-alpha.14", "1.6.0-alpha.15", "1.6.0-alpha.16", "1.6.0-alpha.17", "1.6.0-alpha.18", "1.6.0-alpha.19", "1.6.0-alpha.20", "1.6.0-alpha.21", "1.6.0-alpha.22" },
     entry = "renderer.lua",
     minimumWidth = 50,
     minimumHeight = 31,
@@ -10860,7 +10860,7 @@ local FIELD_RECOVERY_RATIO, MINIMUM_FIELD_INPUT = .05, 50000
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.8"
+local GUARDIAN_VERSION = "1.2.0-alpha.9"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -11652,10 +11652,18 @@ local function inputWorker()
   while true do
     local e,a,b,c=os.pullEvent()
     if e=="char" then
-      if a=="q" then save(controls);return end
+      if a=="q" then
+        enqueue("SAFE SHUTDOWN")
+        controls.message="Quit requested: applying fail-safe hold"
+        return
+      end
       enqueue(keyboardChoice(a))
     elseif e=="key" then
-      if a==keys.q then save(controls);return end
+      if a==keys.q then
+        enqueue("SAFE SHUTDOWN")
+        controls.message="Quit requested: applying fail-safe hold"
+        return
+      end
       if a==keys.one then page="overview" elseif a==keys.two then page="raw" elseif a==keys.three then page="setup" elseif a==keys.four then page="gates" end
       requestDraw()
     elseif e=="monitor_touch" and binding.monitor and a==binding.monitor then
@@ -11865,8 +11873,56 @@ local function profilerWorker()
     end
   end
 end
-parallel.waitForAny(inputWorker,controlWorker,displayWorker,facilityWorker,profilerWorker)
-save(controls)
+
+-- A Draconic reactor must never lose its local control loop because an
+-- optional display or network service returned or raised an error. Restart
+-- those services independently while the control worker keeps containment.
+local function resilient(name,worker)
+  return function()
+    while true do
+      local ok,reason=pcall(worker)
+      if not ok and tostring(reason):find("Terminated",1,true) then error(reason,0) end
+      controls.message=string.upper(name).." service restarted: "..tostring(reason or "unexpected return")
+      local retry=os.startTimer(1)
+      repeat local event,id=os.pullEvent();if event=="timer" and id==retry then break end until false
+    end
+  end
+end
+
+local function emergencyHold(reason)
+  if not binding or not binding.ready then return end
+  local current=read(binding)
+  if current then
+    data=current
+    acquireGates(binding,current,controls)
+  end
+  gate(binding.output,0)
+  gate(binding.input,positive(controls.injectorBaseline) or
+    positive(current and current.inputSet) or positive(current and current.inputFlow) or 0)
+  reactor(binding.reactor,"stopReactor")
+  controls.request="OFF";controls.initialRequested=false;controls.startActivated=false
+  controls.commissioning=false;controls.recovery=false
+  controls.message="FAIL-SAFE HOLD: "..tostring(reason or "Guardian restart")
+  save(controls)
+end
+
+-- On a world/server reload the reactor may resume ticking before the first
+-- 0.2-second supervision timer. Apply a synchronous fail-safe before starting
+-- UI and networking: full learned containment, export closed, reactor stopped.
+-- A reactor which was live before an unclean shutdown therefore stays down
+-- until an operator deliberately starts it again.
+if binding.ready and data then
+  local reactorStatus=string.lower(tostring(data.reactor and data.reactor.status or "unknown"))
+  if reactorStatus=="online" or reactorStatus=="running" or reactorStatus=="stopping" or reactorStatus=="cooling" then
+    emergencyHold("startup/reload interlock; manual restart required")
+  end
+end
+
+local ok,reason=pcall(parallel.waitForAny,
+  resilient("input",inputWorker),controlWorker,resilient("display",displayWorker),
+  resilient("facility network",facilityWorker),resilient("profiler",profilerWorker))
+emergencyHold(ok and "Guardian control loop stopped" or reason)
+if not ok then error(reason,0) end
 ]=],
 }
 
