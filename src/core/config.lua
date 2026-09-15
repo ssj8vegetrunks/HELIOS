@@ -173,6 +173,10 @@ function config.load()
     loaded.network.securityKey = type(loaded.network.securityKey) == "string" and
         loaded.network.securityKey or ""
     if #loaded.network.securityKey < 8 then loaded.network.securityEnabled = false end
+    loaded.logging = loaded.logging or {}
+    loaded.logging.enabled = loaded.logging.enabled ~= false
+    loaded.logging.retentionDays = math.max(1, math.min(30,
+        math.floor(tonumber(loaded.logging.retentionDays) or 7)))
     return loaded
 end
 

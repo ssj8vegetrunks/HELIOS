@@ -2,6 +2,11 @@
 local args = { ... }
 local config = dofile("/helios/core/config.lua").load()
 
+if args[1] == "logs" then
+    dofile("/helios/core/log_viewer.lua").run(config, args[2], args[3])
+    return
+end
+
 if args[1] == "network" then
     local security = dofile("/helios/core/network_security.lua")
     local action = args[2] or "status"

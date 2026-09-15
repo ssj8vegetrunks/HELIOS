@@ -932,6 +932,10 @@ function config.load()
     loaded.network.securityKey = type(loaded.network.securityKey) == "string" and
         loaded.network.securityKey or ""
     if #loaded.network.securityKey < 8 then loaded.network.securityEnabled = false end
+    loaded.logging = loaded.logging or {}
+    loaded.logging.enabled = loaded.logging.enabled ~= false
+    loaded.logging.retentionDays = math.max(1, math.min(30,
+        math.floor(tonumber(loaded.logging.retentionDays) or 7)))
     return loaded
 end
 
@@ -1134,6 +1138,134 @@ function display.count()
 end
 
 return display
+]=],
+
+    ["core/event_log.lua"] = [=[
+local eventLog = {}
+
+local ROOT = "/helios/data/logs"
+local DEFAULT_RETENTION_DAYS = 7
+local MAX_EVENTS_PER_HOUR = 256
+local MAX_VALUE_LENGTH = 512
+local MAX_DETAIL_PAGES = 20
+local MAX_PAGE_LENGTH = 1024
+
+local function safeSegment(value)
+    return tostring(value or "unknown"):gsub("[^%w_.-]", "_"):sub(1, 80)
+end
+
+local function nowParts()
+    local milliseconds = type(os.epoch) == "function" and os.epoch("utc") or math.floor(os.clock() * 1000)
+    local seconds = math.floor(milliseconds / 1000)
+    if type(os.date) == "function" then
+        local okDay, day = pcall(os.date, "!%Y-%m-%d", seconds)
+        local okHour, hour = pcall(os.date, "!%H", seconds)
+        if okDay and okHour and day and hour then return milliseconds, day, hour end
+    end
+    local day = type(os.day) == "function" and os.day() or 0
+    local hour = type(os.time) == "function" and math.floor(os.time()) or 0
+    return milliseconds, ("day-%05d"):format(day), ("%02d"):format(hour)
+end
+
+local function cleanValues(values)
+    local clean = {}
+    for key, value in pairs(type(values) == "table" and values or {}) do
+        local kind = type(value)
+        if kind == "string" or kind == "number" or kind == "boolean" then
+            clean[safeSegment(key)] = tostring(value):sub(1, MAX_VALUE_LENGTH)
+        end
+    end
+    return clean
+end
+
+local function cleanPages(pages)
+    if type(pages) == "string" then pages = { pages } end
+    local clean = {}
+    for index, page in ipairs(type(pages) == "table" and pages or {}) do
+        if index > MAX_DETAIL_PAGES then break end
+        clean[index] = tostring(page):sub(1, MAX_PAGE_LENGTH)
+    end
+    return clean
+end
+
+local function listDirectories(path)
+    local result = {}
+    if not fs.exists(path) or not fs.isDir(path) then return result end
+    for _, name in ipairs(fs.list(path)) do
+        if fs.isDir(fs.combine(path, name)) then result[#result + 1] = name end
+    end
+    table.sort(result)
+    return result
+end
+
+local function listFiles(path)
+    local result = {}
+    if not fs.exists(path) or not fs.isDir(path) then return result end
+    for _, name in ipairs(fs.list(path)) do
+        if not fs.isDir(fs.combine(path, name)) and name:match("%.lua$") then result[#result + 1] = name end
+    end
+    table.sort(result)
+    return result
+end
+
+local function readRecord(path)
+    local handle = fs.open(path, "r")
+    if not handle then return nil end
+    local contents = handle.readAll();handle.close()
+    contents = contents:gsub("^%s*return%s+", "", 1)
+    local record = textutils.unserialize(contents)
+    return type(record) == "table" and record or nil
+end
+
+function eventLog.prune(retentionDays)
+    retentionDays = math.max(1, math.floor(tonumber(retentionDays) or DEFAULT_RETENTION_DAYS))
+    local days = listDirectories(ROOT)
+    while #days > retentionDays do
+        fs.delete(fs.combine(ROOT, table.remove(days, 1)))
+    end
+end
+
+function eventLog.append(key, options)
+    options = type(options) == "table" and options or {}
+    local timestamp, day, hour = nowParts()
+    local hourPath = fs.combine(fs.combine(ROOT, safeSegment(day)), safeSegment(hour))
+    fs.makeDir(hourPath)
+    local existing = listFiles(hourPath)
+    while #existing >= MAX_EVENTS_PER_HOUR do
+        fs.delete(fs.combine(hourPath, table.remove(existing, 1)))
+    end
+    local base = ("event-%013d-%d"):format(timestamp, os.getComputerID and os.getComputerID() or 0)
+    local fileName, suffix = base .. ".lua", 0
+    while fs.exists(fs.combine(hourPath, fileName)) do suffix = suffix + 1;fileName = base .. "-" .. suffix .. ".lua" end
+    local record = {
+        version = 1, id = fileName:gsub("%.lua$", ""), timestamp = timestamp,
+        day = day, hour = hour, severity = safeSegment(options.severity or "info"),
+        subsystem = safeSegment(options.subsystem or "core"), key = tostring(key or "log.unknown"),
+        values = cleanValues(options.values), pages = cleanPages(options.pages),
+    }
+    local handle, reason = fs.open(fs.combine(hourPath, fileName), "w")
+    if not handle then return nil, reason end
+    handle.write("return " .. textutils.serialize(record));handle.close()
+    eventLog.prune(options.retentionDays)
+    return record
+end
+
+function eventLog.days() return listDirectories(ROOT) end
+function eventLog.hours(day) return listDirectories(fs.combine(ROOT, safeSegment(day))) end
+function eventLog.events(day, hour)
+    local path = fs.combine(fs.combine(ROOT, safeSegment(day)), safeSegment(hour))
+    local records = {}
+    for _, fileName in ipairs(listFiles(path)) do
+        local record = readRecord(fs.combine(path, fileName))
+        if record then records[#records + 1] = record end
+    end
+    return records
+end
+function eventLog.get(day, hour, id)
+    return readRecord(fs.combine(fs.combine(fs.combine(ROOT, safeSegment(day)), safeSegment(hour)), safeSegment(id) .. ".lua"))
+end
+
+return eventLog
 ]=],
 
     ["core/facility_protocol.lua"] = [=[
@@ -1703,6 +1835,113 @@ function i18n.new(config)
 end
 
 return i18n
+]=],
+
+    ["core/log_viewer.lua"] = [=[
+local viewer = {}
+
+function viewer.run(config, wantedSeverity, wantedSubsystem)
+    local log = dofile("/helios/core/event_log.lua")
+    local i18n = dofile("/helios/core/i18n.lua").new(config)
+    local function translatedValues(record)
+        local values = {}
+        for key, value in pairs(record.values or {}) do values[key] = value end
+        for key, value in pairs(record.values or {}) do
+            local target = key:match("^(.-)_key$")
+            if target then values[target] = i18n.get(value, nil, value) end
+        end
+        return values
+    end
+    local function tag(prefix, value)
+        return i18n.get(prefix .. tostring(value):lower(), nil, tostring(value))
+    end
+    local function choose(title, entries)
+        if #entries == 0 then
+            term.clear();term.setCursorPos(1, 1);print(title);print("")
+            print(i18n.get("log.no_entries", nil, "No entries."));print("")
+            print(i18n.get("log.press_return", nil, "Press ENTER to return."));read();return nil
+        end
+        local width, height = term.getSize()
+        local pageSize, page = math.max(3, height - 6), 1
+        local pageCount = math.max(1, math.ceil(#entries / pageSize))
+        while true do
+            term.clear();term.setCursorPos(1, 1);print(title);print("")
+            local first, last = (page - 1) * pageSize + 1, math.min(#entries, page * pageSize)
+            for index = first, last do print((("[%d] %s"):format(index, entries[index])):sub(1, width)) end
+            print("");print(i18n.get("log.page", {page=page,total=pageCount}, "PAGE {page}/{total}"))
+            write(i18n.get("log.select", nil, "Number, N/P page, or ENTER to go back: "))
+            local answer = read():lower()
+            if answer == "" then return nil end
+            if answer == "n" then page = math.min(pageCount, page + 1)
+            elseif answer == "p" then page = math.max(1, page - 1)
+            else local selected=tonumber(answer);if selected and entries[selected] then return selected end end
+        end
+    end
+    local days = log.days()
+    local dayIndex = choose(i18n.get("log.days", nil, "CAPTAIN'S LOG // DAYS"), days)
+    if not dayIndex then return end
+    local day = days[dayIndex]
+    local hours = log.hours(day)
+    local hourIndex = choose(i18n.get("log.hours", {day=day}, "CAPTAIN'S LOG // {day} // HOURS"), hours)
+    if not hourIndex then return end
+    local hour = hours[hourIndex]
+    local records = log.events(day, hour)
+    wantedSeverity = wantedSeverity and tostring(wantedSeverity):lower() or nil
+    wantedSubsystem = wantedSubsystem and tostring(wantedSubsystem):lower() or nil
+    if wantedSeverity or wantedSubsystem then
+        local filtered = {}
+        for _, record in ipairs(records) do
+            if (not wantedSeverity or record.severity == wantedSeverity) and
+               (not wantedSubsystem or record.subsystem == wantedSubsystem) then filtered[#filtered + 1] = record end
+        end
+        records = filtered
+    end
+    local labels = {}
+    for index, record in ipairs(records) do
+        labels[index] = ("[%s] [%s] %s"):format(string.upper(tag("value.", record.severity)),
+            tag("log.subsystem_", record.subsystem),
+            i18n.get(record.key, translatedValues(record), record.key))
+    end
+    local selected = choose(i18n.get("log.events", {day=day,hour=hour}, "CAPTAIN'S LOG // {day} // {hour}"), labels)
+    if not selected then return end
+    local record = records[selected]
+    term.clear();term.setCursorPos(1, 1)
+    print(i18n.get(record.key, translatedValues(record), record.key));print("")
+    print(i18n.get("log.severity", nil, "Severity") .. ": " .. string.upper(tag("value.", record.severity)))
+    print(i18n.get("log.subsystem", nil, "Subsystem") .. ": " .. tag("log.subsystem_", record.subsystem))
+    print(i18n.get("log.event", nil, "Event") .. ": " .. record.id)
+    print("");print(i18n.get("log.open_book", nil, "Press ENTER to open the event book."));read()
+    local storedPages = record.pages or {}
+    if #storedPages == 0 then storedPages = { i18n.get("log.no_details", nil, "No additional details.") } end
+    local width, height = term.getSize()
+    local linesPerPage, displayPages = math.max(3, height - 4), {}
+    for _, storedPage in ipairs(storedPages) do
+        local lines = {}
+        for sourceLine in (tostring(storedPage) .. "\n"):gmatch("(.-)\n") do
+            if sourceLine == "" then lines[#lines + 1] = "" end
+            while #sourceLine > 0 do
+                lines[#lines + 1] = sourceLine:sub(1, width)
+                sourceLine = sourceLine:sub(width + 1)
+            end
+        end
+        for first = 1, math.max(1, #lines), linesPerPage do
+            local page = {}
+            for line = first, math.min(#lines, first + linesPerPage - 1) do page[#page + 1] = lines[line] end
+            displayPages[#displayPages + 1] = page
+        end
+    end
+    for index, page in ipairs(displayPages) do
+        term.clear();term.setCursorPos(1, 1)
+        print(i18n.get("log.page", {page=index,total=#displayPages}, "PAGE {page}/{total}"));print("")
+        for _, line in ipairs(page) do print(line) end
+        if index < #displayPages then
+            print("");print(i18n.get("log.next_page", nil, "Press ENTER for the next page."));read()
+        end
+    end
+    print("");print(i18n.get("log.close_book", nil, "Press ENTER to close the book."));read()
+end
+
+return viewer
 ]=],
 
     ["core/mainframe_authority.lua"] = [=[
@@ -3409,6 +3648,11 @@ return renderer
 local args = { ... }
 local config = dofile("/helios/core/config.lua").load()
 
+if args[1] == "logs" then
+    dofile("/helios/core/log_viewer.lua").run(config, args[2], args[3])
+    return
+end
+
 if args[1] == "network" then
     local security = dofile("/helios/core/network_security.lua")
     local action = args[2] or "status"
@@ -3742,6 +3986,59 @@ return {
     strings = {
         ["common.online"] = "ONLINE", ["common.waiting"] = "WARTET", ["common.unknown"] = "UNBEKANNT",
         ["common.read_only"] = "NUR LESEN", ["common.quit"] = "Q beenden", ["common.back"] = "ZURUECK",
+        ["accessibility.title"] = "BARRIEREFREIHEIT UND SPRACHE",
+        ["accessibility.language"] = "Sprache", ["accessibility.colour_profile"] = "Farbprofil",
+        ["accessibility.status_symbols"] = "Statussymbole",
+        ["accessibility.enabled"] = "AKTIVIERT", ["accessibility.disabled"] = "DEAKTIVIERT",
+        ["accessibility.language_button"] = "SPRACHE", ["accessibility.colour_button"] = "FARBPROFIL",
+        ["accessibility.symbols_button"] = "STATUSSYMBOLE",
+        ["accessibility.apply_hint"] = "Aenderungen gelten sofort fuer diesen Computer und den Kabelmonitor.",
+        ["accessibility.language_changed"] = "Sprache geaendert",
+        ["accessibility.language_save_failed"] = "Sprache konnte nicht gespeichert werden",
+        ["accessibility.colour_changed"] = "Farbprofil geaendert",
+        ["accessibility.colour_save_failed"] = "Farbprofil konnte nicht gespeichert werden",
+        ["accessibility.symbols_changed"] = "Statussymbole geaendert",
+        ["accessibility.symbols_save_failed"] = "Statussymbole konnten nicht gespeichert werden",
+        ["log.mainframe_started"] = "HELIOS-Hauptrechner {version} auf Computer {computer} gestartet",
+        ["log.days"] = "KAPITAENSLOG // TAGE", ["log.hours"] = "KAPITAENSLOG // {day} // STUNDEN",
+        ["log.button"] = "KAPITAENSLOG",
+        ["log.events"] = "KAPITAENSLOG // {day} // {hour}", ["log.no_entries"] = "Keine Eintraege.",
+        ["log.press_return"] = "ENTER druecken, um zurueckzukehren.", ["log.select"] = "Nummer, N/P Seite oder ENTER zurueck: ",
+        ["log.severity"] = "Schweregrad", ["log.subsystem"] = "Teilsystem", ["log.event"] = "Ereignis",
+        ["log.subsystem_mainframe"] = "Hauptrechner", ["log.subsystem_discovery"] = "Erkennung",
+        ["log.subsystem_alarm"] = "Alarm", ["log.subsystem_reactor"] = "Reaktor", ["log.subsystem_turbine"] = "Turbine",
+        ["log.subsystem_storage"] = "Speicher", ["log.subsystem_network"] = "Netzwerk",
+        ["log.subsystem_operator"] = "Bediener", ["log.subsystem_guardian"] = "Waechter",
+        ["log.no_details"] = "Keine weiteren Einzelheiten.", ["log.page"] = "SEITE {page}/{total}",
+        ["log.open_book"] = "ENTER druecken, um das Ereignisbuch zu oeffnen.",
+        ["log.next_page"] = "ENTER fuer die naechste Seite.", ["log.close_book"] = "ENTER druecken, um das Buch zu schliessen.",
+        ["log.discovery_complete"] = "Erkennung: {reactors} Reaktoren, {turbines} Turbinen, {storage} Speicher, {missing} fehlen",
+        ["log.alarm_raised"] = "Alarm {code} auf Stufe {level} ausgeloest", ["log.alarm_cleared"] = "Alarm {code} beendet",
+        ["log.alarm_silenced"] = "Bediener hat Alarm {code} stummgeschaltet",
+        ["log.reactor_state"] = "Reaktor {device} wechselte zu {state}", ["log.turbine_state"] = "Turbine {device} wechselte zu {state}",
+        ["log.storage_band"] = "Speicherreserve ist {state} bei {percent}%",
+        ["log.facility_connected"] = "Anlage {device} als {role} verbunden",
+        ["log.facility_disconnected"] = "Verbindung zu Anlage {device} verloren",
+        ["log.guardian_state"] = "Waechter {device} wechselte zu {state}",
+        ["log.guardian_command"] = "Waechterbediener gab einen lokalen Befehl",
+        ["log.guardian_local_state"] = "Waechterreaktor wechselte zu {state} ({mode} / {request})",
+        ["log.guardian_safety"] = "Waechter ging in Sicherheitshaltung: {reason}",
+        ["log.terminal_connected"] = "Terminal {computer} fuer Anzeige {display} mit {version} verbunden",
+        ["log.terminal_disconnected"] = "Terminal {computer} getrennt",
+        ["log.automatic_restored"] = "Automatik wiederhergestellt (Neukalibrierung: {recalibrate})",
+        ["log.maintenance_started"] = "Wartung fuer bis zu {seconds} Sekunden gestartet", ["log.maintenance_stopped"] = "Wartung beendet",
+        ["log.manual_control_started"] = "Geschuetzte Handsteuerung fuer {reactors} Reaktoren und {turbines} Turbinen gestartet",
+        ["log.turbine_recalibration"] = "Bediener forderte Neukalibrierung von Turbine {device} an",
+        ["log.operator_reactor_power"] = "Bediener setzte Reaktor {device} auf {state}",
+        ["log.operator_reactor_rods"] = "Bediener setzte alle Staebe von {device} auf {rods}%",
+        ["log.operator_reactor_rod"] = "Bediener setzte Stab {rod} von {device} auf {rods}%",
+        ["log.operator_turbine_flow"] = "Bediener setzte Durchfluss von {device} auf {flow} mB/t",
+        ["log.operator_turbine_power"] = "Bediener setzte Turbine {device} auf {state}",
+        ["log.alarm_setting"] = "Bediener aenderte Alarmeinstellung {setting} auf {value}",
+        ["log.network_protection"] = "Netzwerkschutz auf {state} gesetzt; Code {code}",
+        ["log.network_key_changed"] = "Netzwerkschluessel ersetzt; neuer Code {code}",
+        ["value.low"] = "NIEDRIG", ["value.high"] = "HOCH", ["value.normal"] = "NORMAL", ["value.enabled"] = "AKTIVIERT",
+        ["value.info"] = "INFO", ["value.critical"] = "KRITISCH",
         ["common.state"] = "Status", ["common.generation"] = "Erzeugung",
         ["common.core_temperature"] = "Kerntemperatur", ["common.field_strength"] = "Feldstaerke",
         ["common.saturation"] = "Saettigung", ["common.fuel_conversion"] = "Brennstoffverbrauch",
@@ -3895,6 +4192,60 @@ return {
         ["common.read_only"] = "EYES ONLY",
         ["common.quit"] = "Q abandon ship",
         ["common.back"] = "TURN AROUND",
+        ["accessibility.title"] = "ACCESS & CREW TONGUE",
+        ["accessibility.language"] = "Tongue", ["accessibility.colour_profile"] = "Signal colours",
+        ["accessibility.status_symbols"] = "Signal marks",
+        ["accessibility.enabled"] = "FLYIN'", ["accessibility.disabled"] = "STRUCK",
+        ["accessibility.language_button"] = "CREW TONGUE",
+        ["accessibility.colour_button"] = "SIGNAL COLOURS",
+        ["accessibility.symbols_button"] = "SIGNAL MARKS",
+        ["accessibility.apply_hint"] = "Changes reach this vessel and its wired lookout at once.",
+        ["accessibility.language_changed"] = "Crew tongue changed",
+        ["accessibility.language_save_failed"] = "Could not chart the crew tongue",
+        ["accessibility.colour_changed"] = "Signal colours changed",
+        ["accessibility.colour_save_failed"] = "Could not chart the signal colours",
+        ["accessibility.symbols_changed"] = "Signal marks changed",
+        ["accessibility.symbols_save_failed"] = "Could not chart the signal marks",
+        ["log.mainframe_started"] = "HELIOS flagship {version} set sail on vessel {computer}",
+        ["log.days"] = "CAPTAIN'S LOG // VOYAGES", ["log.hours"] = "CAPTAIN'S LOG // {day} // BELLS",
+        ["log.button"] = "CAPTAIN'S LOG",
+        ["log.events"] = "CAPTAIN'S LOG // {day} // {hour}", ["log.no_entries"] = "No tales charted.",
+        ["log.press_return"] = "Strike ENTER to turn back.", ["log.select"] = "Number, N/P chart, or ENTER back: ",
+        ["log.severity"] = "Peril", ["log.subsystem"] = "Deck", ["log.event"] = "Tale",
+        ["log.subsystem_mainframe"] = "Flagship", ["log.subsystem_discovery"] = "Lookout",
+        ["log.subsystem_alarm"] = "Alarm", ["log.subsystem_reactor"] = "Beast", ["log.subsystem_turbine"] = "Mill",
+        ["log.subsystem_storage"] = "Power hold", ["log.subsystem_network"] = "Fleet",
+        ["log.subsystem_operator"] = "Captain", ["log.subsystem_guardian"] = "Guardian",
+        ["log.no_details"] = "No more to tell.", ["log.page"] = "PAGE {page}/{total}",
+        ["log.open_book"] = "Strike ENTER to open the tale.",
+        ["log.next_page"] = "Strike ENTER for the next page.", ["log.close_book"] = "Strike ENTER to close the log.",
+        ["log.discovery_complete"] = "Lookout found {reactors} beasts, {turbines} mills, {storage} holds; {missing} missing",
+        ["log.alarm_raised"] = "Alarm {code} raised at peril {level}", ["log.alarm_cleared"] = "Alarm {code} all clear",
+        ["log.alarm_silenced"] = "Captain silenced alarm {code}",
+        ["log.reactor_state"] = "Beast {device} changed course to {state}", ["log.turbine_state"] = "Mill {device} changed course to {state}",
+        ["log.storage_band"] = "Power hold be {state} at {percent}%",
+        ["log.facility_connected"] = "Outpost {device} joined as {role}",
+        ["log.facility_disconnected"] = "Lost signal from outpost {device}",
+        ["log.guardian_state"] = "Guardian {device} changed course to {state}",
+        ["log.guardian_command"] = "Guardian captain gave a local order",
+        ["log.guardian_local_state"] = "Guardian beast changed to {state} ({mode} / {request})",
+        ["log.guardian_safety"] = "Guardian dropped anchor for safety: {reason}",
+        ["log.terminal_connected"] = "Lookout {computer} joined for {display} charts with {version}",
+        ["log.terminal_disconnected"] = "Lookout {computer} left the fleet",
+        ["log.automatic_restored"] = "Helmsman restored (rechart: {recalibrate})",
+        ["log.maintenance_started"] = "Repairs begun for up to {seconds} seconds", ["log.maintenance_stopped"] = "Repairs ended",
+        ["log.manual_control_started"] = "Captain took guarded command of {reactors} beasts and {turbines} mills",
+        ["log.turbine_recalibration"] = "Captain ordered mill {device} recharted",
+        ["log.operator_reactor_power"] = "Captain set beast {device} to {state}",
+        ["log.operator_reactor_rods"] = "Captain set all rods on {device} to {rods}%",
+        ["log.operator_reactor_rod"] = "Captain set rod {rod} on {device} to {rods}%",
+        ["log.operator_turbine_flow"] = "Captain set mill {device} flow to {flow} mB/t",
+        ["log.operator_turbine_power"] = "Captain set mill {device} to {state}",
+        ["log.alarm_setting"] = "Captain changed alarm {setting} to {value}",
+        ["log.network_protection"] = "Fleet ward changed to {state}; code {code}",
+        ["log.network_key_changed"] = "Fleet key replaced; new code {code}",
+        ["value.low"] = "LOW", ["value.high"] = "HIGH", ["value.normal"] = "FAIR", ["value.enabled"] = "FLYIN'",
+        ["value.info"] = "LOG", ["value.critical"] = "ABANDON SHIP",
         ["common.state"] = "Condition",
         ["common.generation"] = "Plunder",
         ["common.core_temperature"] = "Heart o' the beast",
@@ -4073,6 +4424,62 @@ return {
         ["common.read_only"] = "READ ONLY",
         ["common.quit"] = "Q quit",
         ["common.back"] = "BACK",
+        ["accessibility.title"] = "ACCESSIBILITY & LANGUAGE",
+        ["accessibility.language"] = "Language",
+        ["accessibility.colour_profile"] = "Colour profile",
+        ["accessibility.status_symbols"] = "Status symbols",
+        ["accessibility.enabled"] = "ENABLED", ["accessibility.disabled"] = "DISABLED",
+        ["accessibility.language_button"] = "LANGUAGE",
+        ["accessibility.colour_button"] = "COLOUR PROFILE",
+        ["accessibility.symbols_button"] = "STATUS SYMBOLS",
+        ["accessibility.apply_hint"] = "Changes apply immediately to this computer and the wired monitor.",
+        ["accessibility.language_changed"] = "Language changed",
+        ["accessibility.language_save_failed"] = "Could not save language setting",
+        ["accessibility.colour_changed"] = "Colour profile changed",
+        ["accessibility.colour_save_failed"] = "Could not save colour profile",
+        ["accessibility.symbols_changed"] = "Status symbols changed",
+        ["accessibility.symbols_save_failed"] = "Could not save status symbols",
+        ["log.mainframe_started"] = "HELIOS Mainframe {version} started on computer {computer}",
+        ["log.days"] = "CAPTAIN'S LOG // DAYS", ["log.hours"] = "CAPTAIN'S LOG // {day} // HOURS",
+        ["log.button"] = "CAPTAIN'S LOG",
+        ["log.events"] = "CAPTAIN'S LOG // {day} // {hour}", ["log.no_entries"] = "No entries.",
+        ["log.press_return"] = "Press ENTER to return.", ["log.select"] = "Number, N/P page, or ENTER to go back: ",
+        ["log.severity"] = "Severity", ["log.subsystem"] = "Subsystem", ["log.event"] = "Event",
+        ["log.subsystem_mainframe"] = "Mainframe", ["log.subsystem_discovery"] = "Discovery",
+        ["log.subsystem_alarm"] = "Alarm", ["log.subsystem_reactor"] = "Reactor",
+        ["log.subsystem_turbine"] = "Turbine", ["log.subsystem_storage"] = "Storage",
+        ["log.subsystem_network"] = "Network", ["log.subsystem_operator"] = "Operator",
+        ["log.subsystem_guardian"] = "Guardian",
+        ["log.no_details"] = "No additional details.", ["log.page"] = "PAGE {page}/{total}",
+        ["log.open_book"] = "Press ENTER to open the event book.",
+        ["log.next_page"] = "Press ENTER for the next page.", ["log.close_book"] = "Press ENTER to close the book.",
+        ["log.discovery_complete"] = "Discovery: {reactors} reactors, {turbines} turbines, {storage} storage, {missing} missing",
+        ["log.alarm_raised"] = "Alarm {code} raised at level {level}", ["log.alarm_cleared"] = "Alarm {code} cleared",
+        ["log.alarm_silenced"] = "Operator silenced alarm {code}",
+        ["log.reactor_state"] = "Reactor {device} changed to {state}", ["log.turbine_state"] = "Turbine {device} changed to {state}",
+        ["log.storage_band"] = "Storage reserve is {state} at {percent}%",
+        ["log.facility_connected"] = "Facility {device} connected as {role}",
+        ["log.facility_disconnected"] = "Facility {device} connection was lost",
+        ["log.guardian_state"] = "Guardian {device} changed to {state}",
+        ["log.guardian_command"] = "Guardian operator issued a local command",
+        ["log.guardian_local_state"] = "Guardian reactor changed to {state} ({mode} / {request})",
+        ["log.guardian_safety"] = "Guardian entered a fail-safe hold: {reason}",
+        ["log.terminal_connected"] = "Terminal {computer} connected for {display} display using {version}",
+        ["log.terminal_disconnected"] = "Terminal {computer} disconnected",
+        ["log.automatic_restored"] = "Automatic control restored (recalibration: {recalibrate})",
+        ["log.maintenance_started"] = "Maintenance started for up to {seconds} seconds", ["log.maintenance_stopped"] = "Maintenance stopped",
+        ["log.manual_control_started"] = "Guarded manual control started for {reactors} reactors and {turbines} turbines",
+        ["log.turbine_recalibration"] = "Operator requested turbine recalibration for {device}",
+        ["log.operator_reactor_power"] = "Operator set reactor {device} to {state}",
+        ["log.operator_reactor_rods"] = "Operator set all rods on {device} to {rods}%",
+        ["log.operator_reactor_rod"] = "Operator set rod {rod} on {device} to {rods}%",
+        ["log.operator_turbine_flow"] = "Operator set turbine {device} flow limit to {flow} mB/t",
+        ["log.operator_turbine_power"] = "Operator set turbine {device} to {state}",
+        ["log.alarm_setting"] = "Operator changed alarm setting {setting} to {value}",
+        ["log.network_protection"] = "Network protection changed to {state}; network code {code}",
+        ["log.network_key_changed"] = "Network key replaced; network code is now {code}",
+        ["value.low"] = "LOW", ["value.high"] = "HIGH", ["value.normal"] = "NORMAL", ["value.enabled"] = "ENABLED",
+        ["value.info"] = "INFO", ["value.critical"] = "CRITICAL",
         ["common.state"] = "State",
         ["common.generation"] = "Generation",
         ["common.core_temperature"] = "Core temperature",
@@ -4243,6 +4650,59 @@ for key, value in pairs(english.strings) do strings[key] = value end
 local translated = {
     ["common.online"]="EN LINEA", ["common.waiting"]="ESPERANDO", ["common.unknown"]="DESCONOCIDO",
     ["common.read_only"]="SOLO LECTURA", ["common.quit"]="Q salir", ["common.back"]="VOLVER",
+    ["accessibility.title"]="ACCESIBILIDAD E IDIOMA",
+    ["accessibility.language"]="Idioma", ["accessibility.colour_profile"]="Perfil de color",
+    ["accessibility.status_symbols"]="Simbolos de estado",
+    ["accessibility.enabled"]="ACTIVADOS", ["accessibility.disabled"]="DESACTIVADOS",
+    ["accessibility.language_button"]="IDIOMA", ["accessibility.colour_button"]="PERFIL DE COLOR",
+    ["accessibility.symbols_button"]="SIMBOLOS DE ESTADO",
+    ["accessibility.apply_hint"]="Los cambios se aplican al instante a este ordenador y al monitor por cable.",
+    ["accessibility.language_changed"]="Idioma cambiado",
+    ["accessibility.language_save_failed"]="No se pudo guardar el idioma",
+    ["accessibility.colour_changed"]="Perfil de color cambiado",
+    ["accessibility.colour_save_failed"]="No se pudo guardar el perfil de color",
+    ["accessibility.symbols_changed"]="Simbolos de estado cambiados",
+    ["accessibility.symbols_save_failed"]="No se pudieron guardar los simbolos de estado",
+    ["log.mainframe_started"]="El ordenador central HELIOS {version} se inicio en el ordenador {computer}",
+    ["log.days"]="BITACORA DEL CAPITAN // DIAS", ["log.hours"]="BITACORA // {day} // HORAS",
+    ["log.button"]="BITACORA",
+    ["log.events"]="BITACORA // {day} // {hour}", ["log.no_entries"]="No hay entradas.",
+    ["log.press_return"]="Pulsa ENTER para volver.", ["log.select"]="Numero, N/P pagina o ENTER para volver: ",
+    ["log.severity"]="Gravedad", ["log.subsystem"]="Subsistema", ["log.event"]="Evento",
+    ["log.subsystem_mainframe"]="Ordenador central", ["log.subsystem_discovery"]="Deteccion",
+    ["log.subsystem_alarm"]="Alarma", ["log.subsystem_reactor"]="Reactor", ["log.subsystem_turbine"]="Turbina",
+    ["log.subsystem_storage"]="Almacenamiento", ["log.subsystem_network"]="Red",
+    ["log.subsystem_operator"]="Operador", ["log.subsystem_guardian"]="Guardian",
+    ["log.no_details"]="Sin detalles adicionales.", ["log.page"]="PAGINA {page}/{total}",
+    ["log.open_book"]="Pulsa ENTER para abrir el libro del evento.",
+    ["log.next_page"]="Pulsa ENTER para la pagina siguiente.", ["log.close_book"]="Pulsa ENTER para cerrar el libro.",
+    ["log.discovery_complete"]="Deteccion: {reactors} reactores, {turbines} turbinas, {storage} almacenes, {missing} ausentes",
+    ["log.alarm_raised"]="Alarma {code} activada en nivel {level}", ["log.alarm_cleared"]="Alarma {code} despejada",
+    ["log.alarm_silenced"]="El operador silencio la alarma {code}",
+    ["log.reactor_state"]="El reactor {device} cambio a {state}", ["log.turbine_state"]="La turbina {device} cambio a {state}",
+    ["log.storage_band"]="La reserva esta {state} al {percent}%",
+    ["log.facility_connected"]="La instalacion {device} se conecto como {role}",
+    ["log.facility_disconnected"]="Se perdio la conexion con la instalacion {device}",
+    ["log.guardian_state"]="El Guardian {device} cambio a {state}",
+    ["log.guardian_command"]="El operador del Guardian emitio una orden local",
+    ["log.guardian_local_state"]="El reactor del Guardian cambio a {state} ({mode} / {request})",
+    ["log.guardian_safety"]="El Guardian entro en retencion segura: {reason}",
+    ["log.terminal_connected"]="El terminal {computer} se conecto para mostrar {display} con {version}",
+    ["log.terminal_disconnected"]="El terminal {computer} se desconecto",
+    ["log.automatic_restored"]="Control automatico restaurado (recalibracion: {recalibrate})",
+    ["log.maintenance_started"]="Mantenimiento iniciado por hasta {seconds} segundos", ["log.maintenance_stopped"]="Mantenimiento terminado",
+    ["log.manual_control_started"]="Control manual protegido iniciado para {reactors} reactores y {turbines} turbinas",
+    ["log.turbine_recalibration"]="El operador solicito recalibrar la turbina {device}",
+    ["log.operator_reactor_power"]="El operador puso el reactor {device} en {state}",
+    ["log.operator_reactor_rods"]="El operador puso todas las barras de {device} al {rods}%",
+    ["log.operator_reactor_rod"]="El operador puso la barra {rod} de {device} al {rods}%",
+    ["log.operator_turbine_flow"]="El operador puso el limite de {device} en {flow} mB/t",
+    ["log.operator_turbine_power"]="El operador puso la turbina {device} en {state}",
+    ["log.alarm_setting"]="El operador cambio {setting} de alarmas a {value}",
+    ["log.network_protection"]="Proteccion de red en {state}; codigo {code}",
+    ["log.network_key_changed"]="Clave de red sustituida; el codigo ahora es {code}",
+    ["value.low"]="BAJA", ["value.high"]="ALTA", ["value.normal"]="NORMAL", ["value.enabled"]="ACTIVADO",
+    ["value.info"]="INFO", ["value.critical"]="CRITICA",
     ["common.state"]="Estado", ["common.generation"]="Generacion", ["common.core_temperature"]="Temperatura del nucleo",
     ["common.field_strength"]="Fuerza del campo", ["common.saturation"]="Saturacion",
     ["common.fuel_conversion"]="Conversion de combustible", ["common.telemetry_lost"]="TELEMETRIA PERDIDA",
@@ -4372,6 +4832,61 @@ return {
         ["common.read_only"] = "LECTURE SEULE",
         ["common.quit"] = "Q quitter",
         ["common.back"] = "RETOUR",
+        ["accessibility.title"] = "ACCESSIBILITE ET LANGUE",
+        ["accessibility.language"] = "Langue",
+        ["accessibility.colour_profile"] = "Profil de couleurs",
+        ["accessibility.status_symbols"] = "Symboles d'etat",
+        ["accessibility.enabled"] = "ACTIVES", ["accessibility.disabled"] = "DESACTIVES",
+        ["accessibility.language_button"] = "LANGUE",
+        ["accessibility.colour_button"] = "PROFIL DE COULEURS",
+        ["accessibility.symbols_button"] = "SYMBOLES D'ETAT",
+        ["accessibility.apply_hint"] = "Les changements s'appliquent immediatement a cet ordinateur et au moniteur cable.",
+        ["accessibility.language_changed"] = "Langue modifiee",
+        ["accessibility.language_save_failed"] = "Impossible d'enregistrer la langue",
+        ["accessibility.colour_changed"] = "Profil de couleurs modifie",
+        ["accessibility.colour_save_failed"] = "Impossible d'enregistrer le profil de couleurs",
+        ["accessibility.symbols_changed"] = "Symboles d'etat modifies",
+        ["accessibility.symbols_save_failed"] = "Impossible d'enregistrer les symboles d'etat",
+        ["log.mainframe_started"] = "Le serveur HELIOS {version} a demarre sur l'ordinateur {computer}",
+        ["log.days"] = "JOURNAL DU CAPITAINE // JOURS", ["log.hours"] = "JOURNAL // {day} // HEURES",
+        ["log.button"] = "JOURNAL DU CAPITAINE",
+        ["log.events"] = "JOURNAL // {day} // {hour}", ["log.no_entries"] = "Aucune entree.",
+        ["log.press_return"] = "Appuyez sur ENTREE pour revenir.", ["log.select"] = "Numero, N/P page ou ENTREE pour revenir : ",
+        ["log.severity"] = "Gravite", ["log.subsystem"] = "Sous-systeme", ["log.event"] = "Evenement",
+        ["log.subsystem_mainframe"] = "Serveur", ["log.subsystem_discovery"] = "Detection",
+        ["log.subsystem_alarm"] = "Alarme", ["log.subsystem_reactor"] = "Reacteur", ["log.subsystem_turbine"] = "Turbine",
+        ["log.subsystem_storage"] = "Stockage", ["log.subsystem_network"] = "Reseau",
+        ["log.subsystem_operator"] = "Operateur", ["log.subsystem_guardian"] = "Gardien",
+        ["log.no_details"] = "Aucun detail supplementaire.", ["log.page"] = "PAGE {page}/{total}",
+        ["log.open_book"] = "Appuyez sur ENTREE pour ouvrir le livre.",
+        ["log.next_page"] = "Appuyez sur ENTREE pour la page suivante.", ["log.close_book"] = "Appuyez sur ENTREE pour fermer le livre.",
+        ["log.discovery_complete"] = "Detection : {reactors} reacteurs, {turbines} turbines, {storage} stockages, {missing} absents",
+        ["log.alarm_raised"] = "Alarme {code} declenchee au niveau {level}", ["log.alarm_cleared"] = "Alarme {code} terminee",
+        ["log.alarm_silenced"] = "L'operateur a coupe l'alarme {code}",
+        ["log.reactor_state"] = "Le reacteur {device} est passe a {state}", ["log.turbine_state"] = "La turbine {device} est passee a {state}",
+        ["log.storage_band"] = "La reserve est {state} a {percent}%",
+        ["log.facility_connected"] = "Installation {device} connectee comme {role}",
+        ["log.facility_disconnected"] = "Connexion perdue avec l'installation {device}",
+        ["log.guardian_state"] = "Le Gardien {device} est passe a {state}",
+        ["log.guardian_command"] = "L'operateur du Gardien a donne une commande locale",
+        ["log.guardian_local_state"] = "Le reacteur du Gardien est passe a {state} ({mode} / {request})",
+        ["log.guardian_safety"] = "Le Gardien a applique un maintien securise : {reason}",
+        ["log.terminal_connected"] = "Terminal {computer} connecte pour l'affichage {display} avec {version}",
+        ["log.terminal_disconnected"] = "Terminal {computer} deconnecte",
+        ["log.automatic_restored"] = "Controle automatique retabli (reetalonnage : {recalibrate})",
+        ["log.maintenance_started"] = "Maintenance lancee pour un maximum de {seconds} secondes", ["log.maintenance_stopped"] = "Maintenance terminee",
+        ["log.manual_control_started"] = "Controle manuel protege lance pour {reactors} reacteurs et {turbines} turbines",
+        ["log.turbine_recalibration"] = "Reetalonnage de la turbine {device} demande par l'operateur",
+        ["log.operator_reactor_power"] = "L'operateur a regle le reacteur {device} sur {state}",
+        ["log.operator_reactor_rods"] = "L'operateur a regle toutes les barres de {device} a {rods}%",
+        ["log.operator_reactor_rod"] = "L'operateur a regle la barre {rod} de {device} a {rods}%",
+        ["log.operator_turbine_flow"] = "L'operateur a regle le debit de {device} a {flow} mB/t",
+        ["log.operator_turbine_power"] = "L'operateur a regle la turbine {device} sur {state}",
+        ["log.alarm_setting"] = "L'operateur a regle {setting} des alarmes sur {value}",
+        ["log.network_protection"] = "Protection reseau reglee sur {state}; code {code}",
+        ["log.network_key_changed"] = "Cle reseau remplacee; le nouveau code est {code}",
+        ["value.low"] = "BASSE", ["value.high"] = "HAUTE", ["value.normal"] = "NORMALE", ["value.enabled"] = "ACTIVE",
+        ["value.info"] = "INFO", ["value.critical"] = "CRITIQUE",
         ["common.state"] = "Etat",
         ["common.generation"] = "Production",
         ["common.core_temperature"] = "Temperature du coeur",
@@ -4667,6 +5182,20 @@ function mainframe.run(config)
     ui.setVersion(config.version)
     local language = dofile("/helios/core/i18n.lua").new(config)
     local function tr(key, values, fallback) return language.get(key, values, fallback) end
+    local operationalLog = dofile("/helios/core/event_log.lua")
+    local function recordEvent(key, severity, subsystem, values, pages)
+        if config.logging and config.logging.enabled == false then return end
+        -- History must never become a new failure mode for plant control.
+        pcall(operationalLog.append, key, { severity=severity, subsystem=subsystem, values=values,
+            pages=pages, retentionDays=config.logging and config.logging.retentionDays or 7 })
+    end
+    recordEvent("log.mainframe_started", "info", "mainframe",
+        { version=config.version, computer=config.computerId })
+    local loggedStates = { reactors={}, turbines={}, storage=nil, alarm=nil,
+        terminals={}, facilities={}, discovery=nil }
+    local function valueKey(value)
+        return "value." .. tostring(value or "unknown"):lower():gsub("[^%w]+", "_"):gsub("^_+", ""):gsub("_+$", "")
+    end
     local function tv(value) return language.value(value) end
     local gui = dofile("/helios/core/gui.lua")
     gui.configure(config)
@@ -4759,6 +5288,7 @@ function mainframe.run(config)
     local manualSafetyState = manualControl.newSafetyState()
     local minimumPowerReserve
     local returnToAutomatic
+    local deviceName
 
     local function planGeneration(powerReserve, powerDemand)
         local low = tonumber(config.control.storageLow) or 25
@@ -4998,6 +5528,13 @@ function mainframe.run(config)
         turbines = turbineAdapter.readAll(devices)
         storages = storageAdapter.readAll(devices, config.power)
         registryStale = false
+        local missingCount=0;for _ in pairs(missingDevices) do missingCount=missingCount+1 end
+        local discoverySignature=table.concat({#reactors,#turbines,#storages,missingCount},":")
+        if loggedStates.discovery~=discoverySignature then
+            recordEvent("log.discovery_complete", missingCount>0 and "warning" or "info", "discovery",
+                { reactors=#reactors, turbines=#turbines, storage=#storages, missing=missingCount })
+            loggedStates.discovery=discoverySignature
+        end
     end
 
     -- @section ALARMS
@@ -5120,6 +5657,10 @@ function mainframe.run(config)
             ui.setCriticalAlarm(false)
             if previous then playSound("minecraft:block.note_block.pling", 1.5) end
             silencedAlarm = nil
+            if loggedStates.alarm then
+                recordEvent("log.alarm_cleared", "info", "alarm", { code=loggedStates.alarm })
+                loggedStates.alarm = nil
+            end
             return
         end
 
@@ -5130,6 +5671,11 @@ function mainframe.run(config)
         if signature ~= previousSignature then
             silencedAlarm = nil
             lastAlarmSound = 0
+        end
+        if signature ~= loggedStates.alarm then
+            recordEvent("log.alarm_raised", currentAlarm.level >= 3 and "critical" or "warning", "alarm",
+                { code=currentAlarm.key, level=currentAlarm.level }, { currentAlarm.message })
+            loggedStates.alarm = signature
         end
         if silencedAlarm == signature then return end
 
@@ -5231,6 +5777,49 @@ function mainframe.run(config)
             setFlowLimit = turbineAdapter.setFlowLimit,
             setInductor = turbineAdapter.setInductor,
         })
+        for _, reactor in ipairs(reactors) do
+            local state = reactor.governor and (reactor.governor.state or reactor.governor.actuatorState) or
+                (reactor.error and "FAULT" or reactor.active and "ACTIVE" or "OFFLINE")
+            if loggedStates.reactors[reactor.name] ~= state then
+                recordEvent("log.reactor_state", state == "FAULT" and "critical" or "info", "reactor",
+                    { device=deviceName(reactor.name), state_key=valueKey(state) })
+                loggedStates.reactors[reactor.name] = state
+            end
+        end
+        for _, turbine in ipairs(turbines) do
+            local state = turbine.governor and (turbine.governor.state or turbine.governor.actuatorState) or
+                (turbine.error and "FAULT" or turbine.active and "ACTIVE" or "OFFLINE")
+            if loggedStates.turbines[turbine.name] ~= state then
+                recordEvent("log.turbine_state", (state == "FAULT" or state == "OVERSPEED") and "critical" or "info", "turbine",
+                    { device=deviceName(turbine.name), state_key=valueKey(state) })
+                loggedStates.turbines[turbine.name] = state
+            end
+        end
+        local reserveBand = combinedPowerReserve and (combinedPowerReserve <= config.control.storageLow and "LOW" or
+            combinedPowerReserve >= config.control.storageHigh and "HIGH" or "NORMAL") or "UNKNOWN"
+        if loggedStates.storage ~= reserveBand then
+            recordEvent("log.storage_band", reserveBand == "LOW" and "warning" or "info", "storage",
+                { state_key=valueKey(reserveBand), percent=combinedPowerReserve and ("%.1f"):format(combinedPowerReserve) or "N/A" })
+            loggedStates.storage = reserveBand
+        end
+        local linkNow = network.now()
+        for nodeId, facility in pairs(facilities) do
+            local online = linkNow - (tonumber(facility.lastSeen) or 0) <= 7
+            if loggedStates.facilities[nodeId] == nil and online then
+                recordEvent("log.facility_connected", "info", "network",
+                    { device=nodeId, role=facility.role or "facility" })
+            elseif loggedStates.facilities[nodeId] == true and not online then
+                recordEvent("log.facility_disconnected", "warning", "network", { device=nodeId })
+            end
+            loggedStates.facilities[nodeId] = online
+        end
+        for key, remote in pairs(terminals) do
+            local online = linkNow - (tonumber(remote.lastSeen) or 0) <= 10
+            if loggedStates.terminals[key] == true and not online then
+                recordEvent("log.terminal_disconnected", "info", "network", { computer=remote.id })
+            end
+            if loggedStates.terminals[key] ~= nil then loggedStates.terminals[key] = online end
+        end
         updateAlarm()
         local conflictsChanged = refreshIdConflicts()
         if conflictsChanged or #idConflicts > 0 then advertiseIntegrity() end
@@ -5397,6 +5986,19 @@ function mainframe.run(config)
         -- Persist registration metadata, not the one-second telemetry stream.
         -- Live telemetry stays in memory to avoid needless disk churn.
         if clean.kind == "hello" then saveFacilities() end
+        if clean.kind == "hello" and loggedStates.facilities[nodeId] ~= true then
+            recordEvent("log.facility_connected", "info", "network", { device=nodeId, role=clean.source.role })
+            loggedStates.facilities[nodeId] = true
+        end
+        if clean.kind == "telemetry" then
+            local state = tostring(clean.payload.state or "unknown")
+            local stateSlot = "facility:" .. nodeId
+            if loggedStates.reactors[stateSlot] ~= state then
+                recordEvent("log.guardian_state", tonumber(clean.payload.alarmLevel) and "warning" or "info", "guardian",
+                    { device=nodeId, state_key=valueKey(state) })
+                loggedStates.reactors[stateSlot] = state
+            end
+        end
         -- Every Mainframe may retain read-only facility telemetry. Only the
         -- elected collector acknowledges packets or offers command authority.
         if collector then
@@ -5458,6 +6060,11 @@ function mainframe.run(config)
         if not previous or previous.display ~= assignment or previous.version ~= terminals[key].version then
             network.savePeers(terminals)
         end
+        if not previous then
+            recordEvent("log.terminal_connected", "info", "network",
+                { computer=sender, display=assignment, version=terminals[key].version })
+        end
+        loggedStates.terminals[key] = true
         sendSnapshot(sender, assignment)
         if conflictsChanged or #idConflicts > 0 then advertiseIntegrity() end
         return true
@@ -5472,7 +6079,7 @@ function mainframe.run(config)
         return count
     end
 
-    local function deviceName(rawName)
+    deviceName = function(rawName)
         local alias = config.deviceAliases[rawName]
         if alias and alias ~= "" then
             if config.ui.showPeripheralNames then return alias .. " [" .. rawName .. "]" end
@@ -5484,6 +6091,7 @@ function mainframe.run(config)
     local function silenceCurrentAlarm()
         if currentAlarm then
             silencedAlarm = currentAlarm.level .. ":" .. currentAlarm.key
+            recordEvent("log.alarm_silenced", "info", "operator", { code=currentAlarm.key })
             broadcastSnapshots()
         end
     end
@@ -5506,6 +6114,8 @@ function mainframe.run(config)
         config.control.mode = "automatic"
         manualSafetyState = manualControl.newSafetyState()
         manualNotice = reason
+        recordEvent("log.automatic_restored", "info", "operator",
+            { recalibrate_key=valueKey(recalibrate == true) }, { reason })
         if recalibrate then
             for _, turbine in ipairs(turbines) do
                 turbineGovernor.resetCalibration(governorMemory, config.control,
@@ -5534,6 +6144,7 @@ function mainframe.run(config)
         maintenanceEndsAt = nil
         maintenanceTimer = nil
         countdownTimer = nil
+        recordEvent("log.maintenance_stopped", "info", "operator")
         rescan(true)
     end
 
@@ -5544,6 +6155,7 @@ function mainframe.run(config)
         maintenanceEndsAt = os.epoch("utc") + (config.discovery.maintenanceTimeout * 1000)
         maintenanceTimer = os.startTimer(config.discovery.maintenanceTimeout)
         countdownTimer = os.startTimer(1)
+        recordEvent("log.maintenance_started", "warning", "operator", { seconds=config.discovery.maintenanceTimeout })
     end
 
     local function remainingMaintenance()
@@ -5782,6 +6394,9 @@ function mainframe.run(config)
                 local ok, _, reason = reactorAdapter.setActive(reactor,
                     reactor.active ~= true)
                 notice = ok and "Reactor state verified" or tostring(reason)
+                recordEvent("log.operator_reactor_power", ok and "warning" or "critical", "operator",
+                    { device=deviceName(reactor.name), state_key=valueKey(reactor.active ~= true and "ACTIVE" or "OFFLINE") },
+                    ok and nil or { tostring(reason) })
                 pollReactors()
             elseif (event == "key" and (value == keys.z or value == keys.x)) or
                    ui.hit(buttons.allDown, x, y) or ui.hit(buttons.allUp, x, y) then
@@ -5791,6 +6406,8 @@ function mainframe.run(config)
                 local ok, _, reason = reactorAdapter.setAllControlRodLevels(
                     reactor, requested)
                 notice = ok and "All rods verified" or tostring(reason)
+                recordEvent("log.operator_reactor_rods", ok and "warning" or "critical", "operator",
+                    { device=deviceName(reactor.name), rods=("%.1f"):format(requested) }, ok and nil or { tostring(reason) })
                 pollReactors()
             else
                 for _, rod in ipairs(buttons.rods) do
@@ -5801,6 +6418,9 @@ function mainframe.run(config)
                             reactor, rod.index, rod.level + direction * step)
                         notice = ok and ("Rod %d verified"):format(rod.index + 1) or
                             tostring(reason)
+                        recordEvent("log.operator_reactor_rod", ok and "warning" or "critical", "operator",
+                            { device=deviceName(reactor.name), rod=rod.index + 1,
+                                rods=("%.1f"):format(rod.level + direction * step) }, ok and nil or { tostring(reason) })
                         pollReactors()
                         break
                     end
@@ -5887,12 +6507,18 @@ function mainframe.run(config)
                         local change = increase and step or -step
                         local ok, _, reason = turbineAdapter.setFlowLimit(turbine, current + change)
                         notice = ok and "Turbine flow limit verified" or tostring(reason)
+                        recordEvent("log.operator_turbine_flow", ok and "warning" or "critical", "operator",
+                            { device=deviceName(turbine.name), flow=("%.0f"):format(math.max(0, current + change)) },
+                            ok and nil or { tostring(reason) })
                         pollReactors()
                     end
                 elseif (event == "key" and value == keys.p) or ui.hit(buttons.power, x, y) then
                     local ok, _, reason = turbineAdapter.setActive(turbine,
                         turbine.active ~= true)
                     notice = ok and "Turbine state verified" or tostring(reason)
+                    recordEvent("log.operator_turbine_power", ok and "warning" or "critical", "operator",
+                        { device=deviceName(turbine.name), state_key=valueKey(turbine.active ~= true and "ACTIVE" or "OFFLINE") },
+                        ok and nil or { tostring(reason) })
                     pollReactors()
                 end
             end
@@ -6008,6 +6634,8 @@ function mainframe.run(config)
                         "Reactors active; governors paused; safety guard arming" or
                         ("Manual armed; reactor activation failed: " ..
                             table.concat(activationErrors, "; "))
+                    recordEvent("log.manual_control_started", activated and "warning" or "critical", "operator",
+                        { reactors=#reactors, turbines=#turbines }, activationErrors)
                     pollReactors()
                     armed = false
                 else
@@ -6031,6 +6659,8 @@ function mainframe.run(config)
             elseif ui.hit(buttons.retry, x, y) and #turbines > 0 then
                 turbineGovernor.resetCalibration(governorMemory, config.control,
                     turbines[selected].name)
+                recordEvent("log.turbine_recalibration", "warning", "operator",
+                    { device=deviceName(turbines[selected].name) })
                 configStore.save(config)
                 pollReactors()
             elseif ui.hit(buttons.back, x, y) then return
@@ -6228,22 +6858,27 @@ function mainframe.run(config)
             elseif (event == "key" and value == keys.e) or ui.hit(buttons.enabled, touchX, touchY) then
                 config.alarms.enabled = not config.alarms.enabled
                 saveConfig()
+                recordEvent("log.alarm_setting", "info", "operator",
+                    { setting="audible", value_key=valueKey(config.alarms.enabled and "ENABLED" or "DISABLED") })
             elseif (event == "key" and value == keys.l) or ui.hit(buttons.low, touchX, touchY) then
                 config.alarms.lowFuel = editNumber("Low-fuel warning", config.alarms.lowFuel, 1, 99)
                 if config.alarms.criticalFuel > config.alarms.lowFuel then
                     config.alarms.criticalFuel = config.alarms.lowFuel
                 end
                 saveConfig()
+                recordEvent("log.alarm_setting", "info", "operator", { setting="low_fuel", value=config.alarms.lowFuel .. "%" })
                 restoreTimersAfterTextInput()
             elseif (event == "key" and value == keys.c) or ui.hit(buttons.critical, touchX, touchY) then
                 config.alarms.criticalFuel = editNumber("Critical-fuel warning",
                     config.alarms.criticalFuel, 0, config.alarms.lowFuel)
                 saveConfig()
+                recordEvent("log.alarm_setting", "info", "operator", { setting="critical_fuel", value=config.alarms.criticalFuel .. "%" })
                 restoreTimersAfterTextInput()
             elseif (event == "key" and value == keys.v) or ui.hit(buttons.volume, touchX, touchY) then
                 config.alarms.volume = config.alarms.volume + 0.5
                 if config.alarms.volume > 3 then config.alarms.volume = 0.5 end
                 saveConfig()
+                recordEvent("log.alarm_setting", "info", "operator", { setting="volume", value=config.alarms.volume })
             elseif (event == "key" and value == keys.x) or ui.hit(buttons.test, touchX, touchY) then
                 playSound("minecraft:block.note_block.bell", 0.8, true)
             elseif event == "rednet_message" then
@@ -6303,6 +6938,9 @@ function mainframe.run(config)
                         notice = "Enter or generate a key before enabling protection"
                     end
                     saveConfig();network.configure(config)
+                    recordEvent("log.network_protection", "warning", "operator",
+                        { state_key=valueKey(networkSecurity.enabled(config) and "ENABLED" or "DISABLED"),
+                            code=networkSecurity.networkId(config) })
                 elseif ui.hit(networkButtons.key, x, y) then
                     ui.prepare();print("Enter the shared HELIOS key (8-128 characters):");write("> ")
                     local key = read("*")
@@ -6310,6 +6948,7 @@ function mainframe.run(config)
                         config.network.securityKey = key;config.network.securityEnabled = true
                         saveConfig();network.configure(config)
                         notice = "Key saved; restart every HELIOS computer"
+                        recordEvent("log.network_key_changed", "warning", "operator", { code=networkSecurity.networkId(config) })
                     else notice = "Key rejected: 8-128 characters required" end
                 elseif ui.hit(networkButtons.generate, x, y) then
                     local key = networkSecurity.generateKey()
@@ -6319,6 +6958,7 @@ function mainframe.run(config)
                     config.network.securityKey = key;config.network.securityEnabled = true
                     saveConfig();network.configure(config)
                     notice = "New key saved; restart every HELIOS computer"
+                    recordEvent("log.network_key_changed", "warning", "operator", { code=networkSecurity.networkId(config) })
                 elseif event == "rednet_message" then handleNetwork(value, message, protocol)
                 end
             end
@@ -6346,8 +6986,8 @@ function mainframe.run(config)
             ui.status("Maintenance timeout", math.floor(config.discovery.maintenanceTimeout / 60) .. " minutes")
             ui.status("Current mode", modeName(), maintenance and colors.orange or colors.white)
             ui.status("Peripheral names", config.ui.showPeripheralNames and "SHOWN" or "HIDDEN")
-            ui.status("Colour profile", string.upper(config.ui.accessibilityProfile:gsub("_", " ")), colors.cyan)
-            ui.status("Status symbols", config.ui.statusSymbols and "ENABLED" or "DISABLED",
+            ui.status(tr("accessibility.colour_profile", nil, "Colour profile"), string.upper(config.ui.accessibilityProfile:gsub("_", " ")), colors.cyan)
+            ui.status(tr("accessibility.status_symbols", nil, "Status symbols"), config.ui.statusSymbols and tr("accessibility.enabled", nil, "ENABLED") or tr("accessibility.disabled", nil, "DISABLED"),
                 config.ui.statusSymbols and colors.lime or colors.gray)
             ui.status("Power display", config.power.unit .. " / " .. string.upper(config.power.numberFormat))
             local selectedGui = guiLoader.resolve(config.ui.renderer, config.version)
@@ -6378,13 +7018,15 @@ function mainframe.run(config)
             write(" ")
             buttons.gui = ui.inlineButton("GUI MODULE", colors.cyan)
             print("")
-            buttons.palette = ui.inlineButton("COLOUR PROFILE", colors.cyan)
+            buttons.palette = ui.inlineButton(tr("accessibility.colour_button", nil, "COLOUR PROFILE"), colors.cyan)
             write(" ")
-            buttons.symbols = ui.inlineButton("STATUS SYMBOLS", colors.cyan)
+            buttons.symbols = ui.inlineButton(tr("accessibility.symbols_button", nil, "STATUS SYMBOLS"), colors.cyan)
             print("")
             buttons.network = ui.inlineButton("NETWORKING", colors.cyan)
             write(" ")
-            buttons.back = ui.inlineButton("BACK", colors.cyan)
+            buttons.logs = ui.inlineButton(tr("log.button", nil, "CAPTAIN'S LOG"), colors.cyan)
+            write(" ")
+            buttons.back = ui.inlineButton(tr("common.back", nil, "BACK"), colors.cyan)
             -- BACK occupies the last row on a 19-line mirrored terminal. Do not
             -- print a trailing newline here: CC:Tweaked would scroll the visible
             -- page up while leaving every recorded touch target one row lower.
@@ -6419,6 +7061,9 @@ function mainframe.run(config)
                 powerSettings()
             elseif (event == "key" and value == keys.a) or ui.hit(buttons.alarms, touchX, touchY) then
                 alarmSettings()
+            elseif ui.hit(buttons.logs, touchX, touchY) then
+                dofile("/helios/core/log_viewer.lua").run(config)
+                restoreTimersAfterTextInput()
             elseif ui.hit(buttons.palette, touchX, touchY) then
                 local current = 1
                 for index, profile in ipairs(accessibilityProfiles) do
@@ -10877,6 +11522,15 @@ if fs.exists("/helios/core/i18n.lua") and fs.exists("/helios/config.lua") then
   if okAccess then accessibility=loadedAccess;accessibility.apply(term.current(),guardianConfig) end
 end
 local function tr(key,values,fallback) return language and language.get(key,values,fallback) or fallback end
+local guardianLog
+if fs.exists("/helios/core/event_log.lua") then
+  local ok,loaded=pcall(dofile,"/helios/core/event_log.lua");if ok then guardianLog=loaded end
+end
+local function guardianRecord(key,severity,values,pages)
+  if not guardianLog or (guardianConfig and guardianConfig.logging and guardianConfig.logging.enabled==false) then return end
+  pcall(guardianLog.append,key,{severity=severity,subsystem="guardian",values=values,pages=pages,
+    retentionDays=guardianConfig and guardianConfig.logging and guardianConfig.logging.retentionDays or 7})
+end
 local facilityNetwork,facilityProtocol,facilityIdentity,facilitySequence
 local facilityConnected,facilityLastWelcome=false,nil
 local facilityCollectorId,facilityCollectorRole,facilityCollectorPriority=nil,nil,-1
@@ -11435,18 +12089,18 @@ local function draw(t,b,d,page,c,bs)
   local banner=c.mode=="UNRESTRICTED" and tr("guardian.unrestricted",nil,"UNRESTRICTED CONTROL - AUTOMATIC INTERVENTION DISABLED") or c.mode=="ASSISTED" and tr("guardian.assisted",nil,"ASSISTED MANUAL - HARD SAFETY INTERLOCKS ACTIVE") or tr("guardian.automatic",nil,"AUTOMATIC SAFE SUPERVISION")
   if accessibility then banner=accessibility.decorate(banner,c.mode=="UNRESTRICTED" and "critical" or c.mode=="ASSISTED" and "warning" or "healthy",guardianConfig) end
   text(t,1,2,banner,c.mode=="UNRESTRICTED" and colors.red or colors.lime);text(t,1,3,"["..tr("nav.overview",nil,"OVERVIEW").."] ["..tr("nav.raw_data",nil,"RAW DATA").."] ["..tr("nav.setup",nil,"SETUP").."] ["..tr("nav.manual_gates",nil,"MANUAL GATES").."]",colors.cyan)
-  text(t,1,4,"[ACCESSIBILITY]",colors.cyan)
+  text(t,1,4,"["..tr("accessibility.title",nil,"ACCESSIBILITY & LANGUAGE").."]",colors.cyan)
   if page=="accessibility" then
     local uiConfig=type(guardianConfig)=="table" and guardianConfig.ui or {}
-    text(t,1,6,"ACCESSIBILITY & LANGUAGE",colors.yellow)
-    text(t,1,8,"Language: "..string.upper(tostring(uiConfig.language or "en_us")),colors.white)
-    text(t,1,9,"Colour profile: "..string.upper(tostring(uiConfig.accessibilityProfile or "standard"):gsub("_"," ")),colors.cyan)
-    text(t,1,10,"Status symbols: "..(uiConfig.statusSymbols==false and "DISABLED" or "ENABLED"),uiConfig.statusSymbols==false and colors.gray or colors.lime)
-    bs[#bs+1]=button(t,1,13,"LANGUAGE",colors.cyan)
-    bs[#bs+1]=button(t,18,13,"COLOUR PROFILE",colors.cyan)
-    bs[#bs+1]=button(t,42,13,"STATUS SYMBOLS",colors.cyan)
-    bs[#bs+1]=button(t,1,16,"BACK",colors.lightGray)
-    text(t,1,19,"Changes apply immediately to this computer and the wired monitor.",colors.lightGray)
+    text(t,1,6,tr("accessibility.title",nil,"ACCESSIBILITY & LANGUAGE"),colors.yellow)
+    text(t,1,8,tr("accessibility.language",nil,"Language")..": "..string.upper(tostring(uiConfig.language or "en_us")),colors.white)
+    text(t,1,9,tr("accessibility.colour_profile",nil,"Colour profile")..": "..string.upper(tostring(uiConfig.accessibilityProfile or "standard"):gsub("_"," ")),colors.cyan)
+    text(t,1,10,tr("accessibility.status_symbols",nil,"Status symbols")..": "..tr(uiConfig.statusSymbols==false and "accessibility.disabled" or "accessibility.enabled",nil,uiConfig.statusSymbols==false and "DISABLED" or "ENABLED"),uiConfig.statusSymbols==false and colors.gray or colors.lime)
+    bs[#bs+1]=button(t,1,13,tr("accessibility.language_button",nil,"LANGUAGE"),colors.cyan,nil,"LANGUAGE")
+    bs[#bs+1]=button(t,18,13,tr("accessibility.colour_button",nil,"COLOUR PROFILE"),colors.cyan,nil,"COLOUR PROFILE")
+    bs[#bs+1]=button(t,42,13,tr("accessibility.symbols_button",nil,"STATUS SYMBOLS"),colors.cyan,nil,"STATUS SYMBOLS")
+    bs[#bs+1]=button(t,1,16,tr("common.back",nil,"BACK"),colors.lightGray,nil,"BACK")
+    text(t,1,19,tr("accessibility.apply_hint",nil,"Changes apply immediately to this computer and the wired monitor."),colors.lightGray)
     return
   end
   if not b.ready then text(t,1,5,"SETUP INVALID",colors.red);for i,v in ipairs(b.reasons) do text(t,1,5+i,"- "..v) end;return end
@@ -11626,13 +12280,13 @@ local function act(choice,d)
     if ok and type(module.available)=="function" then for _,pack in ipairs(module.available()) do available[#available+1]=pack.id end end
     if #available==0 then available={"en_us"} end
     guardianConfig.ui=guardianConfig.ui or {};guardianConfig.ui.language=cycleValue(available,guardianConfig.ui.language)
-    controls.message=savePresentation() and "Language changed" or "Could not save language setting"
+    controls.message=savePresentation() and tr("accessibility.language_changed",nil,"Language changed") or tr("accessibility.language_save_failed",nil,"Could not save language setting")
   elseif choice=="COLOUR PROFILE" and accessibility and type(guardianConfig)=="table" then
     guardianConfig.ui=guardianConfig.ui or {};guardianConfig.ui.accessibilityProfile=cycleValue(accessibility.profiles(),guardianConfig.ui.accessibilityProfile)
-    controls.message=savePresentation() and "Colour profile changed" or "Could not save colour profile"
+    controls.message=savePresentation() and tr("accessibility.colour_changed",nil,"Colour profile changed") or tr("accessibility.colour_save_failed",nil,"Could not save colour profile")
   elseif choice=="STATUS SYMBOLS" and type(guardianConfig)=="table" then
     guardianConfig.ui=guardianConfig.ui or {};guardianConfig.ui.statusSymbols=guardianConfig.ui.statusSymbols==false
-    controls.message=savePresentation() and "Status symbols changed" or "Could not save status symbols"
+    controls.message=savePresentation() and tr("accessibility.symbols_changed",nil,"Status symbols changed") or tr("accessibility.symbols_save_failed",nil,"Could not save status symbols")
   elseif choice=="ENABLE ASSISTED MANUAL" then controls.mode="ASSISTED";controls.request="OFF";controls.message="Assisted manual enabled at OFF"
   elseif choice=="ARM UNRESTRICTED" then controls.arm=1;controls.message="Unrestricted arming started"
   elseif choice=="CANCEL" then controls.arm=0;controls.message="Unrestricted arming cancelled"
@@ -11695,6 +12349,8 @@ local function enqueue(choice)
   if not choice then return end
   if choice=="SAFE SHUTDOWN" then actions={choice} else actions[#actions+1]=choice end
   controls.message="Command queued: "..tostring(choice)
+  guardianRecord("log.guardian_command",choice=="SAFE SHUTDOWN" and "warning" or "info",nil,
+    {tostring(choice)})
   requestDraw()
 end
 local function inputWorker()
@@ -11739,6 +12395,7 @@ local function controlWorker()
   local timer=os.startTimer(.2)
   local ticks=0
   local lastTelemetry=os.clock()
+  local lastLoggedState
   while true do
     local e,id=os.pullEvent("timer")
     if id==timer then
@@ -11754,12 +12411,23 @@ local function controlWorker()
         if not controls.gatesOwned then acquireGates(binding,data,controls) end
         if not safeHandled then while #actions>0 do act(table.remove(actions,1),data) end end
         supervise(binding,data,controls)
+        local reactorState=tostring(data.reactor and data.reactor.status or "unknown")
+        local stateSignature=table.concat({reactorState,tostring(controls.mode),tostring(controls.request)},":")
+        if stateSignature~=lastLoggedState then
+          guardianRecord("log.guardian_local_state","info",{
+            state_key="value."..reactorState:lower():gsub("[^%w]+","_"),mode=controls.mode,request=controls.request})
+          lastLoggedState=stateSignature
+        end
       else
         controls.telemetryAge=os.clock()-lastTelemetry
         controls.telemetryStale=controls.telemetryAge>=2
         if controls.telemetryStale and binding.ready then
           gate(binding.output,0);reactor(binding.reactor,"stopReactor")
           controls.message="TELEMETRY STALE: export closed, reactor stop requested"
+          if lastLoggedState~="telemetry_stale" then
+            guardianRecord("log.guardian_safety","critical",{reason="telemetry_stale"},{controls.message})
+            lastLoggedState="telemetry_stale"
+          end
         elseif readError then controls.message="Telemetry retry: "..tostring(readError) end
       end
       ticks=ticks+1
@@ -11954,6 +12622,7 @@ local function emergencyHold(reason)
   controls.request="OFF";controls.initialRequested=false;controls.startActivated=false
   controls.commissioning=false;controls.recovery=false
   controls.message="FAIL-SAFE HOLD: "..tostring(reason or "Guardian restart")
+  guardianRecord("log.guardian_safety","critical",{reason=tostring(reason or "Guardian restart")},{controls.message})
   save(controls)
 end
 

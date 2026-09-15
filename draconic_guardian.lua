@@ -50,6 +50,15 @@ if fs.exists("/helios/core/i18n.lua") and fs.exists("/helios/config.lua") then
   if okAccess then accessibility=loadedAccess;accessibility.apply(term.current(),guardianConfig) end
 end
 local function tr(key,values,fallback) return language and language.get(key,values,fallback) or fallback end
+local guardianLog
+if fs.exists("/helios/core/event_log.lua") then
+  local ok,loaded=pcall(dofile,"/helios/core/event_log.lua");if ok then guardianLog=loaded end
+end
+local function guardianRecord(key,severity,values,pages)
+  if not guardianLog or (guardianConfig and guardianConfig.logging and guardianConfig.logging.enabled==false) then return end
+  pcall(guardianLog.append,key,{severity=severity,subsystem="guardian",values=values,pages=pages,
+    retentionDays=guardianConfig and guardianConfig.logging and guardianConfig.logging.retentionDays or 7})
+end
 local facilityNetwork,facilityProtocol,facilityIdentity,facilitySequence
 local facilityConnected,facilityLastWelcome=false,nil
 local facilityCollectorId,facilityCollectorRole,facilityCollectorPriority=nil,nil,-1
@@ -608,18 +617,18 @@ local function draw(t,b,d,page,c,bs)
   local banner=c.mode=="UNRESTRICTED" and tr("guardian.unrestricted",nil,"UNRESTRICTED CONTROL - AUTOMATIC INTERVENTION DISABLED") or c.mode=="ASSISTED" and tr("guardian.assisted",nil,"ASSISTED MANUAL - HARD SAFETY INTERLOCKS ACTIVE") or tr("guardian.automatic",nil,"AUTOMATIC SAFE SUPERVISION")
   if accessibility then banner=accessibility.decorate(banner,c.mode=="UNRESTRICTED" and "critical" or c.mode=="ASSISTED" and "warning" or "healthy",guardianConfig) end
   text(t,1,2,banner,c.mode=="UNRESTRICTED" and colors.red or colors.lime);text(t,1,3,"["..tr("nav.overview",nil,"OVERVIEW").."] ["..tr("nav.raw_data",nil,"RAW DATA").."] ["..tr("nav.setup",nil,"SETUP").."] ["..tr("nav.manual_gates",nil,"MANUAL GATES").."]",colors.cyan)
-  text(t,1,4,"[ACCESSIBILITY]",colors.cyan)
+  text(t,1,4,"["..tr("accessibility.title",nil,"ACCESSIBILITY & LANGUAGE").."]",colors.cyan)
   if page=="accessibility" then
     local uiConfig=type(guardianConfig)=="table" and guardianConfig.ui or {}
-    text(t,1,6,"ACCESSIBILITY & LANGUAGE",colors.yellow)
-    text(t,1,8,"Language: "..string.upper(tostring(uiConfig.language or "en_us")),colors.white)
-    text(t,1,9,"Colour profile: "..string.upper(tostring(uiConfig.accessibilityProfile or "standard"):gsub("_"," ")),colors.cyan)
-    text(t,1,10,"Status symbols: "..(uiConfig.statusSymbols==false and "DISABLED" or "ENABLED"),uiConfig.statusSymbols==false and colors.gray or colors.lime)
-    bs[#bs+1]=button(t,1,13,"LANGUAGE",colors.cyan)
-    bs[#bs+1]=button(t,18,13,"COLOUR PROFILE",colors.cyan)
-    bs[#bs+1]=button(t,42,13,"STATUS SYMBOLS",colors.cyan)
-    bs[#bs+1]=button(t,1,16,"BACK",colors.lightGray)
-    text(t,1,19,"Changes apply immediately to this computer and the wired monitor.",colors.lightGray)
+    text(t,1,6,tr("accessibility.title",nil,"ACCESSIBILITY & LANGUAGE"),colors.yellow)
+    text(t,1,8,tr("accessibility.language",nil,"Language")..": "..string.upper(tostring(uiConfig.language or "en_us")),colors.white)
+    text(t,1,9,tr("accessibility.colour_profile",nil,"Colour profile")..": "..string.upper(tostring(uiConfig.accessibilityProfile or "standard"):gsub("_"," ")),colors.cyan)
+    text(t,1,10,tr("accessibility.status_symbols",nil,"Status symbols")..": "..tr(uiConfig.statusSymbols==false and "accessibility.disabled" or "accessibility.enabled",nil,uiConfig.statusSymbols==false and "DISABLED" or "ENABLED"),uiConfig.statusSymbols==false and colors.gray or colors.lime)
+    bs[#bs+1]=button(t,1,13,tr("accessibility.language_button",nil,"LANGUAGE"),colors.cyan,nil,"LANGUAGE")
+    bs[#bs+1]=button(t,18,13,tr("accessibility.colour_button",nil,"COLOUR PROFILE"),colors.cyan,nil,"COLOUR PROFILE")
+    bs[#bs+1]=button(t,42,13,tr("accessibility.symbols_button",nil,"STATUS SYMBOLS"),colors.cyan,nil,"STATUS SYMBOLS")
+    bs[#bs+1]=button(t,1,16,tr("common.back",nil,"BACK"),colors.lightGray,nil,"BACK")
+    text(t,1,19,tr("accessibility.apply_hint",nil,"Changes apply immediately to this computer and the wired monitor."),colors.lightGray)
     return
   end
   if not b.ready then text(t,1,5,"SETUP INVALID",colors.red);for i,v in ipairs(b.reasons) do text(t,1,5+i,"- "..v) end;return end
@@ -799,13 +808,13 @@ local function act(choice,d)
     if ok and type(module.available)=="function" then for _,pack in ipairs(module.available()) do available[#available+1]=pack.id end end
     if #available==0 then available={"en_us"} end
     guardianConfig.ui=guardianConfig.ui or {};guardianConfig.ui.language=cycleValue(available,guardianConfig.ui.language)
-    controls.message=savePresentation() and "Language changed" or "Could not save language setting"
+    controls.message=savePresentation() and tr("accessibility.language_changed",nil,"Language changed") or tr("accessibility.language_save_failed",nil,"Could not save language setting")
   elseif choice=="COLOUR PROFILE" and accessibility and type(guardianConfig)=="table" then
     guardianConfig.ui=guardianConfig.ui or {};guardianConfig.ui.accessibilityProfile=cycleValue(accessibility.profiles(),guardianConfig.ui.accessibilityProfile)
-    controls.message=savePresentation() and "Colour profile changed" or "Could not save colour profile"
+    controls.message=savePresentation() and tr("accessibility.colour_changed",nil,"Colour profile changed") or tr("accessibility.colour_save_failed",nil,"Could not save colour profile")
   elseif choice=="STATUS SYMBOLS" and type(guardianConfig)=="table" then
     guardianConfig.ui=guardianConfig.ui or {};guardianConfig.ui.statusSymbols=guardianConfig.ui.statusSymbols==false
-    controls.message=savePresentation() and "Status symbols changed" or "Could not save status symbols"
+    controls.message=savePresentation() and tr("accessibility.symbols_changed",nil,"Status symbols changed") or tr("accessibility.symbols_save_failed",nil,"Could not save status symbols")
   elseif choice=="ENABLE ASSISTED MANUAL" then controls.mode="ASSISTED";controls.request="OFF";controls.message="Assisted manual enabled at OFF"
   elseif choice=="ARM UNRESTRICTED" then controls.arm=1;controls.message="Unrestricted arming started"
   elseif choice=="CANCEL" then controls.arm=0;controls.message="Unrestricted arming cancelled"
@@ -868,6 +877,8 @@ local function enqueue(choice)
   if not choice then return end
   if choice=="SAFE SHUTDOWN" then actions={choice} else actions[#actions+1]=choice end
   controls.message="Command queued: "..tostring(choice)
+  guardianRecord("log.guardian_command",choice=="SAFE SHUTDOWN" and "warning" or "info",nil,
+    {tostring(choice)})
   requestDraw()
 end
 local function inputWorker()
@@ -912,6 +923,7 @@ local function controlWorker()
   local timer=os.startTimer(.2)
   local ticks=0
   local lastTelemetry=os.clock()
+  local lastLoggedState
   while true do
     local e,id=os.pullEvent("timer")
     if id==timer then
@@ -927,12 +939,23 @@ local function controlWorker()
         if not controls.gatesOwned then acquireGates(binding,data,controls) end
         if not safeHandled then while #actions>0 do act(table.remove(actions,1),data) end end
         supervise(binding,data,controls)
+        local reactorState=tostring(data.reactor and data.reactor.status or "unknown")
+        local stateSignature=table.concat({reactorState,tostring(controls.mode),tostring(controls.request)},":")
+        if stateSignature~=lastLoggedState then
+          guardianRecord("log.guardian_local_state","info",{
+            state_key="value."..reactorState:lower():gsub("[^%w]+","_"),mode=controls.mode,request=controls.request})
+          lastLoggedState=stateSignature
+        end
       else
         controls.telemetryAge=os.clock()-lastTelemetry
         controls.telemetryStale=controls.telemetryAge>=2
         if controls.telemetryStale and binding.ready then
           gate(binding.output,0);reactor(binding.reactor,"stopReactor")
           controls.message="TELEMETRY STALE: export closed, reactor stop requested"
+          if lastLoggedState~="telemetry_stale" then
+            guardianRecord("log.guardian_safety","critical",{reason="telemetry_stale"},{controls.message})
+            lastLoggedState="telemetry_stale"
+          end
         elseif readError then controls.message="Telemetry retry: "..tostring(readError) end
       end
       ticks=ticks+1
@@ -1127,6 +1150,7 @@ local function emergencyHold(reason)
   controls.request="OFF";controls.initialRequested=false;controls.startActivated=false
   controls.commissioning=false;controls.recovery=false
   controls.message="FAIL-SAFE HOLD: "..tostring(reason or "Guardian restart")
+  guardianRecord("log.guardian_safety","critical",{reason=tostring(reason or "Guardian restart")},{controls.message})
   save(controls)
 end
 

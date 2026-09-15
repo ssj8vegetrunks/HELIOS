@@ -22,6 +22,10 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 
 - No HELIOS module dependencies detected.
 
+### `core/event_log.lua`
+
+- No HELIOS module dependencies detected.
+
 ### `core/facility_protocol.lua`
 
 - No HELIOS module dependencies detected.
@@ -37,6 +41,11 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 ### `core/i18n.lua`
 
 - No HELIOS module dependencies detected.
+
+### `core/log_viewer.lua`
+
+- depends on → `core/event_log.lua`
+- depends on → `core/i18n.lua`
 
 ### `core/mainframe_authority.lua`
 
@@ -99,6 +108,7 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 - depends on → `core/config.lua`
 - depends on → `core/gui_loader.lua`
 - depends on → `core/i18n.lua`
+- depends on → `core/log_viewer.lua`
 - depends on → `core/module_loader.lua`
 - depends on → `core/module_manager.lua`
 - depends on → `core/network_security.lua`
@@ -144,10 +154,12 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 - depends on → `core/boot.lua`
 - depends on → `core/config.lua`
 - depends on → `core/display.lua`
+- depends on → `core/event_log.lua`
 - depends on → `core/facility_protocol.lua`
 - depends on → `core/gui.lua`
 - depends on → `core/gui_loader.lua`
 - depends on → `core/i18n.lua`
+- depends on → `core/log_viewer.lua`
 - depends on → `core/mainframe_authority.lua`
 - depends on → `core/module_loader.lua`
 - depends on → `core/network.lua`
@@ -237,6 +249,11 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 - used by ← `mainframe/main.lua`
 - used by ← `terminal/main.lua`
 
+### `core/event_log.lua`
+
+- used by ← `core/log_viewer.lua`
+- used by ← `mainframe/main.lua`
+
 ### `core/facility_protocol.lua`
 
 - used by ← `mainframe/main.lua`
@@ -254,11 +271,17 @@ Dependencies are inferred from bundled `dofile("/helios/...lua")` calls and Modu
 
 ### `core/i18n.lua`
 
+- used by ← `core/log_viewer.lua`
 - used by ← `draconic/controller.lua`
 - used by ← `draconic/profiler.lua`
 - used by ← `helios.lua`
 - used by ← `mainframe/main.lua`
 - used by ← `terminal/main.lua`
+
+### `core/log_viewer.lua`
+
+- used by ← `helios.lua`
+- used by ← `mainframe/main.lua`
 
 ### `core/mainframe_authority.lua`
 

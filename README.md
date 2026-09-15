@@ -219,6 +219,7 @@ helios scan
 helios reactors
 helios turbines
 helios storage
+helios logs
 helios modules update
 ```
 
@@ -256,6 +257,9 @@ The installed layout is:
 
 See [`docs/MODULE_API.md`](docs/MODULE_API.md) for the manifest, compatibility,
 and adapter-loading contract.
+
+See [`docs/LOGGING.md`](docs/LOGGING.md) for the seven-day Captain's Log,
+language-aware event records, filters, and storage limits.
 
 If `/startup` is already a program, the installer asks permission before
 converting it into a startup directory. The original is preserved as

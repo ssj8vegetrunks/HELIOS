@@ -14,6 +14,20 @@ function mainframe.run(config)
     ui.setVersion(config.version)
     local language = dofile("/helios/core/i18n.lua").new(config)
     local function tr(key, values, fallback) return language.get(key, values, fallback) end
+    local operationalLog = dofile("/helios/core/event_log.lua")
+    local function recordEvent(key, severity, subsystem, values, pages)
+        if config.logging and config.logging.enabled == false then return end
+        -- History must never become a new failure mode for plant control.
+        pcall(operationalLog.append, key, { severity=severity, subsystem=subsystem, values=values,
+            pages=pages, retentionDays=config.logging and config.logging.retentionDays or 7 })
+    end
+    recordEvent("log.mainframe_started", "info", "mainframe",
+        { version=config.version, computer=config.computerId })
+    local loggedStates = { reactors={}, turbines={}, storage=nil, alarm=nil,
+        terminals={}, facilities={}, discovery=nil }
+    local function valueKey(value)
+        return "value." .. tostring(value or "unknown"):lower():gsub("[^%w]+", "_"):gsub("^_+", ""):gsub("_+$", "")
+    end
     local function tv(value) return language.value(value) end
     local gui = dofile("/helios/core/gui.lua")
     gui.configure(config)
@@ -106,6 +120,7 @@ function mainframe.run(config)
     local manualSafetyState = manualControl.newSafetyState()
     local minimumPowerReserve
     local returnToAutomatic
+    local deviceName
 
     local function planGeneration(powerReserve, powerDemand)
         local low = tonumber(config.control.storageLow) or 25
@@ -345,6 +360,13 @@ function mainframe.run(config)
         turbines = turbineAdapter.readAll(devices)
         storages = storageAdapter.readAll(devices, config.power)
         registryStale = false
+        local missingCount=0;for _ in pairs(missingDevices) do missingCount=missingCount+1 end
+        local discoverySignature=table.concat({#reactors,#turbines,#storages,missingCount},":")
+        if loggedStates.discovery~=discoverySignature then
+            recordEvent("log.discovery_complete", missingCount>0 and "warning" or "info", "discovery",
+                { reactors=#reactors, turbines=#turbines, storage=#storages, missing=missingCount })
+            loggedStates.discovery=discoverySignature
+        end
     end
 
     -- @section ALARMS
@@ -467,6 +489,10 @@ function mainframe.run(config)
             ui.setCriticalAlarm(false)
             if previous then playSound("minecraft:block.note_block.pling", 1.5) end
             silencedAlarm = nil
+            if loggedStates.alarm then
+                recordEvent("log.alarm_cleared", "info", "alarm", { code=loggedStates.alarm })
+                loggedStates.alarm = nil
+            end
             return
         end
 
@@ -477,6 +503,11 @@ function mainframe.run(config)
         if signature ~= previousSignature then
             silencedAlarm = nil
             lastAlarmSound = 0
+        end
+        if signature ~= loggedStates.alarm then
+            recordEvent("log.alarm_raised", currentAlarm.level >= 3 and "critical" or "warning", "alarm",
+                { code=currentAlarm.key, level=currentAlarm.level }, { currentAlarm.message })
+            loggedStates.alarm = signature
         end
         if silencedAlarm == signature then return end
 
@@ -578,6 +609,49 @@ function mainframe.run(config)
             setFlowLimit = turbineAdapter.setFlowLimit,
             setInductor = turbineAdapter.setInductor,
         })
+        for _, reactor in ipairs(reactors) do
+            local state = reactor.governor and (reactor.governor.state or reactor.governor.actuatorState) or
+                (reactor.error and "FAULT" or reactor.active and "ACTIVE" or "OFFLINE")
+            if loggedStates.reactors[reactor.name] ~= state then
+                recordEvent("log.reactor_state", state == "FAULT" and "critical" or "info", "reactor",
+                    { device=deviceName(reactor.name), state_key=valueKey(state) })
+                loggedStates.reactors[reactor.name] = state
+            end
+        end
+        for _, turbine in ipairs(turbines) do
+            local state = turbine.governor and (turbine.governor.state or turbine.governor.actuatorState) or
+                (turbine.error and "FAULT" or turbine.active and "ACTIVE" or "OFFLINE")
+            if loggedStates.turbines[turbine.name] ~= state then
+                recordEvent("log.turbine_state", (state == "FAULT" or state == "OVERSPEED") and "critical" or "info", "turbine",
+                    { device=deviceName(turbine.name), state_key=valueKey(state) })
+                loggedStates.turbines[turbine.name] = state
+            end
+        end
+        local reserveBand = combinedPowerReserve and (combinedPowerReserve <= config.control.storageLow and "LOW" or
+            combinedPowerReserve >= config.control.storageHigh and "HIGH" or "NORMAL") or "UNKNOWN"
+        if loggedStates.storage ~= reserveBand then
+            recordEvent("log.storage_band", reserveBand == "LOW" and "warning" or "info", "storage",
+                { state_key=valueKey(reserveBand), percent=combinedPowerReserve and ("%.1f"):format(combinedPowerReserve) or "N/A" })
+            loggedStates.storage = reserveBand
+        end
+        local linkNow = network.now()
+        for nodeId, facility in pairs(facilities) do
+            local online = linkNow - (tonumber(facility.lastSeen) or 0) <= 7
+            if loggedStates.facilities[nodeId] == nil and online then
+                recordEvent("log.facility_connected", "info", "network",
+                    { device=nodeId, role=facility.role or "facility" })
+            elseif loggedStates.facilities[nodeId] == true and not online then
+                recordEvent("log.facility_disconnected", "warning", "network", { device=nodeId })
+            end
+            loggedStates.facilities[nodeId] = online
+        end
+        for key, remote in pairs(terminals) do
+            local online = linkNow - (tonumber(remote.lastSeen) or 0) <= 10
+            if loggedStates.terminals[key] == true and not online then
+                recordEvent("log.terminal_disconnected", "info", "network", { computer=remote.id })
+            end
+            if loggedStates.terminals[key] ~= nil then loggedStates.terminals[key] = online end
+        end
         updateAlarm()
         local conflictsChanged = refreshIdConflicts()
         if conflictsChanged or #idConflicts > 0 then advertiseIntegrity() end
@@ -744,6 +818,19 @@ function mainframe.run(config)
         -- Persist registration metadata, not the one-second telemetry stream.
         -- Live telemetry stays in memory to avoid needless disk churn.
         if clean.kind == "hello" then saveFacilities() end
+        if clean.kind == "hello" and loggedStates.facilities[nodeId] ~= true then
+            recordEvent("log.facility_connected", "info", "network", { device=nodeId, role=clean.source.role })
+            loggedStates.facilities[nodeId] = true
+        end
+        if clean.kind == "telemetry" then
+            local state = tostring(clean.payload.state or "unknown")
+            local stateSlot = "facility:" .. nodeId
+            if loggedStates.reactors[stateSlot] ~= state then
+                recordEvent("log.guardian_state", tonumber(clean.payload.alarmLevel) and "warning" or "info", "guardian",
+                    { device=nodeId, state_key=valueKey(state) })
+                loggedStates.reactors[stateSlot] = state
+            end
+        end
         -- Every Mainframe may retain read-only facility telemetry. Only the
         -- elected collector acknowledges packets or offers command authority.
         if collector then
@@ -805,6 +892,11 @@ function mainframe.run(config)
         if not previous or previous.display ~= assignment or previous.version ~= terminals[key].version then
             network.savePeers(terminals)
         end
+        if not previous then
+            recordEvent("log.terminal_connected", "info", "network",
+                { computer=sender, display=assignment, version=terminals[key].version })
+        end
+        loggedStates.terminals[key] = true
         sendSnapshot(sender, assignment)
         if conflictsChanged or #idConflicts > 0 then advertiseIntegrity() end
         return true
@@ -819,7 +911,7 @@ function mainframe.run(config)
         return count
     end
 
-    local function deviceName(rawName)
+    deviceName = function(rawName)
         local alias = config.deviceAliases[rawName]
         if alias and alias ~= "" then
             if config.ui.showPeripheralNames then return alias .. " [" .. rawName .. "]" end
@@ -831,6 +923,7 @@ function mainframe.run(config)
     local function silenceCurrentAlarm()
         if currentAlarm then
             silencedAlarm = currentAlarm.level .. ":" .. currentAlarm.key
+            recordEvent("log.alarm_silenced", "info", "operator", { code=currentAlarm.key })
             broadcastSnapshots()
         end
     end
@@ -853,6 +946,8 @@ function mainframe.run(config)
         config.control.mode = "automatic"
         manualSafetyState = manualControl.newSafetyState()
         manualNotice = reason
+        recordEvent("log.automatic_restored", "info", "operator",
+            { recalibrate_key=valueKey(recalibrate == true) }, { reason })
         if recalibrate then
             for _, turbine in ipairs(turbines) do
                 turbineGovernor.resetCalibration(governorMemory, config.control,
@@ -881,6 +976,7 @@ function mainframe.run(config)
         maintenanceEndsAt = nil
         maintenanceTimer = nil
         countdownTimer = nil
+        recordEvent("log.maintenance_stopped", "info", "operator")
         rescan(true)
     end
 
@@ -891,6 +987,7 @@ function mainframe.run(config)
         maintenanceEndsAt = os.epoch("utc") + (config.discovery.maintenanceTimeout * 1000)
         maintenanceTimer = os.startTimer(config.discovery.maintenanceTimeout)
         countdownTimer = os.startTimer(1)
+        recordEvent("log.maintenance_started", "warning", "operator", { seconds=config.discovery.maintenanceTimeout })
     end
 
     local function remainingMaintenance()
@@ -1129,6 +1226,9 @@ function mainframe.run(config)
                 local ok, _, reason = reactorAdapter.setActive(reactor,
                     reactor.active ~= true)
                 notice = ok and "Reactor state verified" or tostring(reason)
+                recordEvent("log.operator_reactor_power", ok and "warning" or "critical", "operator",
+                    { device=deviceName(reactor.name), state_key=valueKey(reactor.active ~= true and "ACTIVE" or "OFFLINE") },
+                    ok and nil or { tostring(reason) })
                 pollReactors()
             elseif (event == "key" and (value == keys.z or value == keys.x)) or
                    ui.hit(buttons.allDown, x, y) or ui.hit(buttons.allUp, x, y) then
@@ -1138,6 +1238,8 @@ function mainframe.run(config)
                 local ok, _, reason = reactorAdapter.setAllControlRodLevels(
                     reactor, requested)
                 notice = ok and "All rods verified" or tostring(reason)
+                recordEvent("log.operator_reactor_rods", ok and "warning" or "critical", "operator",
+                    { device=deviceName(reactor.name), rods=("%.1f"):format(requested) }, ok and nil or { tostring(reason) })
                 pollReactors()
             else
                 for _, rod in ipairs(buttons.rods) do
@@ -1148,6 +1250,9 @@ function mainframe.run(config)
                             reactor, rod.index, rod.level + direction * step)
                         notice = ok and ("Rod %d verified"):format(rod.index + 1) or
                             tostring(reason)
+                        recordEvent("log.operator_reactor_rod", ok and "warning" or "critical", "operator",
+                            { device=deviceName(reactor.name), rod=rod.index + 1,
+                                rods=("%.1f"):format(rod.level + direction * step) }, ok and nil or { tostring(reason) })
                         pollReactors()
                         break
                     end
@@ -1234,12 +1339,18 @@ function mainframe.run(config)
                         local change = increase and step or -step
                         local ok, _, reason = turbineAdapter.setFlowLimit(turbine, current + change)
                         notice = ok and "Turbine flow limit verified" or tostring(reason)
+                        recordEvent("log.operator_turbine_flow", ok and "warning" or "critical", "operator",
+                            { device=deviceName(turbine.name), flow=("%.0f"):format(math.max(0, current + change)) },
+                            ok and nil or { tostring(reason) })
                         pollReactors()
                     end
                 elseif (event == "key" and value == keys.p) or ui.hit(buttons.power, x, y) then
                     local ok, _, reason = turbineAdapter.setActive(turbine,
                         turbine.active ~= true)
                     notice = ok and "Turbine state verified" or tostring(reason)
+                    recordEvent("log.operator_turbine_power", ok and "warning" or "critical", "operator",
+                        { device=deviceName(turbine.name), state_key=valueKey(turbine.active ~= true and "ACTIVE" or "OFFLINE") },
+                        ok and nil or { tostring(reason) })
                     pollReactors()
                 end
             end
@@ -1355,6 +1466,8 @@ function mainframe.run(config)
                         "Reactors active; governors paused; safety guard arming" or
                         ("Manual armed; reactor activation failed: " ..
                             table.concat(activationErrors, "; "))
+                    recordEvent("log.manual_control_started", activated and "warning" or "critical", "operator",
+                        { reactors=#reactors, turbines=#turbines }, activationErrors)
                     pollReactors()
                     armed = false
                 else
@@ -1378,6 +1491,8 @@ function mainframe.run(config)
             elseif ui.hit(buttons.retry, x, y) and #turbines > 0 then
                 turbineGovernor.resetCalibration(governorMemory, config.control,
                     turbines[selected].name)
+                recordEvent("log.turbine_recalibration", "warning", "operator",
+                    { device=deviceName(turbines[selected].name) })
                 configStore.save(config)
                 pollReactors()
             elseif ui.hit(buttons.back, x, y) then return
@@ -1575,22 +1690,27 @@ function mainframe.run(config)
             elseif (event == "key" and value == keys.e) or ui.hit(buttons.enabled, touchX, touchY) then
                 config.alarms.enabled = not config.alarms.enabled
                 saveConfig()
+                recordEvent("log.alarm_setting", "info", "operator",
+                    { setting="audible", value_key=valueKey(config.alarms.enabled and "ENABLED" or "DISABLED") })
             elseif (event == "key" and value == keys.l) or ui.hit(buttons.low, touchX, touchY) then
                 config.alarms.lowFuel = editNumber("Low-fuel warning", config.alarms.lowFuel, 1, 99)
                 if config.alarms.criticalFuel > config.alarms.lowFuel then
                     config.alarms.criticalFuel = config.alarms.lowFuel
                 end
                 saveConfig()
+                recordEvent("log.alarm_setting", "info", "operator", { setting="low_fuel", value=config.alarms.lowFuel .. "%" })
                 restoreTimersAfterTextInput()
             elseif (event == "key" and value == keys.c) or ui.hit(buttons.critical, touchX, touchY) then
                 config.alarms.criticalFuel = editNumber("Critical-fuel warning",
                     config.alarms.criticalFuel, 0, config.alarms.lowFuel)
                 saveConfig()
+                recordEvent("log.alarm_setting", "info", "operator", { setting="critical_fuel", value=config.alarms.criticalFuel .. "%" })
                 restoreTimersAfterTextInput()
             elseif (event == "key" and value == keys.v) or ui.hit(buttons.volume, touchX, touchY) then
                 config.alarms.volume = config.alarms.volume + 0.5
                 if config.alarms.volume > 3 then config.alarms.volume = 0.5 end
                 saveConfig()
+                recordEvent("log.alarm_setting", "info", "operator", { setting="volume", value=config.alarms.volume })
             elseif (event == "key" and value == keys.x) or ui.hit(buttons.test, touchX, touchY) then
                 playSound("minecraft:block.note_block.bell", 0.8, true)
             elseif event == "rednet_message" then
@@ -1650,6 +1770,9 @@ function mainframe.run(config)
                         notice = "Enter or generate a key before enabling protection"
                     end
                     saveConfig();network.configure(config)
+                    recordEvent("log.network_protection", "warning", "operator",
+                        { state_key=valueKey(networkSecurity.enabled(config) and "ENABLED" or "DISABLED"),
+                            code=networkSecurity.networkId(config) })
                 elseif ui.hit(networkButtons.key, x, y) then
                     ui.prepare();print("Enter the shared HELIOS key (8-128 characters):");write("> ")
                     local key = read("*")
@@ -1657,6 +1780,7 @@ function mainframe.run(config)
                         config.network.securityKey = key;config.network.securityEnabled = true
                         saveConfig();network.configure(config)
                         notice = "Key saved; restart every HELIOS computer"
+                        recordEvent("log.network_key_changed", "warning", "operator", { code=networkSecurity.networkId(config) })
                     else notice = "Key rejected: 8-128 characters required" end
                 elseif ui.hit(networkButtons.generate, x, y) then
                     local key = networkSecurity.generateKey()
@@ -1666,6 +1790,7 @@ function mainframe.run(config)
                     config.network.securityKey = key;config.network.securityEnabled = true
                     saveConfig();network.configure(config)
                     notice = "New key saved; restart every HELIOS computer"
+                    recordEvent("log.network_key_changed", "warning", "operator", { code=networkSecurity.networkId(config) })
                 elseif event == "rednet_message" then handleNetwork(value, message, protocol)
                 end
             end
@@ -1693,8 +1818,8 @@ function mainframe.run(config)
             ui.status("Maintenance timeout", math.floor(config.discovery.maintenanceTimeout / 60) .. " minutes")
             ui.status("Current mode", modeName(), maintenance and colors.orange or colors.white)
             ui.status("Peripheral names", config.ui.showPeripheralNames and "SHOWN" or "HIDDEN")
-            ui.status("Colour profile", string.upper(config.ui.accessibilityProfile:gsub("_", " ")), colors.cyan)
-            ui.status("Status symbols", config.ui.statusSymbols and "ENABLED" or "DISABLED",
+            ui.status(tr("accessibility.colour_profile", nil, "Colour profile"), string.upper(config.ui.accessibilityProfile:gsub("_", " ")), colors.cyan)
+            ui.status(tr("accessibility.status_symbols", nil, "Status symbols"), config.ui.statusSymbols and tr("accessibility.enabled", nil, "ENABLED") or tr("accessibility.disabled", nil, "DISABLED"),
                 config.ui.statusSymbols and colors.lime or colors.gray)
             ui.status("Power display", config.power.unit .. " / " .. string.upper(config.power.numberFormat))
             local selectedGui = guiLoader.resolve(config.ui.renderer, config.version)
@@ -1725,13 +1850,15 @@ function mainframe.run(config)
             write(" ")
             buttons.gui = ui.inlineButton("GUI MODULE", colors.cyan)
             print("")
-            buttons.palette = ui.inlineButton("COLOUR PROFILE", colors.cyan)
+            buttons.palette = ui.inlineButton(tr("accessibility.colour_button", nil, "COLOUR PROFILE"), colors.cyan)
             write(" ")
-            buttons.symbols = ui.inlineButton("STATUS SYMBOLS", colors.cyan)
+            buttons.symbols = ui.inlineButton(tr("accessibility.symbols_button", nil, "STATUS SYMBOLS"), colors.cyan)
             print("")
             buttons.network = ui.inlineButton("NETWORKING", colors.cyan)
             write(" ")
-            buttons.back = ui.inlineButton("BACK", colors.cyan)
+            buttons.logs = ui.inlineButton(tr("log.button", nil, "CAPTAIN'S LOG"), colors.cyan)
+            write(" ")
+            buttons.back = ui.inlineButton(tr("common.back", nil, "BACK"), colors.cyan)
             -- BACK occupies the last row on a 19-line mirrored terminal. Do not
             -- print a trailing newline here: CC:Tweaked would scroll the visible
             -- page up while leaving every recorded touch target one row lower.
@@ -1766,6 +1893,9 @@ function mainframe.run(config)
                 powerSettings()
             elseif (event == "key" and value == keys.a) or ui.hit(buttons.alarms, touchX, touchY) then
                 alarmSettings()
+            elseif ui.hit(buttons.logs, touchX, touchY) then
+                dofile("/helios/core/log_viewer.lua").run(config)
+                restoreTimersAfterTextInput()
             elseif ui.hit(buttons.palette, touchX, touchY) then
                 local current = 1
                 for index, profile in ipairs(accessibilityProfiles) do
