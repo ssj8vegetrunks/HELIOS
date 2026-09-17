@@ -10,7 +10,7 @@
         {
           "source": "src/helios.lua",
           "path": "helios.lua",
-          "bytes": 20448
+          "bytes": 20668
         },
         {
           "source": "src/core/accessibility.lua",

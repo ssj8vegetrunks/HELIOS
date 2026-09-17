@@ -4,7 +4,7 @@
 
 Core version: **1.6.0-alpha.27**
 
-The bootstrap `install.lua` is 318 readable lines and contains no runtime payload.
+The bootstrap `install.lua` is 327 readable lines and contains no runtime payload.
 It downloads only the packages selected for one computer from `packages/manifest.json`.
 
 ## Packages
@@ -12,10 +12,10 @@ It downloads only the packages selected for one computer from `packages/manifest
 ### `core` — HELIOS Core
 
 - Kind: `core`
-- Direct payload: 63487 bytes
+- Direct payload: 63707 bytes
 - Required packages: none
 
-- `helios.lua` ← `src/helios.lua` (20448 bytes)
+- `helios.lua` ← `src/helios.lua` (20668 bytes)
 - `core/accessibility.lua` ← `src/core/accessibility.lua` (3683 bytes)
 - `core/calculations.lua` ← `src/core/calculations.lua` (1375 bytes)
 - `core/config.lua` ← `src/core/config.lua` (11550 bytes)

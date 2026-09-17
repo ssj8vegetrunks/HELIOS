@@ -251,8 +251,12 @@ local function run()
         end
     end
 
-    local networkEnabled = previous and previous.network and previous.network.securityEnabled == true or false
-    local networkKey = networkEnabled and tostring(previous.network.securityKey or "") or ""
+    local networkEnabled = previous and type(previous.network) == "table" and
+        previous.network.securityEnabled == true or false
+    local networkKey = ""
+    if networkEnabled and type(previous.network.securityKey) == "string" then
+        networkKey = previous.network.securityKey
+    end
     local modemDetected = false
     for _, name in ipairs(peripheral.getNames()) do
         for _, kind in ipairs({ peripheral.getType(name) }) do
@@ -262,10 +266,15 @@ local function run()
     end
     if modemDetected then title("Network Protection") end
     if modemDetected and confirm("Enable HELIOS network protection on this computer?", networkEnabled) then
-        print(networkEnabled and "Enter a replacement key, or leave blank to keep the current key:" or
+        print(networkEnabled and "Enter a new HELIOS network key, or leave blank to keep the current network key:" or
             "Enter the shared HELIOS network key (8-128 characters):")
         write("> ");local entered = read("*")
-        if entered ~= "" then networkKey = entered end
+        if entered ~= "" then
+            print("Re-enter the HELIOS network key to verify it:")
+            write("> ");local verified = read("*")
+            if entered ~= verified then error("The HELIOS network keys do not match. No changes were made.", 0) end
+            networkKey = entered
+        end
         if #networkKey < 8 or #networkKey > 128 then error("Network keys must contain 8-128 characters.", 0) end
         networkEnabled = true
     elseif modemDetected then networkEnabled = false;networkKey = "" end

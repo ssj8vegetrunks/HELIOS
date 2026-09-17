@@ -82,6 +82,9 @@ if args[1] == "network" then
         print(prompt);write("> ")
         local value = read("*")
         if not security.validKey(value) then error("Network keys must contain 8-128 characters.", 0) end
+        print("Re-enter the HELIOS network key to verify it:");write("> ")
+        local verified = read("*")
+        if value ~= verified then error("The HELIOS network keys do not match. No changes were made.", 0) end
         return value
     end
     if action == "status" then
