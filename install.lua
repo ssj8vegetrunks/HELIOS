@@ -2,8 +2,9 @@
 -- Downloads only the Core, role, and optional packages selected for this computer.
 
 local VERSION = "1.6.0-alpha.27"
-local BASE_URL = "https://raw.githubusercontent.com/ssj8vegetrunks/HELIOS/testing/public-alpha"
-local MANIFEST_URL = BASE_URL .. "/packages/manifest.json"
+local REPOSITORY = "ssj8vegetrunks/HELIOS"
+local BRANCH_API = "https://api.github.com/repos/" .. REPOSITORY .. "/commits/testing%2Fpublic-alpha"
+local BASE_URL
 local INSTALL_DIR, LOCAL_STAGE = "/helios", "/.helios-install"
 local DOWNLOAD_NONCE = tostring(os.epoch and os.epoch("utc") or os.getComputerID())
 
@@ -66,6 +67,16 @@ local function fetch(url)
     if not response then error("Could not download " .. url .. ": " .. tostring(reason), 0) end
     local contents = response.readAll();response.close();return contents
 end
+local function pinRevision()
+    if BASE_URL then return end
+    local encoded = fetch(BRANCH_API)
+    local ok, revision = pcall(textutils.unserializeJSON, encoded)
+    local sha = ok and type(revision) == "table" and revision.sha or nil
+    if type(sha) ~= "string" or not sha:match("^[0-9a-f]+$") or #sha ~= 40 then
+        error("Could not resolve the HELIOS testing branch to a Git revision.", 0)
+    end
+    BASE_URL = "https://raw.githubusercontent.com/" .. REPOSITORY .. "/" .. sha
+end
 local function writeFile(path, contents)
     local parent = fs.getDir(path)
     if parent ~= "" and not fs.exists(parent) then fs.makeDir(parent) end
@@ -78,7 +89,8 @@ local function safePath(path)
         not path:find("..", 1, true) and not path:find("\\", 1, true)
 end
 local function loadManifest()
-    local encoded = fetch(MANIFEST_URL)
+    pinRevision()
+    local encoded = fetch(BASE_URL .. "/packages/manifest.json")
     local ok, manifest = pcall(textutils.unserializeJSON, encoded)
     if not ok or type(manifest) ~= "table" or manifest.schema_version ~= 1 or
        manifest.core_version ~= VERSION or type(manifest.packages) ~= "table" then
