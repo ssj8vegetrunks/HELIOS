@@ -74,17 +74,42 @@ function loader.load(id, coreVersion, width, height)
     return renderer, manifest
 end
 
-function loader.install(baseUrl, coreVersion)
-    if not http or not http.get or type(baseUrl) ~= "string" then
-        return nil, "HTTP is unavailable or the module URL is invalid"
+local function normalizeSource(source)
+    if type(source) ~= "string" then return nil end
+    source = source:gsub("^%s+", ""):gsub("%s+$", ""):gsub("/+$", "")
+    if source:match("^https://raw%.githubusercontent%.com/") then return source end
+    local owner, repository, reference, path = source:match(
+        "^https://github%.com/([^/]+)/([^/]+)/tree/([^/]+)/?(.*)$")
+    if not owner then
+        owner, repository, reference, path = source:match(
+            "^https://github%.com/([^/]+)/([^/]+)/blob/([^/]+)/(.+)/manifest%.lua$")
     end
-    baseUrl = string.gsub(baseUrl, "/+$", "")
-    local function fetch(url)
-        local handle, reason = http.get(url)
-        if not handle then return nil, reason end
-        local body = handle.readAll()
-        handle.close()
-        return body
+    if owner then
+        repository = repository:gsub("%.git$", "")
+        local base = ("https://raw.githubusercontent.com/%s/%s/%s"):format(
+            owner, repository, reference)
+        return path ~= "" and (base .. "/" .. path) or base
+    end
+    owner, repository = source:match("^https://github%.com/([^/]+)/([^/]+)$")
+    if owner then
+        repository = repository:gsub("%.git$", "")
+        return ("https://raw.githubusercontent.com/%s/%s/main"):format(owner, repository)
+    end
+    return nil
+end
+
+local function fetch(url)
+    local handle, reason = http.get(url)
+    if not handle then return nil, reason end
+    local body = handle.readAll()
+    handle.close()
+    return body
+end
+
+function loader.preview(source, coreVersion)
+    local baseUrl = normalizeSource(source)
+    if not http or not http.get or not baseUrl then
+        return nil, "HTTP is unavailable or the module URL is invalid"
     end
     local manifestText, reason = fetch(baseUrl .. "/manifest.lua")
     if not manifestText then return nil, "Could not download GUI manifest: " .. tostring(reason) end
@@ -92,27 +117,73 @@ function loader.install(baseUrl, coreVersion)
     if not fn then return nil, "GUI manifest is invalid: " .. tostring(parseReason) end
     local ok, manifest = pcall(fn)
     if not ok or type(manifest) ~= "table" or type(manifest.id) ~= "string" or
-       string.find(manifest.id, "[^%w_%-]") or type(manifest.entry) ~= "string" or
+       manifest.id == "" or string.find(manifest.id, "[^%w_%-]") or
+       type(manifest.name) ~= "string" or manifest.name == "" or
+       type(manifest.version) ~= "string" or tonumber(manifest.apiVersion) ~= 1 or
+       type(manifest.entry) ~= "string" or
        string.find(manifest.entry, "[/\\]") or string.find(manifest.entry, "..", 1, true) then
         return nil, "GUI manifest contains unsafe metadata"
     end
+    if not compatible(manifest, coreVersion) then
+        return nil, "GUI module is not compatible with HELIOS " .. tostring(coreVersion)
+    end
     local rendererText, rendererReason = fetch(baseUrl .. "/" .. manifest.entry)
     if not rendererText then return nil, "Could not download GUI renderer: " .. tostring(rendererReason) end
+    manifest.downloadBytes = #manifestText + #rendererText
+    manifest.sourceUrl = baseUrl
+    manifest._manifestText = manifestText
+    manifest._rendererText = rendererText
+    return manifest
+end
+
+function loader.installPreview(manifest, coreVersion)
+    if type(manifest) ~= "table" or type(manifest._manifestText) ~= "string" or
+       type(manifest._rendererText) ~= "string" or not compatible(manifest, coreVersion) then
+        return nil, "GUI installation preview is missing, invalid, or expired"
+    end
+    local free = fs.getFreeSpace(fs.exists(ROOT) and ROOT or "/helios")
+    if type(free) == "number" and free < (manifest.downloadBytes or 0) + 2048 then
+        return nil, ("Not enough space for this GUI: %d bytes available, about %d required"):
+            format(free, (manifest.downloadBytes or 0) + 2048)
+    end
     local root = ROOT .. "/" .. manifest.id
+    local stage = ROOT .. "/.install-" .. manifest.id
+    local backup = ROOT .. "/.previous-" .. manifest.id
     if not fs.exists(ROOT) then fs.makeDir(ROOT) end
-    if not fs.exists(root) then fs.makeDir(root) end
+    if fs.exists(stage) then fs.delete(stage) end
+    if fs.exists(backup) then fs.delete(backup) end
+    fs.makeDir(stage)
     local function write(path, body)
         local handle, openReason = fs.open(path, "w")
         if not handle then return false, openReason end
         handle.write(body); handle.close(); return true
     end
-    local wrote, writeReason = write(root .. "/manifest.lua", manifestText)
-    if not wrote then return nil, writeReason end
-    wrote, writeReason = write(root .. "/" .. manifest.entry, rendererText)
-    if not wrote then return nil, writeReason end
+    local wrote, writeReason = write(stage .. "/manifest.lua", manifest._manifestText)
+    if not wrote then fs.delete(stage);return nil, writeReason end
+    wrote, writeReason = write(stage .. "/" .. manifest.entry, manifest._rendererText)
+    if not wrote then fs.delete(stage);return nil, writeReason end
+    manifest._manifestText, manifest._rendererText = nil, nil
+    if fs.exists(root) then fs.move(root, backup) end
+    local moved, moveReason = pcall(fs.move, stage, root)
+    if not moved then
+        if fs.exists(root) then fs.delete(root) end
+        if fs.exists(backup) then fs.move(backup, root) end
+        return nil, "GUI installation rolled back: " .. tostring(moveReason)
+    end
     local installed, validationReason = inspect(manifest.id, coreVersion)
-    if not installed then return nil, validationReason end
+    if not installed then
+        fs.delete(root)
+        if fs.exists(backup) then fs.move(backup, root) end
+        return nil, "GUI installation rolled back: " .. tostring(validationReason)
+    end
+    if fs.exists(backup) then fs.delete(backup) end
     return installed
+end
+
+function loader.install(source, coreVersion)
+    local manifest, reason = loader.preview(source, coreVersion)
+    if not manifest then return nil, reason end
+    return loader.installPreview(manifest, coreVersion)
 end
 
 return loader

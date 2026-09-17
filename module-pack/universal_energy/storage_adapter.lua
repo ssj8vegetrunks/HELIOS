@@ -1,6 +1,8 @@
 -- @section GENERIC STORAGE PERIPHERAL ADAPTER
 local adapter = {}
 local previousSamples = {}
+local calculations = dofile("/helios/core/calculations.lua")
+local powerFormat = dofile("/helios/core/power_format.lua")
 
 local function contains(value, fragment)
     return string.find(string.lower(value or ""), fragment, 1, true) ~= nil
@@ -63,23 +65,7 @@ local function mekanismSupported(device, available)
 end
 
 local function toBaseFE(value, nativeUnit, powerConfig)
-    value = number(value)
-    if value == nil then return nil end
-    if nativeUnit == "J" then
-        local joulesPerFE = tonumber(((powerConfig or {}).ratios or {}).J) or 2.5
-        if joulesPerFE > 0 then return value / joulesPerFE end
-    end
-    return value
-end
-
-local function percentage(stored, capacity, reported)
-    reported = number(reported)
-    if reported ~= nil then
-        if reported >= 0 and reported <= 1 then return reported * 100 end
-        return reported
-    end
-    if stored ~= nil and capacity and capacity > 0 then return stored / capacity * 100 end
-    return nil
+    return powerFormat.toBase(number(value), nativeUnit, powerConfig)
 end
 
 local function readGeneric(device, available, powerConfig)
@@ -140,7 +126,8 @@ local function readMekanism(device, available, powerConfig)
 end
 
 local function finalize(storage)
-    storage.percent = percentage(storage.stored, storage.capacity, storage.reportedPercent)
+    storage.percent = calculations.normalizedPercent(
+        storage.reportedPercent, storage.stored, storage.capacity)
     storage.reportedPercent = nil
 
     if storage.input ~= nil and storage.output ~= nil then
@@ -236,21 +223,8 @@ function adapter.readAll(devices, powerConfig)
     return storages
 end
 
-local function eta(value)
-    if value == nil or value ~= value or value == math.huge then return "N/A" end
-    value = math.max(0, math.floor(value + 0.5))
-    local days = math.floor(value / 86400)
-    local hours = math.floor((value % 86400) / 3600)
-    local minutes = math.floor((value % 3600) / 60)
-    local seconds = value % 60
-    if days > 0 then return ("%dd %dh"):format(days, hours) end
-    if hours > 0 then return ("%dh %dm"):format(hours, minutes) end
-    if minutes > 0 then return ("%dm %ds"):format(minutes, seconds) end
-    return seconds .. "s"
-end
-
 function adapter.formatETA(storage)
-    return eta(storage and storage.etaSeconds)
+    return powerFormat.duration(storage and storage.etaSeconds)
 end
 
 function adapter.printReport(storages, config, formatter)
@@ -270,8 +244,8 @@ function adapter.printReport(storages, config, formatter)
             print("  Output: " .. formatter.power(storage.output, config.power, true))
             print("  Net: " .. formatter.power(storage.net, config.power, true))
             print("  State: " .. storage.state)
-            if storage.state == "CHARGING" then print("  Full in: " .. eta(storage.etaSeconds)) end
-            if storage.state == "DRAINING" then print("  Empty in: " .. eta(storage.etaSeconds)) end
+            if storage.state == "CHARGING" then print("  Full in: " .. powerFormat.duration(storage.etaSeconds)) end
+            if storage.state == "DRAINING" then print("  Empty in: " .. powerFormat.duration(storage.etaSeconds)) end
         end
         print("")
     end

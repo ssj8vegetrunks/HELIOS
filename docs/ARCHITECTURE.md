@@ -5,6 +5,19 @@ HELIOS architecture and design specification.
 
 HELIOS Architecture v0.1
 
+Shared calculation policy
+-------------------------
+
+Hardware-independent calculations are provided by `core/calculations.lua` as a
+versioned interface. Roles, official modules, and third-party modules should
+call this interface instead of carrying private copies of percentage, clamp,
+rounding, and normalization formulas. Power conversion and display formatting
+remain centralized in `core/power_format.lua`.
+
+Device-specific API translation remains inside each hardware adapter. The
+Draconic Guardian deliberately keeps its containment and fail-safe mathematics
+self-contained so reactor safety never depends on a Mainframe or network link.
+
 1. What HELIOS is
 2. Core philosophy
    - Mainframe = brain
@@ -115,3 +128,13 @@ docs/
    - Manual actuator commands require active Manual authority
    - The built-in text UI remains installed as the failure-safe fallback
    - See UI_API.md for contract versioning, commands, and lifecycle rules
+
+13. Modular installation boundary
+   - `install.lua` is a bootstrap and contains no runtime payload
+   - `packages/manifest.json` explicitly assigns every installed file to Core, one role, or an optional feature
+   - Every computer installs shared Core plus exactly one role package
+   - Mainframe, Terminal, Guardian, and Profiler implementation files are never cross-installed
+   - Hardware adapters, GUIs, Captain's Log, tools, and non-English languages are independent packages
+   - Package dependencies are resolved before download and duplicate destinations are rejected
+   - Configuration, calibration, runtime data, and installed language packs survive role-package upgrades
+   - Installed safety and control never depend on GitHub or removable storage at runtime

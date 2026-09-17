@@ -1,4 +1,5 @@
 local gui = {}
+local calculations = dofile("/helios/core/calculations.lua")
 local accessibilityConfig
 
 function gui.configure(config) accessibilityConfig = config end
@@ -24,8 +25,7 @@ end
 gui.length = textLength
 
 local function clamp(value, low, high)
-    value = tonumber(value) or 0
-    return math.max(low, math.min(high, value))
+    return calculations.clamp(tonumber(value) or 0, low, high)
 end
 
 function gui.prepare()

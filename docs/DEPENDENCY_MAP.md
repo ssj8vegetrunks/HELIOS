@@ -1,44 +1,38 @@
-# Public Alpha dependency map
+# Public Alpha modular dependency map
 
 ```text
-install.lua
-`-- HELIOS Core
-    |-- Mainframe
-    |   |-- peripheral discovery
-    |   |-- safety/governors
-    |   |-- official Module Pack
-    |   |   |-- Extreme Reactors adapters
-    |   |   `-- Universal Energy Storage adapter
-    |   |-- local displays + helios.v1 terminal snapshots
-    |   `-- helios.facility.v1 Guardian registration + telemetry
-    `-- Remote
-        `-- read-only network snapshots + local display
-
-discovery_probe.lua
-`-- CC:Tweaked peripheral API only (standalone, read-only)
-
-draconic_guardian.lua
-|-- CC:Tweaked
-|-- Advanced Peripherals / Draconic Evolution peripheral integration
-|-- local reactor, injector and two Flux Gate peripherals
-|-- optional Advanced Monitor
-`-- optional HELIOS Core networking modules (read-only facility link)
-
-module-template/
-`-- developer source only; not installed or loaded automatically
+install.lua (small bootstrap; no runtime payload)
+`-- packages/manifest.json
+    |-- core
+    |   |-- role: mainframe
+    |   |   `-- official_hardware
+    |   |-- role: terminal
+    |   |-- role: guardian
+    |   `-- role: profiler
+    |-- optional GUI: control_room
+    |-- optional feature: captains_log
+    |-- optional tool: discovery_probe
+    `-- optional languages: de_de / en_pi / es_es / fr_ca
 ```
+
+Every computer receives `core` and exactly one role. Package membership is explicit in
+`packages/manifest.json`; adding a source file does not automatically put it into an installation.
+Core exposes the versioned `core/calculations.lua` interface for reusable numerical formulas and
+`core/power_format.lua` for energy conversion and display formatting.
 
 ## Boundary rules
 
-- Mainframe owns plant-wide scheduling and HELIOS hardware adapters.
-- Remote terminals never load hardware adapters and never own actuators.
-- The Probe observes names, types, and methods; it never calls setters.
-- The Draconic Guardian owns its reactor safety locally. Network loss must not
-  weaken or stop its safety loop.
-- A module file is loaded only when explicitly declared by a compatible Module
-  Pack manifest.
-- The public template is telemetry-only until its developer deliberately adds
-  guarded commands, verification, and failure behavior.
+- Mainframe owns plant-wide scheduling and installs official hardware adapters.
+- Remote Terminals install no hardware adapters and never own actuators.
+- The Draconic Guardian contains its complete local safety loop but no Mainframe implementation.
+- The Profiler contains only its read-only profiling role and shared dependencies.
+- Captain's Log, non-English languages, the Control Room GUI, and the discovery probe install only
+  when selected.
+- The bootstrap verifies manifest version, paths, dependency closure, duplicate destinations, and
+  downloaded file sizes before installation.
+- Installed control and safety never require GitHub or a removable disk to remain available.
+- Hardware adapters call Core's shared formulas but retain their device-specific API translation.
+- Guardian containment mathematics remains local and self-contained as a safety boundary.
 
-For inferred file-to-file dependencies and bundled line numbers, see
-[`DEPENDENCY_TREE.md`](DEPENDENCY_TREE.md) and [`SOURCE_MAP.md`](SOURCE_MAP.md).
+For generated package membership, file dependencies, and blast radius, see
+[`SOURCE_MAP.md`](SOURCE_MAP.md) and [`DEPENDENCY_TREE.md`](DEPENDENCY_TREE.md).

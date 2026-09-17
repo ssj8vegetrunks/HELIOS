@@ -1,11 +1,36 @@
 local eventLog = {}
 
-local ROOT = "/helios/data/logs"
+local LOCAL_ROOT = "/helios/data/logs"
+local STORAGE_MARKER = ".helios-storage"
 local DEFAULT_RETENTION_DAYS = 7
 local MAX_EVENTS_PER_HOUR = 256
 local MAX_VALUE_LENGTH = 512
 local MAX_DETAIL_PAGES = 20
 local MAX_PAGE_LENGTH = 1024
+local MAX_LOCAL_LOG_BYTES = 48 * 1024
+
+local function root()
+    if fs.getDrive then
+        local localDrive = fs.getDrive("/")
+        for _, name in ipairs(fs.list("/")) do
+            local mount = "/" .. name
+            if fs.isDir(mount) and fs.getDrive(mount) ~= localDrive then
+                local markerPath = fs.combine(mount, STORAGE_MARKER)
+                if fs.exists(markerPath) and not fs.isDir(markerPath) then
+                    local handle = fs.open(markerPath, "r")
+                    local marker = handle and textutils.unserialize(handle.readAll()) or nil
+                    if handle then handle.close() end
+                    local computerId = os.getComputerID and os.getComputerID() or 0
+                    if type(marker) == "table" and marker.kind == "helios-archive" and
+                       marker.computerId == computerId then
+                        return fs.combine(mount, "helios-archive/logs"), true
+                    end
+                end
+            end
+        end
+    end
+    return LOCAL_ROOT, false
+end
 
 local function safeSegment(value)
     return tostring(value or "unknown"):gsub("[^%w_.-]", "_"):sub(1, 80)
@@ -76,16 +101,41 @@ end
 
 function eventLog.prune(retentionDays)
     retentionDays = math.max(1, math.floor(tonumber(retentionDays) or DEFAULT_RETENTION_DAYS))
-    local days = listDirectories(ROOT)
+    local logRoot, external = root()
+    local days = listDirectories(logRoot)
     while #days > retentionDays do
-        fs.delete(fs.combine(ROOT, table.remove(days, 1)))
+        fs.delete(fs.combine(logRoot, table.remove(days, 1)))
+    end
+    -- Without an archive disk, retain a small troubleshooting window without
+    -- allowing optional history to crowd control and safety programs off disk.
+    if not external and type(fs.getSize) == "function" then
+        local files, total = {}, 0
+        for _, day in ipairs(listDirectories(logRoot)) do
+            local dayPath = fs.combine(logRoot, day)
+            for _, hour in ipairs(listDirectories(dayPath)) do
+                local hourPath = fs.combine(dayPath, hour)
+                for _, name in ipairs(listFiles(hourPath)) do
+                    local path = fs.combine(hourPath, name)
+                    local size = fs.getSize(path)
+                    files[#files + 1] = { path = path, size = size }
+                    total = total + size
+                end
+            end
+        end
+        local index = 1
+        while total > MAX_LOCAL_LOG_BYTES and files[index] do
+            fs.delete(files[index].path)
+            total = total - files[index].size
+            index = index + 1
+        end
     end
 end
 
 function eventLog.append(key, options)
     options = type(options) == "table" and options or {}
     local timestamp, day, hour = nowParts()
-    local hourPath = fs.combine(fs.combine(ROOT, safeSegment(day)), safeSegment(hour))
+    local logRoot = root()
+    local hourPath = fs.combine(fs.combine(logRoot, safeSegment(day)), safeSegment(hour))
     fs.makeDir(hourPath)
     local existing = listFiles(hourPath)
     while #existing >= MAX_EVENTS_PER_HOUR do
@@ -107,10 +157,10 @@ function eventLog.append(key, options)
     return record
 end
 
-function eventLog.days() return listDirectories(ROOT) end
-function eventLog.hours(day) return listDirectories(fs.combine(ROOT, safeSegment(day))) end
+function eventLog.days() return listDirectories(root()) end
+function eventLog.hours(day) return listDirectories(fs.combine(root(), safeSegment(day))) end
 function eventLog.events(day, hour)
-    local path = fs.combine(fs.combine(ROOT, safeSegment(day)), safeSegment(hour))
+    local path = fs.combine(fs.combine(root(), safeSegment(day)), safeSegment(hour))
     local records = {}
     for _, fileName in ipairs(listFiles(path)) do
         local record = readRecord(fs.combine(path, fileName))
@@ -119,7 +169,12 @@ function eventLog.events(day, hour)
     return records
 end
 function eventLog.get(day, hour, id)
-    return readRecord(fs.combine(fs.combine(fs.combine(ROOT, safeSegment(day)), safeSegment(hour)), safeSegment(id) .. ".lua"))
+    return readRecord(fs.combine(fs.combine(fs.combine(root(), safeSegment(day)), safeSegment(hour)), safeSegment(id) .. ".lua"))
+end
+
+function eventLog.storage()
+    local path, external = root()
+    return { path = path, external = external }
 end
 
 return eventLog

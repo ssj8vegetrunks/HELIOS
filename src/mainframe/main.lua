@@ -14,9 +14,13 @@ function mainframe.run(config)
     ui.setVersion(config.version)
     local language = dofile("/helios/core/i18n.lua").new(config)
     local function tr(key, values, fallback) return language.get(key, values, fallback) end
-    local operationalLog = dofile("/helios/core/event_log.lua")
+    local operationalLog
+    if fs.exists("/helios/core/event_log.lua") then
+        local ok, loaded = pcall(dofile, "/helios/core/event_log.lua")
+        if ok then operationalLog = loaded end
+    end
     local function recordEvent(key, severity, subsystem, values, pages)
-        if config.logging and config.logging.enabled == false then return end
+        if not operationalLog or (config.logging and config.logging.enabled == false) then return end
         -- History must never become a new failure mode for plant control.
         pcall(operationalLog.append, key, { severity=severity, subsystem=subsystem, values=values,
             pages=pages, retentionDays=config.logging and config.logging.retentionDays or 7 })
@@ -1856,7 +1860,9 @@ function mainframe.run(config)
             print("")
             buttons.network = ui.inlineButton("NETWORKING", colors.cyan)
             write(" ")
-            buttons.logs = ui.inlineButton(tr("log.button", nil, "CAPTAIN'S LOG"), colors.cyan)
+            if fs.exists("/helios/core/log_viewer.lua") then
+                buttons.logs = ui.inlineButton(tr("log.button", nil, "CAPTAIN'S LOG"), colors.cyan)
+            end
             write(" ")
             buttons.back = ui.inlineButton(tr("common.back", nil, "BACK"), colors.cyan)
             -- BACK occupies the last row on a 19-line mirrored terminal. Do not
@@ -1893,7 +1899,7 @@ function mainframe.run(config)
                 powerSettings()
             elseif (event == "key" and value == keys.a) or ui.hit(buttons.alarms, touchX, touchY) then
                 alarmSettings()
-            elseif ui.hit(buttons.logs, touchX, touchY) then
+            elseif buttons.logs and ui.hit(buttons.logs, touchX, touchY) then
                 dofile("/helios/core/log_viewer.lua").run(config)
                 restoreTimersAfterTextInput()
             elseif ui.hit(buttons.palette, touchX, touchY) then
@@ -1915,20 +1921,23 @@ function mainframe.run(config)
                     if module.id == config.ui.renderer then index = moduleIndex break end
                 end
                 while true do
-                    ui.header("GUI MODULES", "Installed graphical interfaces")
+                    ui.header(tr("gui.modules_title", nil, "GUI MODULES"),
+                        tr("gui.modules_subtitle", nil, "Installed graphical interfaces"))
                     local module = modules[index]
-                    ui.status("Selected", module.name, colors.cyan)
-                    ui.status("Module ID", module.id)
-                    ui.status("Minimum display", ("%dx%d characters"):format(
+                    ui.status(tr("gui.selected", nil, "Selected"), module.name, colors.cyan)
+                    ui.status(tr("gui.module_id", nil, "Module ID"), module.id)
+                    ui.status(tr("gui.minimum_display", nil, "Minimum display"), ("%dx%d characters"):format(
                         module.minimumWidth or 1, module.minimumHeight or 1))
                     print("")
-                    local previous = ui.inlineButton("< PREVIOUS", colors.cyan)
+                    local previous = ui.inlineButton(tr("gui.previous", nil, "< PREVIOUS"), colors.cyan)
                     write(" ")
-                    local nextButton = ui.inlineButton("NEXT >", colors.cyan)
+                    local nextButton = ui.inlineButton(tr("gui.next", nil, "NEXT >"), colors.cyan)
                     print("")
-                    local apply = ui.inlineButton("USE THIS GUI", colors.lime)
+                    local apply = ui.inlineButton(tr("gui.use", nil, "USE THIS GUI"), colors.lime)
                     write(" ")
-                    local back = ui.inlineButton("BACK", colors.cyan)
+                    local back = ui.inlineButton(tr("common.back", nil, "BACK"), colors.cyan)
+                    print("")
+                    local install = ui.inlineButton(tr("gui.install_github", nil, "INSTALL FROM GITHUB"), colors.orange)
                     print("")
                     local subEvent, subValue, subMessage, subProtocol = os.pullEvent()
                     local sx, sy = ui.eventPoint(subEvent, subValue, subMessage, subProtocol)
@@ -1941,6 +1950,59 @@ function mainframe.run(config)
                         config.ui.renderer = module.id
                         saveConfig()
                         break
+                    elseif ui.hit(install, sx, sy) then
+                        ui.prepare()
+                        print(tr("gui.install_title", nil, "INSTALL GUI FROM GITHUB"))
+                        print("")
+                        print(tr("gui.paste_folder", nil, "Paste the GitHub folder link containing manifest.lua."))
+                        print(tr("gui.example", nil, "Example:"))
+                        print("https://github.com/owner/repository/tree/main/gui-name")
+                        print("")
+                        write("> ")
+                        local source = read()
+                        source = source:gsub("^%s+", ""):gsub("%s+$", "")
+                        if source ~= "" then
+                            print("")
+                            print(tr("gui.inspecting", nil, "Inspecting GUI module..."))
+                            local preview, previewReason = guiLoader.preview(source, config.version)
+                            if preview then
+                                print(tr("gui.name", nil, "Name") .. ": " .. preview.name)
+                                print(tr("gui.version", nil, "Version") .. ": " .. preview.version)
+                                print(tr("gui.module_id", nil, "Module ID") .. ": " .. preview.id)
+                                print(tr("gui.download", nil, "Download") .. ": " .. tostring(preview.downloadBytes or 0) .. " bytes")
+                                print(tr("gui.source", nil, "Source") .. ": " .. tostring(preview.sourceUrl or source))
+                                print(tr("gui.trust_warning", nil,
+                                    "Only install GUIs from developers you trust. GUI code runs on this computer."))
+                                print("")
+                                print(tr("gui.confirm", nil, "Install this GUI? Type YES to confirm."))
+                                write("> ")
+                                local answer = string.upper(read() or "")
+                                if answer == "YES" or answer == "SI" or answer == "JA" or
+                                   answer == "OUI" or answer == "AYE" then
+                                    local installed, installReason = guiLoader.installPreview(preview, config.version)
+                                    if installed then
+                                        print(tr("gui.installed", { name = installed.name }, "Installed {name}."))
+                                        modules = guiLoader.scan(config.version)
+                                        for moduleIndex, candidate in ipairs(modules) do
+                                            if candidate.id == installed.id then index = moduleIndex break end
+                                        end
+                                    else
+                                        print(tr("gui.install_failed", { reason = tostring(installReason) },
+                                            "Installation failed: {reason}"))
+                                    end
+                                else
+                                    print(tr("gui.install_cancelled", nil, "Installation cancelled."))
+                                end
+                            else
+                                print(tr("gui.cannot_install", { reason = tostring(previewReason) },
+                                    "Cannot install this GUI: {reason}"))
+                            end
+                        else
+                            print(tr("gui.install_cancelled", nil, "Installation cancelled."))
+                        end
+                        print(tr("gui.return", nil, "Press ENTER to return to GUI Modules."))
+                        read()
+                        restoreTimersAfterTextInput()
                     elseif subEvent == "rednet_message" then handleNetwork(subValue, subMessage, subProtocol)
                     elseif subEvent == "timer" and subValue == reactorTimer then
                         pollReactors(); broadcastSnapshots(); reactorTimer = os.startTimer(1)

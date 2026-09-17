@@ -1,16 +1,11 @@
 local governor = {}
 local clearCooldown
 local saveProfile
+local calculations = dofile("/helios/core/calculations.lua")
 
 -- @section COMMON FUNCTIONS
-local function clamp(value, minimum, maximum)
-    return math.max(minimum, math.min(maximum, value))
-end
-
-local function round(value, places)
-    local scale = 10 ^ (places or 0)
-    return math.floor(value * scale + 0.5) / scale
-end
+local clamp = calculations.clamp
+local round = calculations.round
 
 local function hasConflict(context)
     local wanted = tonumber(context and context.mainframeId)

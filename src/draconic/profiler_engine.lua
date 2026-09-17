@@ -1,13 +1,9 @@
 local engine = {}
+local calculations = dofile("/helios/core/calculations.lua")
 
 local function number(value)
     value = tonumber(value)
     return value and value == value and value ~= math.huge and value ~= -math.huge and value or nil
-end
-
-local function percent(value, maximum)
-    value, maximum = number(value), number(maximum)
-    return value and maximum and maximum > 0 and value / maximum * 100 or nil
 end
 
 local function minimum(a, b)
@@ -41,9 +37,9 @@ function engine.normalize(payload, receivedAt)
         state = string.lower(tostring(payload.state or "unknown")),
         generation = number(payload.generationRate),
         temperature = number(payload.temperature),
-        field = percent(payload.fieldStrength, payload.maxFieldStrength),
-        saturation = percent(payload.energySaturation, payload.maxEnergySaturation),
-        fuel = percent(payload.fuelConversion, payload.maxFuelConversion),
+        field = calculations.percent(payload.fieldStrength, payload.maxFieldStrength),
+        saturation = calculations.percent(payload.energySaturation, payload.maxEnergySaturation),
+        fuel = calculations.percent(payload.fuelConversion, payload.maxFuelConversion),
         fieldInput = number(payload.fieldInput or payload.fieldGate),
         fieldDrain = number(payload.fieldDrainRate),
         export = number(payload.exportFlow or payload.exportGate),

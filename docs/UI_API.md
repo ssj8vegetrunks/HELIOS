@@ -101,3 +101,23 @@ built-in graphical interface.
 Use `helios gui list`, `helios gui set <id>`, `helios gui status`, or
 `helios gui install <raw-base-url>`. Selection is also available under
 Advanced > Settings > GUI Module.
+
+### Installing a third-party GUI
+
+The Mainframe GUI Modules screen includes **Install from GitHub**. Paste either:
+
+- a normal GitHub folder link such as
+  `https://github.com/owner/repository/tree/main/gui-name`;
+- a repository link when the GUI files are in that repository's `main` root; or
+- the equivalent `raw.githubusercontent.com` folder address.
+
+The selected folder must contain `manifest.lua` and the renderer named by its
+`entry` field. HELIOS downloads these into memory first and displays the GUI
+name, version, module ID, source, and download size. Nothing is written until
+the operator explicitly confirms the preview. Installation checks the Core/API
+compatibility and available space, stages both files, validates the installed
+module, and restores the previous copy if replacement fails.
+
+Third-party GUI code runs locally when selected, so operators must install only
+from developers they trust. A failed or incompatible renderer falls back to the
+built-in interface and cannot bypass the Core command and authority guards.

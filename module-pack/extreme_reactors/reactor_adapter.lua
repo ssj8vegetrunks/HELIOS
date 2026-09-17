@@ -1,5 +1,6 @@
 -- @section REACTOR PERIPHERAL ADAPTER
 local adapter = {}
+local calculations = dofile("/helios/core/calculations.lua")
 
 local function readAny(name, availableMethods, candidates)
     for _, method in ipairs(candidates) do
@@ -15,12 +16,6 @@ local function number(value)
     value = tonumber(value)
     if value ~= value then return nil end
     return value
-end
-
-local function percent(amount, maximum)
-    amount, maximum = number(amount), number(maximum)
-    if not amount or not maximum or maximum <= 0 then return nil end
-    return math.max(0, math.min(100, amount / maximum * 100))
 end
 
 local function availableMethods(name)
@@ -107,7 +102,7 @@ function adapter.read(device)
     end
 
     reactor.fuelPercent = percent(reactor.fuel, reactor.fuelMax)
-    reactor.energyPercent = percent(reactor.energy, reactor.energyMax)
+    reactor.energyPercent = calculations.percent(reactor.energy, reactor.energyMax)
     reactor.coolantPercent = percent(reactor.coolant, reactor.coolantMax)
     reactor.hotFluidPercent = percent(reactor.hotFluid, reactor.hotFluidMax)
 

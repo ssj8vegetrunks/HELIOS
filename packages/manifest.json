@@ -1,0 +1,380 @@
+{
+  "schema_version": 1,
+  "core_version": "1.6.0-alpha.27",
+  "packages": {
+    "core": {
+      "kind": "core",
+      "name": "HELIOS Core",
+      "required": [],
+      "files": [
+        {
+          "source": "src/helios.lua",
+          "path": "helios.lua",
+          "bytes": 20448
+        },
+        {
+          "source": "src/core/accessibility.lua",
+          "path": "core/accessibility.lua",
+          "bytes": 3683
+        },
+        {
+          "source": "src/core/calculations.lua",
+          "path": "core/calculations.lua",
+          "bytes": 1375
+        },
+        {
+          "source": "src/core/config.lua",
+          "path": "core/config.lua",
+          "bytes": 11550
+        },
+        {
+          "source": "src/core/i18n.lua",
+          "path": "core/i18n.lua",
+          "bytes": 4641
+        },
+        {
+          "source": "src/core/power_format.lua",
+          "path": "core/power_format.lua",
+          "bytes": 2927
+        },
+        {
+          "source": "src/lang/en_us.lua",
+          "path": "lang/en_us.lua",
+          "bytes": 18863
+        }
+      ]
+    },
+    "mainframe": {
+      "kind": "role",
+      "name": "Mainframe",
+      "required": [
+        "core",
+        "official_hardware"
+      ],
+      "files": [
+        {
+          "source": "src/core/boot.lua",
+          "path": "core/boot.lua",
+          "bytes": 4914
+        },
+        {
+          "source": "src/core/display.lua",
+          "path": "core/display.lua",
+          "bytes": 7066
+        },
+        {
+          "source": "src/core/facility_protocol.lua",
+          "path": "core/facility_protocol.lua",
+          "bytes": 8025
+        },
+        {
+          "source": "src/core/gui.lua",
+          "path": "core/gui.lua",
+          "bytes": 3556
+        },
+        {
+          "source": "src/core/gui_loader.lua",
+          "path": "core/gui_loader.lua",
+          "bytes": 8631
+        },
+        {
+          "source": "src/core/mainframe_authority.lua",
+          "path": "core/mainframe_authority.lua",
+          "bytes": 2106
+        },
+        {
+          "source": "src/core/module_loader.lua",
+          "path": "core/module_loader.lua",
+          "bytes": 5288
+        },
+        {
+          "source": "src/core/module_manager.lua",
+          "path": "core/module_manager.lua",
+          "bytes": 5967
+        },
+        {
+          "source": "src/core/network.lua",
+          "path": "core/network.lua",
+          "bytes": 3383
+        },
+        {
+          "source": "src/core/network_security.lua",
+          "path": "core/network_security.lua",
+          "bytes": 4819
+        },
+        {
+          "source": "src/core/ui.lua",
+          "path": "core/ui.lua",
+          "bytes": 5075
+        },
+        {
+          "source": "src/core/ui_contract.lua",
+          "path": "core/ui_contract.lua",
+          "bytes": 3726
+        },
+        {
+          "source": "src/mainframe/device_registry.lua",
+          "path": "mainframe/device_registry.lua",
+          "bytes": 4219
+        },
+        {
+          "source": "src/mainframe/main.lua",
+          "path": "mainframe/main.lua",
+          "bytes": 170893
+        },
+        {
+          "source": "src/mainframe/manual_control.lua",
+          "path": "mainframe/manual_control.lua",
+          "bytes": 1990
+        },
+        {
+          "source": "src/mainframe/reactor_governor.lua",
+          "path": "mainframe/reactor_governor.lua",
+          "bytes": 66372
+        },
+        {
+          "source": "src/mainframe/turbine_governor.lua",
+          "path": "mainframe/turbine_governor.lua",
+          "bytes": 46462
+        }
+      ]
+    },
+    "terminal": {
+      "kind": "role",
+      "name": "Remote Terminal",
+      "required": [
+        "core"
+      ],
+      "files": [
+        {
+          "source": "src/core/boot.lua",
+          "path": "core/boot.lua",
+          "bytes": 4914
+        },
+        {
+          "source": "src/core/display.lua",
+          "path": "core/display.lua",
+          "bytes": 7066
+        },
+        {
+          "source": "src/core/gui.lua",
+          "path": "core/gui.lua",
+          "bytes": 3556
+        },
+        {
+          "source": "src/core/gui_loader.lua",
+          "path": "core/gui_loader.lua",
+          "bytes": 8631
+        },
+        {
+          "source": "src/core/network.lua",
+          "path": "core/network.lua",
+          "bytes": 3383
+        },
+        {
+          "source": "src/core/network_security.lua",
+          "path": "core/network_security.lua",
+          "bytes": 4819
+        },
+        {
+          "source": "src/core/ui.lua",
+          "path": "core/ui.lua",
+          "bytes": 5075
+        },
+        {
+          "source": "src/core/ui_contract.lua",
+          "path": "core/ui_contract.lua",
+          "bytes": 3726
+        },
+        {
+          "source": "src/terminal/main.lua",
+          "path": "terminal/main.lua",
+          "bytes": 32253
+        }
+      ]
+    },
+    "guardian": {
+      "kind": "role",
+      "name": "Draconic Guardian",
+      "required": [
+        "core"
+      ],
+      "files": [
+        {
+          "source": "src/core/boot.lua",
+          "path": "core/boot.lua",
+          "bytes": 4914
+        },
+        {
+          "source": "src/core/facility_protocol.lua",
+          "path": "core/facility_protocol.lua",
+          "bytes": 8025
+        },
+        {
+          "source": "src/core/network.lua",
+          "path": "core/network.lua",
+          "bytes": 3383
+        },
+        {
+          "source": "src/core/network_security.lua",
+          "path": "core/network_security.lua",
+          "bytes": 4819
+        },
+        {
+          "source": "draconic_guardian.lua",
+          "path": "draconic/controller.lua",
+          "bytes": 81178
+        }
+      ]
+    },
+    "profiler": {
+      "kind": "role",
+      "name": "Draconic Profiler",
+      "required": [
+        "core"
+      ],
+      "files": [
+        {
+          "source": "src/core/network_security.lua",
+          "path": "core/network_security.lua",
+          "bytes": 4819
+        },
+        {
+          "source": "src/draconic/profiler.lua",
+          "path": "draconic/profiler.lua",
+          "bytes": 9906
+        },
+        {
+          "source": "src/draconic/profiler_engine.lua",
+          "path": "draconic/profiler_engine.lua",
+          "bytes": 7417
+        }
+      ]
+    },
+    "official_hardware": {
+      "kind": "hardware",
+      "name": "Official Hardware Modules",
+      "required": [
+        "core"
+      ],
+      "files": [
+        {
+          "source": "module-pack/manifest.json",
+          "path": "modules/manifest.json",
+          "bytes": 1555
+        },
+        {
+          "source": "module-pack/extreme_reactors/reactor_adapter.lua",
+          "path": "modules/extreme_reactors/reactor_adapter.lua",
+          "bytes": 16952
+        },
+        {
+          "source": "module-pack/extreme_reactors/turbine_adapter.lua",
+          "path": "modules/extreme_reactors/turbine_adapter.lua",
+          "bytes": 9482
+        },
+        {
+          "source": "module-pack/universal_energy/storage_adapter.lua",
+          "path": "modules/universal_energy/storage_adapter.lua",
+          "bytes": 10447
+        }
+      ]
+    },
+    "captains_log": {
+      "kind": "feature",
+      "name": "Captain's Log",
+      "required": [],
+      "files": [
+        {
+          "source": "src/core/event_log.lua",
+          "path": "core/event_log.lua",
+          "bytes": 7235
+        },
+        {
+          "source": "src/core/log_viewer.lua",
+          "path": "core/log_viewer.lua",
+          "bytes": 5434
+        }
+      ]
+    },
+    "control_room": {
+      "kind": "gui",
+      "name": "Control Room GUI",
+      "required": [
+        "core"
+      ],
+      "files": [
+        {
+          "source": "src/gui/control-room/manifest.lua",
+          "path": "gui/control-room/manifest.lua",
+          "bytes": 668
+        },
+        {
+          "source": "src/gui/control-room/renderer.lua",
+          "path": "gui/control-room/renderer.lua",
+          "bytes": 15559
+        }
+      ]
+    },
+    "discovery_probe": {
+      "kind": "tool",
+      "name": "Hardware Discovery Probe",
+      "required": [],
+      "files": [
+        {
+          "source": "discovery_probe.lua",
+          "path": "tools/discovery_probe.lua",
+          "bytes": 5843
+        }
+      ]
+    },
+    "language_de_de": {
+      "kind": "language",
+      "name": "de_de",
+      "required": [],
+      "files": [
+        {
+          "source": "src/lang/de_de.lua",
+          "path": "lang/de_de.lua",
+          "bytes": 19074
+        }
+      ]
+    },
+    "language_en_pi": {
+      "kind": "language",
+      "name": "en_pi",
+      "required": [],
+      "files": [
+        {
+          "source": "src/lang/en_pi.lua",
+          "path": "lang/en_pi.lua",
+          "bytes": 18745
+        }
+      ]
+    },
+    "language_es_es": {
+      "kind": "language",
+      "name": "es_es",
+      "required": [],
+      "files": [
+        {
+          "source": "src/lang/es_es.lua",
+          "path": "lang/es_es.lua",
+          "bytes": 18090
+        }
+      ]
+    },
+    "language_fr_ca": {
+      "kind": "language",
+      "name": "fr_ca",
+      "required": [],
+      "files": [
+        {
+          "source": "src/lang/fr_ca.lua",
+          "path": "lang/fr_ca.lua",
+          "bytes": 19638
+        }
+      ]
+    }
+  }
+}

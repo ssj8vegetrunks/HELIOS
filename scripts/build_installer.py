@@ -1,46 +1,18 @@
 #!/usr/bin/env python3
-"""Rebuild install.lua's embedded FILES table from src/."""
+"""Compatibility entrypoint for the modular HELIOS packaging build."""
 
+import subprocess
+import sys
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-INSTALLER = ROOT / "install.lua"
-START = "FILES = {\n"
-END = "\n}\n\nlocal function installStartup()"
-
-
-def lua_long_string(text: str) -> str:
-    equals = "="
-    while f"]{equals}]" in text:
-        equals += "="
-    return f"[{equals}[\n{text.rstrip()}\n]{equals}]"
 
 
 def main() -> None:
-    installer = INSTALLER.read_text(encoding="utf-8")
-    before, remainder = installer.split(START, 1)
-    _, after = remainder.split(END, 1)
-
-    entries = []
-    for source in sorted((ROOT / "src").rglob("*.lua")):
-        relative = source.relative_to(ROOT / "src").as_posix()
-        entries.append(f'    ["{relative}"] = {lua_long_string(source.read_text(encoding="utf-8"))},')
-
-    # The probe intentionally remains a single downloadable file at the
-    # repository root, while the installer also exposes it as `helios probe`.
-    probe = ROOT / "discovery_probe.lua"
-    entries.append(
-        f'    ["tools/discovery_probe.lua"] = {lua_long_string(probe.read_text(encoding="utf-8"))},'
-    )
-    guardian = ROOT / "draconic_guardian.lua"
-    entries.append(
-        f'    ["draconic/controller.lua"] = {lua_long_string(guardian.read_text(encoding="utf-8"))},'
-    )
-
-    rebuilt = before + START + "\n\n".join(entries) + END + after
-    INSTALLER.write_text(rebuilt, encoding="utf-8")
-    print(f"Embedded {len(entries)} Lua programs in {INSTALLER.name}")
+    subprocess.run([sys.executable, str(ROOT / "scripts" / "build_packages.py")], check=True)
+    installer = ROOT / "install.lua"
+    print(f"Modular bootstrap: {installer.stat().st_size} bytes ({installer.name})")
 
 
 if __name__ == "__main__":

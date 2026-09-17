@@ -1,0 +1,15 @@
+local calculations = dofile("src/core/calculations.lua")
+
+assert(calculations.apiVersion == 1)
+assert(calculations.number("12.5") == 12.5)
+assert(calculations.number(0 / 0) == nil)
+assert(calculations.clamp(120, 0, 100) == 100)
+assert(calculations.clamp(-1, 0, 100) == 0)
+assert(calculations.round(1.25, 1) == 1.3)
+assert(calculations.round(-1.6) == -2)
+assert(calculations.percent(25, 50) == 50)
+assert(calculations.percent(5, 0) == nil)
+assert(calculations.normalizedPercent(0.75, nil, nil) == 75)
+assert(calculations.normalizedPercent(150, nil, nil) == 100)
+
+print("Shared calculations tests passed")

@@ -1,13 +1,9 @@
 local governor = {}
+local calculations = dofile("/helios/core/calculations.lua")
 
 -- @section COMMON FUNCTIONS
-local function clamp(value, minimum, maximum)
-    return math.max(minimum, math.min(maximum, value))
-end
-
-local function round(value)
-    return math.floor(value + 0.5)
-end
+local clamp = calculations.clamp
+local round = calculations.round
 
 local function contains(list, wanted)
     for _, value in ipairs(list or {}) do

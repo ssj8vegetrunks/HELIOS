@@ -4,15 +4,15 @@
 
 | Path | Purpose | Hardware writes |
 |---|---|---|
-| `install.lua` | HELIOS Mainframe/Remote/Guardian installer, with hidden debug utilities | Only after role setup and explicit operation |
+| `install.lua` | Small modular bootstrap for all HELIOS computer roles | No |
+| `packages/manifest.json` | Explicit Core, role, feature, language, GUI, and tool packages | No |
 | `discovery_probe.lua` | Standalone peripheral and method inventory | No |
 | `draconic_guardian.lua` | Standalone Draconic Reactor Guardian | Yes, guarded and locally authoritative |
 | `module-template/` | Copyable Lua developer starter | No; actuator examples fail closed |
 
-The installer presents Mainframe and Remote Terminal as HELIOS computer roles.
-The read-only Probe and Draconic Guardian are selected from the separate
-`Modules` submenu. The read-only Draconic Profiler remains available only
-through the hidden maintainer/debug path.
+The bootstrap presents Mainframe, Remote Terminal, Draconic Guardian, and
+Draconic Profiler as separate roles. The read-only Probe, Captain's Log,
+Control Room GUI, and non-English languages are optional packages.
 
 ## Repository layout
 
@@ -37,6 +37,8 @@ HELIOS/
 |   |-- manifest.json
 |   |-- extreme_reactors/
 |   `-- universal_energy/
+|-- packages/
+|   `-- manifest.json
 |-- src/
 |   |-- core/
 |   |-- draconic/
@@ -56,13 +58,13 @@ HELIOS/
 |-- helios.lua
 |-- core/
 |-- data/            (persistent local state and facility registry)
-|-- draconic/        (Draconic Guardian and Profiler roles)
-|-- gui/
+|-- draconic/        (only on Guardian or Profiler roles)
+|-- gui/             (only selected GUI packages)
 |-- lang/            (English fallback and installed language packs)
-|-- mainframe/       (Mainframe role)
-|-- terminal/        (Remote role)
+|-- mainframe/       (only on Mainframe role)
+|-- terminal/        (only on Remote Terminal role)
 |-- modules/         (Mainframe role; downloaded Module Pack)
-`-- tools/
+`-- tools/           (only selected tool packages)
     `-- discovery_probe.lua
 ```
 

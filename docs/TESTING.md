@@ -1,5 +1,22 @@
 # Public Alpha testing guide
 
+## Modular installation checks
+
+For each role, start from a fresh CC:Tweaked computer and run the bootstrap. Confirm that
+`helios status` reports the selected role and that unrelated role directories are absent:
+
+- Mainframe: `/helios/mainframe` and `/helios/modules` exist; `/helios/terminal` and
+  `/helios/draconic` do not.
+- Remote Terminal: `/helios/terminal` exists; Mainframe hardware modules and Draconic role files do
+  not.
+- Draconic Guardian: `/helios/draconic/controller.lua` exists; Mainframe and Terminal files do not.
+- Draconic Profiler: only the profiler files exist under `/helios/draconic`.
+
+Repeat a Mainframe upgrade from Alpha 26 with little free space. Configuration, calibration,
+facility data, custom names, installed languages, and `/helios/data` must survive. Deselecting
+Captain's Log, the Control Room GUI, or the discovery probe must leave those optional program files
+absent while normal control and the dependable built-in interface continue operating.
+
 ## Before testing
 
 1. Back up the ComputerCraft computer directory or test on a fresh computer.

@@ -37,11 +37,13 @@ advertised to a HELIOS Mainframe over `helios.facility.v1`.
 
 Start with the [tester guide](docs/TESTING.md), [site map](docs/SITE_MAP.md),
 [dependency map](docs/DEPENDENCY_MAP.md), [language-pack contract](docs/LANGUAGE_PACKS.md),
-[accessibility guide](docs/ACCESSIBILITY.md),
+[accessibility guide](docs/ACCESSIBILITY.md), [storage guide](docs/STORAGE.md),
 or [module template](module-template/README.md).
 
-Core `1.6.0-alpha.26` includes English (`en_us`), Canadian French (`fr_ca`), Spanish (`es_es`), and
-German (`de_de`). English remains the automatic fallback for incomplete packs.
+Core `1.6.0-alpha.27` keeps English (`en_us`) locally as the dependable fallback. Canadian French
+(`fr_ca`), Spanish (`es_es`), German (`de_de`), and Pirate English (`en_pi`) are optional packs:
+`helios language install <id>`. This keeps complete HELIOS control and safety local without making
+every computer store every translation.
 Fresh installations use HELIOS High Contrast by default; upgrades preserve the user's selected palette.
 
 > Public Alpha means the interfaces are testable, not yet final. Please include
@@ -71,10 +73,12 @@ layout with aggregate plant dials and a live governor-activity panel. Select it
 under Advanced > Settings > GUI Module or run `helios gui set control-room`.
 Smaller displays automatically retain the built-in interface.
 
-HELIOS Core and its peripheral adapters are now independently versioned. The
-mainframe installer retrieves the official Module Pack from GitHub; remote
-terminals install Core only. The tested reactor, turbine, and storage adapter
-logic is unchanged in this first modular release.
+HELIOS now uses a small modular bootstrap. It reads `packages/manifest.json`,
+then downloads only shared Core, the selected computer role, its required
+dependencies, and operator-selected features. A Mainframe receives the official
+hardware adapters; Terminals, Guardians, and Profilers do not. Guardian code is
+never installed on a Mainframe. The tested reactor, turbine, and storage adapter
+logic remains independently versioned in the official Module Pack.
 
 This milestone adds guarded reactor steam regulation to the automatic turbine
 governor. HELIOS now matches steam-reactor output to the trusted intake
@@ -171,7 +175,8 @@ The existing touch interface and network-ID protection remain online:
 
 The existing telemetry foundation includes:
 
-- one installer for both machine roles;
+- one small bootstrap for Mainframe, Terminal, Guardian, and Profiler roles;
+- explicit package manifests prevent new source files from silently entering every installation;
 - persistent `mainframe` or `terminal` configuration;
 - terminal assignments for `reactor`, `turbine`, `battery`, or `all`;
 - one role-aware launcher;
@@ -220,6 +225,8 @@ helios reactors
 helios turbines
 helios storage
 helios logs
+helios archive status
+helios language list
 helios modules update
 ```
 
@@ -231,6 +238,7 @@ The installed layout is:
   config.lua
   helios.lua
   core/
+    calculations.lua
     config.lua
     display.lua
     module_loader.lua
@@ -252,7 +260,7 @@ The installed layout is:
       storage_adapter.lua
   terminal/
     main.lua
-/startup/99-helios.lua
+/startup/50-helios.lua
 ```
 
 See [`docs/MODULE_API.md`](docs/MODULE_API.md) for the manifest, compatibility,

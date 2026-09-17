@@ -19,6 +19,31 @@ function formatter.convert(value, powerConfig)
     return value * ratio
 end
 
+-- Convert a device's native energy value back to HELIOS's FE base unit.
+function formatter.toBase(value, nativeUnit, powerConfig)
+    value = tonumber(value)
+    if not value then return nil end
+    if nativeUnit == "FE" then return value end
+    local fallback = nativeUnit == "J" and 2.5 or 1
+    local ratio = tonumber(((powerConfig or {}).ratios or {})[nativeUnit]) or fallback
+    if ratio <= 0 then return nil end
+    return value / ratio
+end
+
+function formatter.duration(seconds)
+    seconds = tonumber(seconds)
+    if not seconds or seconds ~= seconds or seconds == math.huge then return "N/A" end
+    seconds = math.max(0, math.floor(seconds + 0.5))
+    local days = math.floor(seconds / 86400)
+    local hours = math.floor((seconds % 86400) / 3600)
+    local minutes = math.floor((seconds % 3600) / 60)
+    local remaining = seconds % 60
+    if days > 0 then return ("%dd %dh"):format(days, hours) end
+    if hours > 0 then return ("%dh %dm"):format(hours, minutes) end
+    if minutes > 0 then return ("%dm %ds"):format(minutes, remaining) end
+    return remaining .. "s"
+end
+
 function formatter.number(value, powerConfig)
     value = tonumber(value)
     if not value then return "N/A" end

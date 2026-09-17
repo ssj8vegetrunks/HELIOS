@@ -3,20 +3,21 @@
 HELIOS language packs are data-only Lua tables stored in `/helios/lang/`.
 Official packs currently include English (US), Canadian French, German,
 Spanish, and the optional Pirate translation.
-English (`en_us`) is always installed and is the fallback for every missing
-translation. Canadian French (`fr_ca`) and German (`de_de`) are the supported
-installer choices in this release. A damaged, incomplete, or absent selected pack therefore
-cannot produce blank labels or disable controls.
+English (`en_us`) is part of Core and is always the fallback for every missing
+translation. Every other official language is a separate downloadable package.
+A damaged, incomplete, or absent selected pack therefore cannot produce blank
+labels or disable controls.
 
 ## Selecting a language
 
-The installer asks for language before showing any installation category or
-configuration screen. That choice controls the rest of the installer and is
-written directly to the new HELIOS configuration. On an upgrade, the existing
-language is marked as the current choice but the operator may change it.
+The bootstrap asks which runtime language package to install and writes that
+selection to the new HELIOS configuration. The compact bootstrap itself uses
+English so it does not need to carry every translation. On an upgrade, the
+existing language is marked as the current choice but may be changed.
 
 ```text
 helios language list
+helios language install fr_ca
 helios language set fr_ca
 ```
 

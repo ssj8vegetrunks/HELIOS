@@ -4,6 +4,16 @@ This directory is a copyable starting point for peripheral support. The example
 is intentionally read-only and fails closed. It is not loaded by HELIOS merely
 because it exists in the repository.
 
+Generic mathematics is supplied by HELIOS Core:
+
+```lua
+local calculations = dofile("/helios/core/calculations.lua")
+```
+
+Use that versioned interface for percentages, clamping, rounding, finite-number
+checks, and normalized percentages instead of copying those formulas into a
+module. Hardware-specific peripheral translation remains inside the module.
+
 ## Developer workflow
 
 1. Run the standalone Probe against the target hardware.

@@ -1,10 +1,15 @@
 # HELIOS Captain's Log
 
+Captain's Log history uses a HELIOS archive disk when one has been attached with
+`helios archive attach`. Without one, HELIOS retains only a 48 KiB local troubleshooting window so
+optional history cannot consume the space required by control and safety. See [STORAGE.md](STORAGE.md).
+
 HELIOS stores operational history as a small navigable archive rather than a
 scrolling terminal. Run `helios logs` and choose a day, an hour, and then an
 event. Each event opens as a book whose detail pages are shown one at a time.
 
-The archive lives under `/helios/data/logs/`:
+The local archive lives under `/helios/data/logs/`; an attached archive disk uses
+`<disk>/helios-archive/logs/`:
 
 ```text
 logs/

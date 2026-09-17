@@ -3,7 +3,70 @@ local args = { ... }
 local config = dofile("/helios/core/config.lua").load()
 
 if args[1] == "logs" then
+    if not fs.exists("/helios/core/log_viewer.lua") then
+        error("Captain's Log is not installed on this computer.", 0)
+    end
     dofile("/helios/core/log_viewer.lua").run(config, args[2], args[3])
+    return
+end
+
+if args[1] == "archive" then
+    if not fs.exists("/helios/core/event_log.lua") then
+        error("Captain's Log is not installed on this computer.", 0)
+    end
+    local action = args[2] or "status"
+    local markerName = ".helios-storage"
+    local computerId = os.getComputerID and os.getComputerID() or 0
+    local function externalMounts()
+        local mounts, localDrive = {}, fs.getDrive and fs.getDrive("/") or "hdd"
+        if fs.getDrive then
+            for _, name in ipairs(fs.list("/")) do
+                local path = "/" .. name
+                if fs.isDir(path) and fs.getDrive(path) ~= localDrive then mounts[#mounts + 1] = path end
+            end
+        end
+        table.sort(mounts);return mounts
+    end
+    if action == "status" then
+        local state = dofile("/helios/core/event_log.lua").storage()
+        print("Captain's Log storage: " .. state.path)
+        print(state.external and "HELIOS archive disk online." or "Using limited local computer storage.")
+    elseif action == "attach" then
+        local wanted = args[3]
+        if wanted and wanted:sub(1, 1) ~= "/" then wanted = "/" .. wanted end
+        local mounts = externalMounts()
+        local mount = wanted
+        if not mount then
+            if #mounts ~= 1 then error("Attach one writable disk, or use: helios archive attach <mount>", 0) end
+            mount = mounts[1]
+        end
+        local valid = false
+        for _, candidate in ipairs(mounts) do if candidate == mount then valid = true break end end
+        if not valid then error("That path is not an attached data disk: " .. tostring(mount), 0) end
+        local marker = fs.combine(mount, markerName)
+        local handle, reason = fs.open(marker, "w")
+        if not handle then error("The disk is not writable: " .. tostring(reason), 0) end
+        handle.write(textutils.serialize({ kind = "helios-archive", computerId = computerId, version = 1 }));handle.close()
+        fs.makeDir(fs.combine(mount, "helios-archive/logs"))
+        print("HELIOS archive disk attached at " .. mount .. ".")
+        print("Control and safety remain on the computer if this disk is removed.")
+    elseif action == "detach" then
+        local removed = 0
+        for _, mount in ipairs(externalMounts()) do
+            local marker = fs.combine(mount, markerName)
+            if fs.exists(marker) then
+                local handle = fs.open(marker, "r")
+                local value = handle and textutils.unserialize(handle.readAll()) or nil
+                if handle then handle.close() end
+                if type(value) == "table" and value.kind == "helios-archive" and value.computerId == computerId then
+                    fs.delete(marker);removed = removed + 1
+                end
+            end
+        end
+        print("Detached " .. removed .. " HELIOS archive disk(s). Existing archives were not deleted.")
+    else
+        error("Usage: helios archive [status|attach <mount>|detach]", 0)
+    end
     return
 end
 
@@ -51,10 +114,53 @@ end
 if args[1] == "language" then
     local i18n = dofile("/helios/core/i18n.lua")
     local action = args[2] or "list"
+    local catalog = { de_de = "Deutsch", en_pi = "Pirate English", es_es = "Espanol", fr_ca = "Francais (Canada)" }
+    local catalogOrder = { "de_de", "en_pi", "es_es", "fr_ca" }
+    local baseUrl = "https://raw.githubusercontent.com/ssj8vegetrunks/HELIOS/testing/public-alpha/src/lang/"
+    local function download(id)
+        if not catalog[id] then error("Unknown HELIOS language pack: " .. tostring(id), 0) end
+        if not http or type(http.get) ~= "function" then error("HTTP is disabled; language pack cannot be downloaded.", 0) end
+        local response, reason = http.get(baseUrl .. id .. ".lua")
+        if not response then error("Language download failed: " .. tostring(reason), 0) end
+        local contents = response.readAll();response.close()
+        local temporary = "/helios/lang/." .. id .. ".download"
+        local handle, writeReason = fs.open(temporary, "w")
+        if not handle then error("Could not save language pack: " .. tostring(writeReason), 0) end
+        handle.write(contents);handle.close()
+        local ok, pack = pcall(dofile, temporary)
+        if not ok or type(pack) ~= "table" or pack.id ~= id or type(pack.strings) ~= "table" then
+            fs.delete(temporary);error("Downloaded language pack is invalid.", 0)
+        end
+        local destination = "/helios/lang/" .. id .. ".lua"
+        if fs.exists(destination) then fs.delete(destination) end
+        fs.move(temporary, destination)
+        return pack
+    end
     if action == "list" then
         for _, pack in ipairs(i18n.available()) do
             print((pack.id == config.ui.language and "* " or "  ") .. pack.id .. " - " .. pack.name)
         end
+        print("Available downloads:")
+        for _, id in ipairs(catalogOrder) do
+            local name = catalog[id]
+            if not fs.exists("/helios/lang/" .. id .. ".lua") then print("  " .. id .. " - " .. name) end
+        end
+    elseif action == "install" then
+        local id = tostring(args[3] or "")
+        local pack = download(id)
+        print("Installed " .. pack.name .. ". Use: helios language set " .. id)
+    elseif action == "remove" then
+        local id = tostring(args[3] or "")
+        if id == "en_us" then error("English is the required HELIOS fallback and cannot be removed.", 0) end
+        if not catalog[id] then error("Unknown HELIOS language pack: " .. id, 0) end
+        local path = "/helios/lang/" .. id .. ".lua"
+        if fs.exists(path) then fs.delete(path) end
+        if config.ui.language == id then
+            config.ui.language = "en_us"
+            local ok, reason = dofile("/helios/core/config.lua").save(config)
+            if not ok then error("Could not save HELIOS configuration: " .. tostring(reason), 0) end
+        end
+        print("Removed " .. id .. ".")
     elseif action == "set" then
         local wanted, found = tostring(args[3] or ""), false
         for _, pack in ipairs(i18n.available()) do if pack.id == wanted then found = true break end end
@@ -64,7 +170,7 @@ if args[1] == "language" then
         if not ok then error("Could not save HELIOS configuration: " .. tostring(reason), 0) end
         print("HELIOS language set to " .. wanted .. ". Restart HELIOS to apply it.")
     else
-        error("Usage: helios language [list|set <language_id>]", 0)
+        error("Usage: helios language [list|install <id>|remove <id>|set <id>]", 0)
     end
     return
 end
@@ -110,17 +216,26 @@ if args[1] == nil and config.role == "profiler" then
 end
 
 if args[1] == "probe" then
+    if not fs.exists("/helios/tools/discovery_probe.lua") then
+        error("The discovery probe is not installed on this computer.", 0)
+    end
     dofile("/helios/tools/discovery_probe.lua")
     return
 end
 
 if args[1] == "draconic" then
+    if not fs.exists("/helios/draconic/guardian.lua") then
+        error("The legacy Draconic diagnostic module is not installed on this computer.", 0)
+    end
     local guardian = dofile("/helios/draconic/guardian.lua")
     guardian.run(args[2] or "check")
     return
 end
 
 if args[1] == "gui" then
+    if not fs.exists("/helios/core/gui_loader.lua") then
+        error("Graphical interface management is not installed for this computer role.", 0)
+    end
     local loader = dofile("/helios/core/gui_loader.lua")
     local action = args[2] or "status"
     if action == "list" or action == "rescan" then

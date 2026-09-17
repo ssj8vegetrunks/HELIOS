@@ -1,5 +1,6 @@
 -- @section TURBINE PERIPHERAL ADAPTER
 local adapter = {}
+local calculations = dofile("/helios/core/calculations.lua")
 
 local function readAny(name, availableMethods, candidates)
     for _, method in ipairs(candidates) do
@@ -15,12 +16,6 @@ local function number(value)
     value = tonumber(value)
     if value ~= value then return nil end
     return value
-end
-
-local function percent(amount, maximum)
-    amount, maximum = number(amount), number(maximum)
-    if not amount or not maximum or maximum <= 0 then return nil end
-    return math.max(0, math.min(100, amount / maximum * 100))
 end
 
 local function availableMethods(name)
@@ -64,9 +59,9 @@ function adapter.read(device)
     turbine.coilCount = number(readAny(name, availableMethods, { "getCoilSize", "getCoilCount", "coilSize" }))
     turbine.efficiency = number(readAny(name, availableMethods, { "getRotorEfficiencyLastTick", "getEfficiency", "rotorEfficiencyLastTick" }))
 
-    turbine.energyPercent = percent(turbine.energy, turbine.energyMax)
-    turbine.inputPercent = percent(turbine.inputAmount, turbine.inputMax)
-    turbine.outputPercent = percent(turbine.outputAmount, turbine.outputMax)
+    turbine.energyPercent = calculations.percent(turbine.energy, turbine.energyMax)
+    turbine.inputPercent = calculations.percent(turbine.inputAmount, turbine.inputMax)
+    turbine.outputPercent = calculations.percent(turbine.outputAmount, turbine.outputMax)
 
     local useful = turbine.active ~= nil or turbine.rotorSpeed ~= nil or turbine.energyProduction ~= nil
     if turbine.connected == false then

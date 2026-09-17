@@ -1,4 +1,5 @@
 local renderer = {}
+local calculations = dofile("/helios/core/calculations.lua")
 
 local function sum(list, field)
     local total = 0
@@ -33,12 +34,6 @@ local function displayedReactors(snapshot)
     for _, reactor in ipairs(snapshot.reactors or {}) do result[#result + 1] = reactor end
     for _, reactor in ipairs(snapshot.facilityReactors or {}) do result[#result + 1] = reactor end
     return result
-end
-
-local function percent(value, maximum)
-    value, maximum = tonumber(value), tonumber(maximum)
-    if not value or not maximum or maximum <= 0 then return nil end
-    return math.max(0, math.min(100, value / maximum * 100))
 end
 
 function renderer.render(snapshot, state, services)
@@ -156,9 +151,9 @@ function renderer.render(snapshot, state, services)
             gui.text(1, 7, ("%d/%d  %s"):format(state.selected[key], #list, nameOf(item.name, snapshot)), colors.cyan)
             local row = 9
             if item.facility then
-                local fieldPercent = percent(item.fieldStrength, item.maxFieldStrength)
-                local saturationPercent = percent(item.energySaturation, item.maxEnergySaturation)
-                local fuelPercent = percent(item.fuelConversion, item.maxFuelConversion)
+                local fieldPercent = calculations.percent(item.fieldStrength, item.maxFieldStrength)
+                local saturationPercent = calculations.percent(item.energySaturation, item.maxEnergySaturation)
+                local fuelPercent = calculations.percent(item.fuelConversion, item.maxFuelConversion)
                 local details = {
                     {tr("common.type", "TYPE"), "DRACONIC / " .. tr("common.guardian", "GUARDIAN"), colors.magenta},
                     {tr("common.link", "LINK"), tv(item.online and "ONLINE" or "STALE"), item.online and colors.lime or colors.orange},
