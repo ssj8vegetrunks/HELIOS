@@ -1171,4 +1171,3 @@ local ok,reason=pcall(parallel.waitForAny,
   resilient("facility network",facilityWorker),resilient("profiler",profilerWorker))
 emergencyHold(ok and "Guardian control loop stopped" or reason)
 if not ok then error(reason,0) end
-
