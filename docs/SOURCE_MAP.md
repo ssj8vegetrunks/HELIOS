@@ -4,7 +4,7 @@
 
 Core version: **1.6.0-alpha.27**
 
-The bootstrap `install.lua` is 327 readable lines and contains no runtime payload.
+The bootstrap `install.lua` is 329 readable lines and contains no runtime payload.
 It downloads only the packages selected for one computer from `packages/manifest.json`.
 
 ## Packages

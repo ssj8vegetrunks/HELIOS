@@ -5,6 +5,7 @@ local VERSION = "1.6.0-alpha.27"
 local BASE_URL = "https://raw.githubusercontent.com/ssj8vegetrunks/HELIOS/testing/public-alpha"
 local MANIFEST_URL = BASE_URL .. "/packages/manifest.json"
 local INSTALL_DIR, LOCAL_STAGE = "/helios", "/.helios-install"
+local DOWNLOAD_NONCE = tostring(os.epoch and os.epoch("utc") or os.getComputerID())
 
 local function colour(value) if term.isColor() then term.setTextColor(value) end end
 local function title(value)
@@ -60,7 +61,8 @@ local function fetch(url)
     if not http or type(http.get) ~= "function" then
         error("CC:Tweaked HTTP is disabled. Enable HTTP and run the HELIOS installer again.", 0)
     end
-    local response, reason = http.get(url)
+    local separator = url:find("?", 1, true) and "&" or "?"
+    local response, reason = http.get(url .. separator .. "helios_install=" .. DOWNLOAD_NONCE)
     if not response then error("Could not download " .. url .. ": " .. tostring(reason), 0) end
     local contents = response.readAll();response.close();return contents
 end
