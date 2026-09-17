@@ -101,10 +101,10 @@ function adapter.read(device)
             (100 - reactor.controlRodLevel) / 100
     end
 
-    reactor.fuelPercent = percent(reactor.fuel, reactor.fuelMax)
+    reactor.fuelPercent = calculations.percent(reactor.fuel, reactor.fuelMax)
     reactor.energyPercent = calculations.percent(reactor.energy, reactor.energyMax)
-    reactor.coolantPercent = percent(reactor.coolant, reactor.coolantMax)
-    reactor.hotFluidPercent = percent(reactor.hotFluid, reactor.hotFluidMax)
+    reactor.coolantPercent = calculations.percent(reactor.coolant, reactor.coolantMax)
+    reactor.hotFluidPercent = calculations.percent(reactor.hotFluid, reactor.hotFluidMax)
 
     if reactor.activelyCooled == true then
         reactor.mode = "steam"

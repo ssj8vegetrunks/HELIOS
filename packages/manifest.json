@@ -266,7 +266,7 @@
         {
           "source": "module-pack/extreme_reactors/reactor_adapter.lua",
           "path": "modules/extreme_reactors/reactor_adapter.lua",
-          "bytes": 16952
+          "bytes": 16991
         },
         {
           "source": "module-pack/extreme_reactors/turbine_adapter.lua",
