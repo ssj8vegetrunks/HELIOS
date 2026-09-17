@@ -20,7 +20,7 @@ local function confirm(prompt, defaultYes)
     if answer == "" then return defaultYes == true end
     return answer == "y" or answer == "yes"
 end
-local function choose(prompt, options, defaultIndex)
+local function choose(prompt, options, defaultIndex, hiddenOptions)
     while true do
         print(prompt)
         for index, option in ipairs(options) do
@@ -28,10 +28,33 @@ local function choose(prompt, options, defaultIndex)
         end
         write("> ");local answer = read()
         if answer == "" and defaultIndex then return options[defaultIndex].value end
+        local hidden = hiddenOptions and hiddenOptions[answer:lower()]
+        if hidden then return hidden end
         local index = tonumber(answer)
         if index and options[index] then return options[index].value end
         colour(colors.red);print("Please enter a number from the list.");colour(colors.white)
     end
+end
+local function selectLanguage(existing)
+    title("Language / Idioma / Langue / Sprache")
+    local options = {
+        {label="English (US)",value="en_us"},{label="Francais (Canada)",value="fr_ca"},
+        {label="Deutsch",value="de_de"},{label="Espanol",value="es_es"},
+    }
+    local selected = 1
+    for index, option in ipairs(options) do if option.value == existing then selected = index end end
+    return choose("Select installer language:", options, selected, { p = "en_pi" })
+end
+local function selectAccessibility(existing)
+    title("Accessibility")
+    local options = {
+        {label="High contrast (HELIOS default)",value="high_contrast"},
+        {label="Classic",value="standard"},{label="Deuteranopia",value="deuteranopia"},
+        {label="Protanopia",value="protanopia"},{label="Tritanopia",value="tritanopia"},
+    }
+    local selected = 1
+    for index, option in ipairs(options) do if option.value == existing then selected = index end end
+    return choose("Select accessibility colour profile:", options, selected)
 end
 local function fetch(url)
     if not http or type(http.get) ~= "function" then
@@ -153,11 +176,11 @@ local function installStartup()
     if fs.exists("/startup/99-helios.lua") then fs.delete("/startup/99-helios.lua") end
     writeFile("/startup/50-helios.lua", 'shell.run("/helios/helios.lua")\n');return true
 end
-local function configure(previous, role, language, logging, renderer, display, guardianId, networkEnabled, networkKey)
+local function configure(previous, role, language, accessibility, logging, renderer, display, guardianId, networkEnabled, networkKey)
     local config = previous or {}
     config.version = VERSION;config.role = role;config.computerId = os.getComputerID();config.display = display
     config.ui = config.ui or {};config.ui.language = language
-    config.ui.accessibilityProfile = config.ui.accessibilityProfile or "high_contrast"
+    config.ui.accessibilityProfile = accessibility or "high_contrast"
     config.ui.statusSymbols = config.ui.statusSymbols ~= false;config.ui.renderer = renderer or "default"
     config.network = config.network or {};if role == "profiler" then config.network.guardianId = guardianId end
     config.network.securityEnabled = networkEnabled == true
@@ -169,47 +192,59 @@ local function configure(previous, role, language, logging, renderer, display, g
 end
 
 local function run()
-    local previous = existingConfig();title("Modular Installer")
-    local roles = {
-        {label="Mainframe",value="mainframe"},{label="Remote Terminal",value="terminal"},
-        {label="Draconic Guardian",value="guardian"},{label="Draconic Profiler",value="profiler"},
-    }
-    local defaultRole = 1
-    if previous then for index, item in ipairs(roles) do if item.value == previous.role then defaultRole = index end end end
-    local role = choose("Select this computer's role:", roles, defaultRole)
-    local languages = {
-        {label="English",value="en_us"},{label="Espanol",value="es_es"},
-        {label="Francais (Canada)",value="fr_ca"},{label="Deutsch",value="de_de"},
-        {label="Pirate English",value="en_pi"},
-    }
-    local defaultLanguage, oldLanguage = 1, previous and previous.ui and previous.ui.language
-    for index, item in ipairs(languages) do if item.value == oldLanguage then defaultLanguage = index end end
-    local language = choose("Select a language pack:", languages, defaultLanguage)
+    local previous = existingConfig()
+    local previousUi = previous and previous.ui or {}
+    local language = selectLanguage(previousUi.language)
+    local accessibility = selectAccessibility(previousUi.accessibilityProfile)
+    title("Modular Installer")
+    local defaultCategory = previous and previous.role == "terminal" and 2 or
+        (previous and (previous.role == "guardian" or previous.role == "profiler") and 3 or 1)
+    local category = choose("Select an installation category:", {
+        {label="Install Mainframe",value="mainframe"},
+        {label="Install Remote Terminal",value="terminal"},
+        {label="Modules",value="modules"},
+    }, defaultCategory)
+    local role = category
+    if category == "modules" then
+        title("Modules")
+        local module = choose("Select a module:", {
+            {label="Hardware Probe (run once, read-only)",value="probe"},
+            {label="Draconic Reactor Guardian",value="guardian"},
+        }, previous and previous.role == "guardian" and 2 or 1, { d = "profiler" })
+        if module == "probe" then
+            title("Hardware Probe")
+            local temporary = "/.helios-probe-run.lua"
+            if fs.exists(temporary) then fs.delete(temporary) end
+            writeFile(temporary, fetch(BASE_URL .. "/discovery_probe.lua"))
+            local ran, probeReason = shell.run(temporary)
+            if fs.exists(temporary) then fs.delete(temporary) end
+            if not ran then error("Hardware Probe failed: " .. tostring(probeReason), 0) end
+            return
+        end
+        role = module
+    end
     local requested, logging = { role }, false
     if language ~= "en_us" then requested[#requested + 1] = "language_" .. language end
     if role == "mainframe" then
+        title("Optional Features")
         logging = confirm("Install Captain's Log?", previous == nil or not previous.logging or previous.logging.enabled ~= false)
         if logging then requested[#requested + 1] = "captains_log" end
     end
-    local renderer = "default"
+    local renderer = previousUi.renderer or "default"
     if role == "mainframe" or role == "terminal" then
-        local hadControlRoom = previous == nil or
-            (previous.ui and previous.ui.renderer == "control-room") or fs.exists("/helios/gui/control-room/manifest.lua")
-        if confirm("Install the Control Room graphical interface?", hadControlRoom) then
-            requested[#requested + 1] = "control_room";renderer = "control-room"
-        end
-    end
-    local hadProbe = previous == nil or fs.exists("/helios/tools/discovery_probe.lua")
-    if role == "mainframe" and confirm("Install the read-only hardware discovery probe?", hadProbe) then
-        requested[#requested + 1] = "discovery_probe"
+        -- The official GUI is available in HELIOS's GUI selector. Installation
+        -- does not choose or activate a GUI on the operator's behalf.
+        requested[#requested + 1] = "control_room"
     end
     local display, guardianId
     if role == "terminal" then
+        title("Remote Terminal Configuration")
         display = choose("Select the terminal view:", {
             {label="All systems",value="all"},{label="Reactors",value="reactor"},
             {label="Turbines",value="turbine"},{label="Power storage",value="battery"},
         }, 1)
     elseif role == "profiler" then
+        title("Profiler Pairing")
         print("Enter the Draconic Guardian computer ID:");write("> ");guardianId = tonumber(read())
         if not guardianId or guardianId < 0 or guardianId ~= math.floor(guardianId) then
             error("Guardian computer ID must be a whole number.", 0)
@@ -225,6 +260,7 @@ local function run()
         end
         if modemDetected then break end
     end
+    if modemDetected then title("Network Protection") end
     if modemDetected and confirm("Enable HELIOS network protection on this computer?", networkEnabled) then
         print(networkEnabled and "Enter a replacement key, or leave blank to keep the current key:" or
             "Enter the shared HELIOS network key (8-128 characters):")
@@ -241,7 +277,7 @@ local function run()
     print("Download: approximately " .. math.ceil(payloadBytes / 1024) .. " KiB")
     if not confirm("Install these HELIOS packages?", true) then print("Installation cancelled.");return end
 
-    local config = configure(previous, role, language, logging, renderer, display, guardianId, networkEnabled, networkKey)
+    local config = configure(previous, role, language, accessibility, logging, renderer, display, guardianId, networkEnabled, networkKey)
     local required, localFree = payloadBytes + (32 * 1024), fs.getFreeSpace("/")
     local stage, mount = LOCAL_STAGE
     if type(localFree) == "number" and localFree < required then stage, mount = externalStage(required) end
