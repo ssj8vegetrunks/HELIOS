@@ -134,7 +134,7 @@ docs/
    - `packages/manifest.json` explicitly assigns every installed file to Core, one role, or an optional feature
    - Every computer installs shared Core plus exactly one role package
    - Mainframe, Terminal, Guardian, and Profiler implementation files are never cross-installed
-   - Hardware adapters, GUIs, Captain's Log, tools, and non-English languages are independent packages
+   - Hardware adapters, GUIs, Event Viewer, tools, and non-English languages are independent packages
    - Package dependencies are resolved before download and duplicate destinations are rejected
    - Configuration, calibration, runtime data, and installed language packs survive role-package upgrades
    - Installed safety and control never depend on GitHub or removable storage at runtime

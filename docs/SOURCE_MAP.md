@@ -12,21 +12,21 @@ It downloads only the packages selected for one computer from `packages/manifest
 ### `core` — HELIOS Core
 
 - Kind: `core`
-- Direct payload: 63707 bytes
+- Direct payload: 63700 bytes
 - Required packages: none
 
-- `helios.lua` ← `src/helios.lua` (20668 bytes)
+- `helios.lua` ← `src/helios.lua` (20665 bytes)
 - `core/accessibility.lua` ← `src/core/accessibility.lua` (3683 bytes)
 - `core/calculations.lua` ← `src/core/calculations.lua` (1375 bytes)
 - `core/config.lua` ← `src/core/config.lua` (11550 bytes)
 - `core/i18n.lua` ← `src/core/i18n.lua` (4641 bytes)
 - `core/power_format.lua` ← `src/core/power_format.lua` (2927 bytes)
-- `lang/en_us.lua` ← `src/lang/en_us.lua` (18863 bytes)
+- `lang/en_us.lua` ← `src/lang/en_us.lua` (18859 bytes)
 
 ### `mainframe` — Mainframe
 
 - Kind: `role`
-- Direct payload: 352492 bytes
+- Direct payload: 352491 bytes
 - Required packages: `core`, `official_hardware`
 
 - `core/boot.lua` ← `src/core/boot.lua` (4914 bytes)
@@ -42,7 +42,7 @@ It downloads only the packages selected for one computer from `packages/manifest
 - `core/ui.lua` ← `src/core/ui.lua` (5075 bytes)
 - `core/ui_contract.lua` ← `src/core/ui_contract.lua` (3726 bytes)
 - `mainframe/device_registry.lua` ← `src/mainframe/device_registry.lua` (4219 bytes)
-- `mainframe/main.lua` ← `src/mainframe/main.lua` (170893 bytes)
+- `mainframe/main.lua` ← `src/mainframe/main.lua` (170892 bytes)
 - `mainframe/manual_control.lua` ← `src/mainframe/manual_control.lua` (1990 bytes)
 - `mainframe/reactor_governor.lua` ← `src/mainframe/reactor_governor.lua` (66372 bytes)
 - `mainframe/turbine_governor.lua` ← `src/mainframe/turbine_governor.lua` (46462 bytes)
@@ -96,14 +96,14 @@ It downloads only the packages selected for one computer from `packages/manifest
 - `modules/extreme_reactors/turbine_adapter.lua` ← `module-pack/extreme_reactors/turbine_adapter.lua` (9482 bytes)
 - `modules/universal_energy/storage_adapter.lua` ← `module-pack/universal_energy/storage_adapter.lua` (10447 bytes)
 
-### `captains_log` — Captain's Log
+### `captains_log` — Event Viewer
 
 - Kind: `feature`
-- Direct payload: 14618 bytes
+- Direct payload: 14615 bytes
 - Required packages: none
 
 - `core/event_log.lua` ← `src/core/event_log.lua` (7235 bytes)
-- `core/log_viewer.lua` ← `src/core/log_viewer.lua` (7383 bytes)
+- `core/log_viewer.lua` ← `src/core/log_viewer.lua` (7380 bytes)
 
 ### `control_room` — Control Room GUI
 
@@ -125,10 +125,10 @@ It downloads only the packages selected for one computer from `packages/manifest
 ### `language_de_de` — de_de
 
 - Kind: `language`
-- Direct payload: 19074 bytes
+- Direct payload: 19076 bytes
 - Required packages: none
 
-- `lang/de_de.lua` ← `src/lang/de_de.lua` (19074 bytes)
+- `lang/de_de.lua` ← `src/lang/de_de.lua` (19076 bytes)
 
 ### `language_en_pi` — en_pi
 
@@ -141,18 +141,18 @@ It downloads only the packages selected for one computer from `packages/manifest
 ### `language_es_es` — es_es
 
 - Kind: `language`
-- Direct payload: 18090 bytes
+- Direct payload: 18092 bytes
 - Required packages: none
 
-- `lang/es_es.lua` ← `src/lang/es_es.lua` (18090 bytes)
+- `lang/es_es.lua` ← `src/lang/es_es.lua` (18092 bytes)
 
 ### `language_fr_ca` — fr_ca
 
 - Kind: `language`
-- Direct payload: 19638 bytes
+- Direct payload: 19652 bytes
 - Required packages: none
 
-- `lang/fr_ca.lua` ← `src/lang/fr_ca.lua` (19638 bytes)
+- `lang/fr_ca.lua` ← `src/lang/fr_ca.lua` (19652 bytes)
 
 ## Shared destinations
 

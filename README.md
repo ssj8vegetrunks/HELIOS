@@ -266,7 +266,7 @@ The installed layout is:
 See [`docs/MODULE_API.md`](docs/MODULE_API.md) for the manifest, compatibility,
 and adapter-loading contract.
 
-See [`docs/LOGGING.md`](docs/LOGGING.md) for the seven-day Captain's Log,
+See [`docs/LOGGING.md`](docs/LOGGING.md) for the seven-day Event Viewer,
 language-aware event records, filters, and storage limits.
 
 If `/startup` is already a program, the installer asks permission before

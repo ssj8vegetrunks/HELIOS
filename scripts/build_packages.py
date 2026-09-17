@@ -94,7 +94,7 @@ PACKAGES = {
     },
     "captains_log": {
         "kind": "feature",
-        "name": "Captain's Log",
+        "name": "Event Viewer",
         "required": [],
         "files": ["src/core/event_log.lua", "src/core/log_viewer.lua"],
     },
@@ -159,7 +159,7 @@ def main() -> None:
                 raise SystemExit(f"{package_id}: missing required package {dependency}")
 
     # Verify direct runtime dependencies for each role closure. The common
-    # command dispatcher is intentionally role-aware, and Captain's Log is an
+    # command dispatcher is intentionally role-aware, and Event Viewer is an
     # explicitly optional dependency guarded by existence checks.
     optional_paths = {"config.lua", "core/event_log.lua", "core/log_viewer.lua"}
     for role in ("mainframe", "terminal", "guardian", "profiler"):

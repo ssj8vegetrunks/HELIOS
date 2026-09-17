@@ -4,7 +4,7 @@ local config = dofile("/helios/core/config.lua").load()
 
 if args[1] == "logs" then
     if not fs.exists("/helios/core/log_viewer.lua") then
-        error("Captain's Log is not installed on this computer.", 0)
+        error("Event Viewer is not installed on this computer.", 0)
     end
     dofile("/helios/core/log_viewer.lua").run(config, args[2], args[3])
     return
@@ -12,7 +12,7 @@ end
 
 if args[1] == "archive" then
     if not fs.exists("/helios/core/event_log.lua") then
-        error("Captain's Log is not installed on this computer.", 0)
+        error("Event Viewer is not installed on this computer.", 0)
     end
     local action = args[2] or "status"
     local markerName = ".helios-storage"
@@ -29,7 +29,7 @@ if args[1] == "archive" then
     end
     if action == "status" then
         local state = dofile("/helios/core/event_log.lua").storage()
-        print("Captain's Log storage: " .. state.path)
+        print("Event Viewer storage: " .. state.path)
         print(state.external and "HELIOS archive disk online." or "Using limited local computer storage.")
     elseif action == "attach" then
         local wanted = args[3]

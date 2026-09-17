@@ -1,6 +1,6 @@
-# HELIOS Captain's Log
+# HELIOS Event Viewer
 
-Captain's Log history uses a HELIOS archive disk when one has been attached with
+Event Viewer history uses a HELIOS archive disk when one has been attached with
 `helios archive attach`. Without one, HELIOS retains only a 48 KiB local troubleshooting window so
 optional history cannot consume the space required by control and safety. See [STORAGE.md](STORAGE.md).
 
@@ -41,4 +41,4 @@ verified manual reactor/turbine commands. Repeating one-second telemetry is
 not recorded; HELIOS writes only state transitions and operator actions.
 
 The same viewer is available from the Mainframe Settings screen through
-`CAPTAIN'S LOG`, so the running control room does not need to be stopped.
+`EVENT VIEWER`, so the running control room does not need to be stopped.

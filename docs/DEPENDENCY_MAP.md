@@ -26,7 +26,7 @@ Core exposes the versioned `core/calculations.lua` interface for reusable numeri
 - Remote Terminals install no hardware adapters and never own actuators.
 - The Draconic Guardian contains its complete local safety loop but no Mainframe implementation.
 - The Profiler contains only its read-only profiling role and shared dependencies.
-- Captain's Log, non-English languages, the Control Room GUI, and the discovery probe install only
+- Event Viewer, non-English languages, the Control Room GUI, and the discovery probe install only
   when selected.
 - The bootstrap verifies manifest version, paths, dependency closure, duplicate destinations, and
   downloaded file sizes before installation.

@@ -229,7 +229,7 @@ local function run()
     if language ~= "en_us" then requested[#requested + 1] = "language_" .. language end
     if role == "mainframe" then
         title("Optional Features")
-        logging = confirm("Install Captain's Log?", previous == nil or not previous.logging or previous.logging.enabled ~= false)
+        logging = confirm("Install Event Viewer?", previous == nil or not previous.logging or previous.logging.enabled ~= false)
         if logging then requested[#requested + 1] = "captains_log" end
     end
     local renderer = previousUi.renderer or "default"

@@ -1861,7 +1861,7 @@ function mainframe.run(config)
             buttons.network = ui.inlineButton("NETWORKING", colors.cyan)
             write(" ")
             if fs.exists("/helios/core/log_viewer.lua") then
-                buttons.logs = ui.inlineButton(tr("log.button", nil, "CAPTAIN'S LOG"), colors.cyan)
+                buttons.logs = ui.inlineButton(tr("log.button", nil, "EVENT VIEWER"), colors.cyan)
             end
             write(" ")
             buttons.back = ui.inlineButton(tr("common.back", nil, "BACK"), colors.cyan)

@@ -169,7 +169,7 @@ interface until user tuning controls and their validation limits are implemented
 
 ## Next implementation order
 
-1. Expand the seven-day Captain's Log from its completed archive/viewer foundation to reactor, turbine, storage, alarm, networking, and operator-action events
+1. Expand the seven-day Event Viewer from its completed archive/viewer foundation to reactor, turbine, storage, alarm, networking, and operator-action events
 2. Validate coordinated factory-default startup on the live plant
 3. Explicit reactor-to-turbine routing for multiple steam loops
 4. Storage-based plant demand coordinator

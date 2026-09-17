@@ -10,7 +10,7 @@
         {
           "source": "src/helios.lua",
           "path": "helios.lua",
-          "bytes": 20668
+          "bytes": 20665
         },
         {
           "source": "src/core/accessibility.lua",
@@ -40,7 +40,7 @@
         {
           "source": "src/lang/en_us.lua",
           "path": "lang/en_us.lua",
-          "bytes": 18863
+          "bytes": 18859
         }
       ]
     },
@@ -120,7 +120,7 @@
         {
           "source": "src/mainframe/main.lua",
           "path": "mainframe/main.lua",
-          "bytes": 170893
+          "bytes": 170892
         },
         {
           "source": "src/mainframe/manual_control.lua",
@@ -282,7 +282,7 @@
     },
     "captains_log": {
       "kind": "feature",
-      "name": "Captain's Log",
+      "name": "Event Viewer",
       "required": [],
       "files": [
         {
@@ -293,7 +293,7 @@
         {
           "source": "src/core/log_viewer.lua",
           "path": "core/log_viewer.lua",
-          "bytes": 7383
+          "bytes": 7380
         }
       ]
     },
@@ -336,7 +336,7 @@
         {
           "source": "src/lang/de_de.lua",
           "path": "lang/de_de.lua",
-          "bytes": 19074
+          "bytes": 19076
         }
       ]
     },
@@ -360,7 +360,7 @@
         {
           "source": "src/lang/es_es.lua",
           "path": "lang/es_es.lua",
-          "bytes": 18090
+          "bytes": 18092
         }
       ]
     },
@@ -372,7 +372,7 @@
         {
           "source": "src/lang/fr_ca.lua",
           "path": "lang/fr_ca.lua",
-          "bytes": 19638
+          "bytes": 19652
         }
       ]
     }

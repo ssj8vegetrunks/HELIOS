@@ -13,7 +13,7 @@ helios archive attach
 ```
 
 If several disks are mounted, specify the mount shown by CC:Tweaked, such as
-`helios archive attach disk2`. HELIOS marks the disk for this computer and places Captain's Log
+`helios archive attach disk2`. HELIOS marks the disk for this computer and places Event Viewer
 history under `helios-archive/logs`. Check it with `helios archive status` and release it with
 `helios archive detach`. Detaching does not erase existing archives.
 

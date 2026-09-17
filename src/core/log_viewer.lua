@@ -75,11 +75,11 @@ function viewer.run(config, wantedSeverity, wantedSubsystem)
         end
     end
     local days = log.days()
-    local dayIndex = choose(i18n.get("log.days", nil, "CAPTAIN'S LOG // DAYS"), days)
+    local dayIndex = choose(i18n.get("log.days", nil, "EVENT VIEWER // DAYS"), days)
     if not dayIndex then return end
     local day = days[dayIndex]
     local hours = log.hours(day)
-    local hourIndex = choose(i18n.get("log.hours", {day=day}, "CAPTAIN'S LOG // {day} // HOURS"), hours)
+    local hourIndex = choose(i18n.get("log.hours", {day=day}, "EVENT VIEWER // {day} // HOURS"), hours)
     if not hourIndex then return end
     local hour = hours[hourIndex]
     local records = log.events(day, hour)
@@ -99,7 +99,7 @@ function viewer.run(config, wantedSeverity, wantedSubsystem)
             tag("log.subsystem_", record.subsystem),
             i18n.get(record.key, translatedValues(record), record.key))
     end
-    local selected = choose(i18n.get("log.events", {day=day,hour=hour}, "CAPTAIN'S LOG // {day} // {hour}"), labels)
+    local selected = choose(i18n.get("log.events", {day=day,hour=hour}, "EVENT VIEWER // {day} // {hour}"), labels)
     if not selected then return end
     local record = records[selected]
     term.clear();term.setCursorPos(1, 1)

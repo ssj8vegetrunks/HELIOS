@@ -14,7 +14,7 @@ For each role, start from a fresh CC:Tweaked computer and run the bootstrap. Con
 
 Repeat a Mainframe upgrade from Alpha 26 with little free space. Configuration, calibration,
 facility data, custom names, installed languages, and `/helios/data` must survive. Deselecting
-Captain's Log, the Control Room GUI, or the discovery probe must leave those optional program files
+Event Viewer, the Control Room GUI, or the discovery probe must leave those optional program files
 absent while normal control and the dependable built-in interface continue operating.
 
 ## Before testing

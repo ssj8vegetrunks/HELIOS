@@ -11,7 +11,7 @@
 | `module-template/` | Copyable Lua developer starter | No; actuator examples fail closed |
 
 The bootstrap presents Mainframe, Remote Terminal, Draconic Guardian, and
-Draconic Profiler as separate roles. The read-only Probe, Captain's Log,
+Draconic Profiler as separate roles. The read-only Probe, Event Viewer,
 Control Room GUI, and non-English languages are optional packages.
 
 ## Repository layout
