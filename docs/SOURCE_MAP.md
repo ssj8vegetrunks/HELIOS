@@ -99,11 +99,11 @@ It downloads only the packages selected for one computer from `packages/manifest
 ### `captains_log` — Captain's Log
 
 - Kind: `feature`
-- Direct payload: 12669 bytes
+- Direct payload: 14618 bytes
 - Required packages: none
 
 - `core/event_log.lua` ← `src/core/event_log.lua` (7235 bytes)
-- `core/log_viewer.lua` ← `src/core/log_viewer.lua` (5434 bytes)
+- `core/log_viewer.lua` ← `src/core/log_viewer.lua` (7383 bytes)
 
 ### `control_room` — Control Room GUI
 

@@ -15,26 +15,63 @@ function viewer.run(config, wantedSeverity, wantedSubsystem)
     local function tag(prefix, value)
         return i18n.get(prefix .. tostring(value):lower(), nil, tostring(value))
     end
+    local function waitForAction(prompt, label)
+        print(prompt)
+        local x, y = term.getCursorPos()
+        local text = "[" .. label .. "]"
+        term.setTextColor(colors.cyan);write(text);term.setTextColor(colors.white)
+        while true do
+            local event, a, b, c = os.pullEvent()
+            if event == "key" and (a == keys.enter or a == keys.numPadEnter) then return end
+            if event == "monitor_touch" or event == "mouse_click" then
+                local touchX, touchY = b, c
+                if touchY == y and touchX >= x and touchX < x + #text then return end
+            end
+        end
+    end
     local function choose(title, entries)
         if #entries == 0 then
             term.clear();term.setCursorPos(1, 1);print(title);print("")
             print(i18n.get("log.no_entries", nil, "No entries."));print("")
-            print(i18n.get("log.press_return", nil, "Press ENTER to return."));read();return nil
+            waitForAction(i18n.get("log.press_return", nil, "Press ENTER to return."), "BACK")
+            return nil
         end
         local width, height = term.getSize()
-        local pageSize, page = math.max(3, height - 6), 1
+        local pageSize, page, typed = math.max(3, height - 7), 1, ""
         local pageCount = math.max(1, math.ceil(#entries / pageSize))
         while true do
             term.clear();term.setCursorPos(1, 1);print(title);print("")
             local first, last = (page - 1) * pageSize + 1, math.min(#entries, page * pageSize)
             for index = first, last do print((("[%d] %s"):format(index, entries[index])):sub(1, width)) end
-            print("");print(i18n.get("log.page", {page=page,total=pageCount}, "PAGE {page}/{total}"))
-            write(i18n.get("log.select", nil, "Number, N/P page, or ENTER to go back: "))
-            local answer = read():lower()
-            if answer == "" then return nil end
-            if answer == "n" then page = math.min(pageCount, page + 1)
-            elseif answer == "p" then page = math.max(1, page - 1)
-            else local selected=tonumber(answer);if selected and entries[selected] then return selected end end
+            term.setCursorPos(1, height - 2)
+            term.clearLine();write(i18n.get("log.page", {page=page,total=pageCount}, "PAGE {page}/{total}"))
+            term.setCursorPos(1, height - 1);term.clearLine()
+            term.setTextColor(colors.cyan);write("[< PREVIOUS] [NEXT >] [BACK]");term.setTextColor(colors.white)
+            term.setCursorPos(1, height);term.clearLine()
+            write(i18n.get("log.select", nil, "Select number: ") .. typed)
+            local event, a, b, c = os.pullEvent()
+            if event == "char" then
+                if a:match("%d") then typed = (typed .. a):sub(1, 6)
+                elseif a:lower() == "n" then page = math.min(pageCount, page + 1);typed = ""
+                elseif a:lower() == "p" then page = math.max(1, page - 1);typed = "" end
+            elseif event == "key" then
+                if a == keys.enter or a == keys.numPadEnter then
+                    if typed == "" then return nil end
+                    local selected = tonumber(typed)
+                    if selected and entries[selected] then return selected end
+                    typed = ""
+                elseif a == keys.backspace then typed = typed:sub(1, -2) end
+            elseif event == "monitor_touch" or event == "mouse_click" then
+                local touchX, touchY = b, c
+                if touchY >= 3 and touchY <= 2 + (last - first + 1) then
+                    return first + touchY - 3
+                elseif touchY == height - 1 then
+                    if touchX <= 12 then page = math.max(1, page - 1)
+                    elseif touchX <= 21 then page = math.min(pageCount, page + 1)
+                    elseif touchX <= 28 then return nil end
+                    typed = ""
+                end
+            end
         end
     end
     local days = log.days()
@@ -70,7 +107,8 @@ function viewer.run(config, wantedSeverity, wantedSubsystem)
     print(i18n.get("log.severity", nil, "Severity") .. ": " .. string.upper(tag("value.", record.severity)))
     print(i18n.get("log.subsystem", nil, "Subsystem") .. ": " .. tag("log.subsystem_", record.subsystem))
     print(i18n.get("log.event", nil, "Event") .. ": " .. record.id)
-    print("");print(i18n.get("log.open_book", nil, "Press ENTER to open the event book."));read()
+    print("")
+    waitForAction(i18n.get("log.open_book", nil, "Press ENTER to open the event book."), "OPEN")
     local storedPages = record.pages or {}
     if #storedPages == 0 then storedPages = { i18n.get("log.no_details", nil, "No additional details.") } end
     local width, height = term.getSize()
@@ -95,10 +133,12 @@ function viewer.run(config, wantedSeverity, wantedSubsystem)
         print(i18n.get("log.page", {page=index,total=#displayPages}, "PAGE {page}/{total}"));print("")
         for _, line in ipairs(page) do print(line) end
         if index < #displayPages then
-            print("");print(i18n.get("log.next_page", nil, "Press ENTER for the next page."));read()
+            print("")
+            waitForAction(i18n.get("log.next_page", nil, "Press ENTER for the next page."), "NEXT")
         end
     end
-    print("");print(i18n.get("log.close_book", nil, "Press ENTER to close the book."));read()
+    print("")
+    waitForAction(i18n.get("log.close_book", nil, "Press ENTER to close the book."), "CLOSE")
 end
 
 return viewer
