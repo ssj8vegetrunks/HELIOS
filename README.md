@@ -311,9 +311,11 @@ exactly one remote field-input flow gate. A normal HELIOS mainframe must never
 control these peripherals through its modem network.
 
 The Guardian presents four familiar Draconic-style instruments (saturation,
-field strength, fuel reserve, and output) plus live raw telemetry. It starts in
-`AUTO`, which maintains the field target but leaves output dispatch to a future
-HELIOS request link. `ASSISTED MANUAL` offers OFF/MIN/MED/MAX output selections
+field strength, fuel reserve, and output) plus live raw telemetry. In `AUTO`,
+the Mainframe can dispatch a commissioned Guardian by requested RF/t while the
+Guardian retains containment control, clamps demand to its proven ceiling, and
+closes export if its renewable command lease expires. `ASSISTED MANUAL` offers
+OFF/MIN/MED/MAX output selections
 after automatic commissioning. The Guardian performs this entirely locally: it
 starts the reactor if required, sets a conservative 50k RF/t export, holds the
 field target, and requires twenty stable samples before unlocking output

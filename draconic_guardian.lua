@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.1
+-- HELIOS Draconic Guardian v1.2.0-alpha.13
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -37,7 +37,7 @@ local FIELD_RECOVERY_RATIO, MINIMUM_FIELD_INPUT = .05, 50000
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.12"
+local GUARDIAN_VERSION = "1.2.0-alpha.13"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -60,7 +60,7 @@ local function guardianRecord(key,severity,values,pages)
   pcall(guardianLog.append,key,{severity=severity,subsystem="guardian",values=values,pages=pages,
     retentionDays=guardianConfig and guardianConfig.logging and guardianConfig.logging.retentionDays or 7})
 end
-local facilityNetwork,facilityProtocol,facilityIdentity,facilitySequence
+local facilityNetwork,facilityProtocol,facilityIdentity,facilitySequence,facilityTracker
 local facilityConnected,facilityLastWelcome=false,nil
 local facilityCollectorId,facilityCollectorRole,facilityCollectorPriority=nil,nil,-1
 local facilityCollectorLeaseUntil=0
@@ -84,7 +84,7 @@ if fs.exists("/helios/core/network.lua") and fs.exists("/helios/core/facility_pr
       sessionId=facilityNetwork.sessionId("guardian"),role="guardian",
       software="draconic_guardian",softwareVersion=GUARDIAN_VERSION,
     })
-    facilitySequence=0
+    facilitySequence=0;facilityTracker=facilityProtocol.newSequenceTracker()
   end
 end
 
@@ -603,8 +603,31 @@ local function supervise(b,d,c)
     end
     return
   end
-  if c.mode=="AUTO" then gate(b.input,injectorCap);gate(b.output,0);c.message="Automatic: adopted "..fmt(injectorCap).." RF/t injector limit; export closed";return end
+  if c.mode=="AUTO" and c.request~="REMOTE" then gate(b.input,injectorCap);gate(b.output,0);c.message="Automatic standby: adopted "..fmt(injectorCap).." RF/t injector limit; export closed";return end
   if not c.commissioned or not c.rated then c.message="Control locked: run automatic commissioning first";return end
+  -- A remote target is a leased request, never authority over the safety
+  -- system. The Guardian clamps it to the locally proven ceiling, retains
+  -- containment control, and closes export when Mainframe renewals stop.
+  if c.mode=="AUTO" and c.request=="REMOTE" then
+    local now=facilityNetwork and facilityNetwork.now() or os.epoch("utc")/1000
+    if not tonumber(c.remoteLeaseUntil) or now>=tonumber(c.remoteLeaseUntil) then
+      c.request="OFF";c.remoteTarget=nil;c.remoteLeaseUntil=nil
+      gate(b.input,injectorCap);gate(b.output,0)
+      c.message="Remote command lease expired; export closed"
+      return
+    end
+    local ceiling=lifecycleCeiling(c,r)
+    local target=math.max(0,math.min(tonumber(c.remoteTarget) or 0,ceiling))
+    if target<=0 then
+      gate(b.input,injectorCap);gate(b.output,0)
+      c.message="Mainframe standby: export closed"
+      return
+    end
+    if not live then ensureStarted(b,c,status,"Mainframe power demand",injectorCap,r);return end
+    gate(b.input,injectorCap);gate(b.output,target)
+    c.message="Mainframe demand "..fmt(target).." RF/t (local ceiling "..fmt(ceiling)..")"
+    return
+  end
   -- Manual Gates and the saved Overdrive preset use the operator's exact
   -- field/export pair. Overdrive ramps only its export value so a cold core
   -- can gain efficiency instead of being hit with the whole load at once.
@@ -1021,7 +1044,8 @@ local function facilityWorker()
       fieldGate=tonumber(data and data.inputSet),exportGate=tonumber(data and data.outputSet),
       fieldInput=tonumber(data and data.inputFlow),exportFlow=tonumber(data and data.outputFlow),
       mode=controls.mode,request=controls.request,commissioned=controls.commissioned==true,
-      ratedOutput=tonumber(controls.rated),localAuthority=true,remoteCommands=false,
+      ratedOutput=tonumber(controls.rated),remoteTarget=tonumber(controls.remoteTarget),
+      remoteLeaseUntil=tonumber(controls.remoteLeaseUntil),localAuthority=true,remoteCommands=true,
       guardianMessage=tostring(controls.message or ""),telemetryStale=controls.telemetryStale==true,
       alarmLevel=imminent and 3 or nil,
       alarmCode=imminent and "draconic_meltdown_imminent" or nil,
@@ -1029,7 +1053,7 @@ local function facilityWorker()
     }
   end
   local function hello(target)
-    send("hello",{siteId=facilitySiteId,facilityType="draconic_reactor",capabilities={"telemetry","heartbeat","local_guardian","ui_profile"},uiProfile="draconic_guardian"},target)
+    send("hello",{siteId=facilitySiteId,facilityType="draconic_reactor",capabilities={"telemetry","heartbeat","local_guardian","remote_dispatch","ui_profile"},uiProfile="draconic_guardian",remoteCommands=true},target)
   end
   local function releaseCollector()
     facilityCollectorId,facilityCollectorRole,facilityCollectorPriority=nil,nil,-1
@@ -1046,6 +1070,12 @@ local function facilityWorker()
       if facilityCollectorId and now>=facilityCollectorLeaseUntil then
         releaseCollector()
       end
+      if controls.request=="REMOTE" and tonumber(controls.remoteLeaseUntil) and
+         now>=tonumber(controls.remoteLeaseUntil) then
+        controls.request="OFF";controls.remoteTarget=nil;controls.remoteLeaseUntil=nil
+        controls.message="Remote command lease expired; export closing"
+        requestDraw()
+      end
       -- Broadcast read-only telemetry so Mainframes coming back from an
       -- upgrade immediately refresh their cached registration. Only the
       -- elected collector acknowledges it or gains emergency-command status.
@@ -1055,7 +1085,9 @@ local function facilityWorker()
       hello()
       helloTimer=os.startTimer(5)
     elseif event=="rednet_message" and c==facilityProtocol.rednetProtocol then
-      local message=facilityNetwork.accept(c,b) and facilityProtocol.validate(b) or nil
+      local accepted,message=false,nil
+      if facilityNetwork.accept(c,b) then accepted,message=facilityProtocol.acceptSequence(facilityTracker,b) end
+      if not accepted then message=nil end
       if message and message.payload.siteId==facilitySiteId then
         local role=message.source.role
         local priority=tonumber(message.payload.collectorPriority) or (role=="overseer" and 100 or 50)
@@ -1072,6 +1104,38 @@ local function facilityWorker()
         elseif message.kind=="acknowledgement" and a==facilityCollectorId then
           facilityCollectorLeaseUntil=facilityNetwork.now()+lease
           facilityConnected=true;facilityLastWelcome=facilityNetwork.now()
+        elseif message.kind=="control_command" and a==facilityCollectorId and
+               (role=="mainframe" or role=="overseer") and
+               message.payload.targetNodeId==facilityIdentity.nodeId then
+          local action=tostring(message.payload.action or "")
+          local accepted,detail=false
+          if controls.mode~="AUTO" then
+            detail="Guardian is not in automatic mode"
+          elseif controls.commissioned~=true or not positive(controls.rated) then
+            detail="Guardian has no commissioned output ceiling"
+          elseif action=="standby" then
+            controls.request="OFF";controls.remoteTarget=nil;controls.remoteLeaseUntil=nil
+            controls.initialRequested=false;controls.startActivated=false
+            controls.message="Mainframe requested standby; export closing"
+            accepted=true
+          elseif action=="generate" then
+            local requested=positive(message.payload.target)
+            if not requested then detail="Generation target must be positive"
+            else
+              local lease=math.max(2,math.min(10,tonumber(message.payload.leaseSeconds) or 5))
+              controls.remoteTarget=math.min(requested,positive(controls.rated))
+              controls.remoteLeaseUntil=facilityNetwork.now()+lease
+              controls.request="REMOTE";controls.startActivated=false
+              controls.message="Mainframe requested "..fmt(controls.remoteTarget).." RF/t"
+              accepted=true
+            end
+          else detail="Unsupported control action" end
+          send("status",{
+            siteId=facilitySiteId,commandMessageId=message.messageId,
+            action=action,status=accepted and "accepted" or "rejected",
+            detail=detail,target=tonumber(controls.remoteTarget),
+          },a)
+          requestDraw()
         elseif message.kind=="emergency_command" and a==facilityCollectorId and
                (role=="mainframe" or role=="overseer") and
                message.payload.targetNodeId==facilityIdentity.nodeId and

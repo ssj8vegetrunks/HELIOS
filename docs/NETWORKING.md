@@ -45,9 +45,9 @@ determined hostile player with packet-sniffing or filesystem access.
 
 ## Facility network Alpha 1
 
-`helios.facility.v1` is the Guardian/facility discovery and telemetry contract.
-It deliberately has no general remote-control message. Its only command is the
-narrowly scoped, operator-triggered emergency SCRAM request.
+`helios.facility.v1` is the Guardian/facility discovery, telemetry, and guarded
+dispatch contract. Normal output requests are renewable leases; the Guardian
+clamps them to its locally proven ceiling and closes export when they expire.
 
 Supported traffic:
 
@@ -58,6 +58,7 @@ Supported traffic:
 - `welcome` — Mainframe identity and accepted compatibility policy;
 - `heartbeat` — liveness without a full telemetry payload;
 - `telemetry` — normalized, serializable facility state;
+- `control_command` — authenticated leased generation or standby request;
 - `emergency_command` — authenticated collector-to-Guardian SCRAM request only;
 - `ui_offer` / `ui_request` — optional declarative GUI negotiation;
 - `acknowledgement` — accepted, rejected, or duplicate processing result;
@@ -70,15 +71,17 @@ timestamp, deterministic message ID, and a safe payload.
 ## Safety boundary
 
 - Guardians retain local control authority and continue operating offline.
-- A Mainframe may observe facility telemetry without acquiring ordinary
-  actuator access. During a Guardian critical alarm, an operator may explicitly
-  request SCRAM; the Guardian executes that request locally and reports status.
+- The elected Mainframe may request a bounded generation target, but never
+  receives direct gate or reactor actuator access. The Guardian independently
+  validates mode, commissioning state, lease, containment, temperature, fuel,
+  and its locally proven ceiling before applying output.
+- During a Guardian critical alarm, an operator may explicitly request SCRAM;
+  the Guardian executes that request locally and reports status.
 - Unknown contracts, kinds, roles, malformed identities, stale sequences,
   duplicates, forged message IDs, functions, cycles, and oversized/deep payloads
   fail validation.
-- Adding any command beyond SCRAM requires a separate authorization design, explicit
-  capability negotiation, acknowledgement/readback, idempotency, and local
-  Guardian refusal rules. It will not be implied by telemetry connectivity.
+- Dispatch is available only when the Guardian explicitly advertises
+  `remote_dispatch`; telemetry connectivity alone never grants control.
 
 ## Planned handshake
 
@@ -88,22 +91,24 @@ Guardian                         HELIOS Mainframe
    |<-- acknowledgement ---------------|
    |<-- welcome -----------------------|
    |--- telemetry / heartbeat -------->|
+   |<-- leased generation / standby ---|
+   |--- status / telemetry ------------>|
    |<-- emergency SCRAM (operator) -----|
    |--- status ------------------------>|
    |<-- ui_request (when required) ----|
    |--- ui_offer / status ------------>|
 ```
 
-The Draconic Guardian now advertises itself at startup, publishes one-second
-read-only telemetry, and continues operating locally if HELIOS is absent. The
+The Draconic Guardian advertises itself at startup, publishes one-second
+telemetry, and continues operating safely if HELIOS is absent. The
 Mainframe validates and registers Guardian traffic, acknowledges accepted
-messages, returns a telemetry-only welcome, and persists facility registration
+messages, negotiates guarded dispatch, and persists facility registration
 metadata in `/helios/data/facilities.lua`. Live telemetry remains in memory so
 the one-second stream does not churn the computer disk.
 
-`helios facilities` lists registered facility identities. General remote
-commands remain deliberately absent from Alpha 1; SCRAM is the sole emergency
-exception and does not grant gate-control authority.
+`helios facilities` lists registered facility identities. Dispatch commands
+carry a five-second lease renewed by the active collector; loss of that lease
+closes export locally. SCRAM remains a separate emergency path.
 
 ## Collector authority and fallback
 

@@ -56,8 +56,15 @@ local unsafe, unsafeReason = protocol.make("telemetry", guardian, 2, {
 assert(unsafe and unsafe.payload.reactor == nil and unsafeReason == nil,
     "non-serializable payload members must be removed")
 
-local command, commandReason = protocol.make("command", mainframe, 2, {}, 1002)
-assert(command == nil and commandReason, "facility v1 must expose no remote command kind")
+local command = assert(protocol.make("control_command", mainframe, 2, {
+    siteId = "default",
+    targetNodeId = guardian.nodeId,
+    action = "generate",
+    target = 1000000,
+    leaseSeconds = 5,
+}, 1002))
+assert(protocol.validate(command, "control_command"),
+    "facility v1 must permit authenticated leased control commands")
 
 local scram = assert(protocol.make("emergency_command", mainframe, 3, {
     siteId = "default",
@@ -84,8 +91,8 @@ forged.messageId = "forged"
 assert(protocol.validate(forged) == nil, "forged message IDs must be rejected")
 
 local description = protocol.describe()
-assert(description.remoteCommands == false and description.emergencyCommands == true and
+assert(description.remoteCommands == true and description.emergencyCommands == true and
     description.rednetProtocol == "helios.facility.v1",
-    "contract must advertise emergency commands without general remote control")
+    "contract must advertise leased control and emergency commands")
 
 print("facility protocol tests passed")

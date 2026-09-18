@@ -125,6 +125,8 @@ function mainframe.run(config)
     local minimumPowerReserve
     local returnToAutomatic
     local deviceName
+    local sendFacility
+    local dispatchGuardians
 
     local function planGeneration(powerReserve, powerDemand)
         local low = tonumber(config.control.storageLow) or 25
@@ -140,6 +142,28 @@ function mainframe.run(config)
         end
 
         local sources = {}
+        local linkNow = network.now()
+        for nodeId, facility in pairs(facilities) do
+            facility.dispatchRequested = false
+            facility.dispatchTarget = 0
+            local telemetry = facility.telemetry or {}
+            local online = linkNow - (tonumber(facility.lastSeen) or 0) <= 7
+            local capacity = tonumber(telemetry.ratedOutput) or 0
+            if facility.facilityType == "draconic_reactor" and online and
+               telemetry.commissioned == true and telemetry.remoteCommands == true and
+               telemetry.localAuthority == true and telemetry.mode == "AUTO" and
+               capacity > 0 then
+                -- A hot Guardian core with export closed is still an active
+                -- source. Prefer it over starting another cold generator.
+                local state = tostring(telemetry.state or ""):lower()
+                local active = state == "running" or state == "online"
+                sources[#sources + 1] = {
+                    kind = "guardian", unit = facility, name = nodeId,
+                    capacity = capacity,
+                    priority = active and 1 or 2,
+                }
+            end
+        end
         for _, turbine in ipairs(turbines) do
             turbine.dispatchRequested = false
             turbine.dispatchMode = "COASTING"
@@ -189,7 +213,7 @@ function mainframe.run(config)
             local bKnown = (tonumber(b.capacity) or 0) > 0
             if aKnown ~= bKnown then return aKnown end
             if a.capacity ~= b.capacity then return a.capacity > b.capacity end
-            return tostring(a.unit.name) < tostring(b.unit.name)
+            return tostring(a.unit.name or a.name) < tostring(b.unit.name or b.name)
         end)
 
         local totalCapacity = 0
@@ -222,9 +246,12 @@ function mainframe.run(config)
                     source.unit.dispatchRequested = true
                     source.unit.dispatchMode = "GENERATING"
                     source.unit.requestedSteam = tonumber(source.profile.flowLimit) or 0
-                else
+                elseif source.kind == "reactor" then
                     source.unit.powerDispatchRequested = true
                     source.unit.powerDispatchTarget = assigned
+                else
+                    source.unit.dispatchRequested = true
+                    source.unit.dispatchTarget = assigned
                 end
                 end
                 if knownCapacity then
@@ -561,6 +588,9 @@ function mainframe.run(config)
         local combinedPowerReserve = powerCapacity > 0 and
             powerStored / powerCapacity * 100 or nil
         local generationNeeded = planGeneration(combinedPowerReserve, powerDemand)
+        if dispatchGuardians then
+            dispatchGuardians(maintenance or manualAuthority or authorityPaused)
+        end
         local _, steamDemand = reactorGovernor.evaluateAll(reactorGovernorMemory,
             reactors, turbines, config.control, {
                 maintenance = maintenance or manualAuthority or authorityPaused,
@@ -706,6 +736,10 @@ function mainframe.run(config)
                     alarmCode = telemetry.alarmCode,
                     alarmMessage = telemetry.alarmMessage,
                     localAuthority = telemetry.localAuthority,
+                    remoteCommands = telemetry.remoteCommands,
+                    remoteTarget = telemetry.remoteTarget,
+                    dispatchRequested = facility.dispatchRequested == true,
+                    dispatchTarget = facility.dispatchTarget,
                     commissioned = telemetry.commissioned,
                     ratedOutput = telemetry.ratedOutput,
                 }
@@ -773,7 +807,7 @@ function mainframe.run(config)
         return true
     end
 
-    local function sendFacility(kind, target, payload)
+    sendFacility = function(kind, target, payload)
         facilitySequence = facilitySequence + 1
         local outgoing = facilityProtocol.make(kind, facilityIdentity,
             facilitySequence, payload, network.now())
@@ -781,6 +815,30 @@ function mainframe.run(config)
             return network.sendOn(facilityProtocol.rednetProtocol, target, outgoing)
         end
         return false
+    end
+
+    dispatchGuardians = function(paused)
+        if not isFacilityCollector() then return false end
+        local now = network.now()
+        local sent = false
+        for nodeId, facility in pairs(facilities) do
+            local telemetry = facility.telemetry or {}
+            local online = now - (tonumber(facility.lastSeen) or 0) <= 7
+            if facility.facilityType == "draconic_reactor" and online and
+               facility.id and telemetry.remoteCommands == true then
+                local target = not paused and facility.dispatchRequested == true and
+                    math.max(0, tonumber(facility.dispatchTarget) or 0) or 0
+                local action = target > 0 and "generate" or "standby"
+                sent = sendFacility("control_command", facility.id, {
+                    siteId = facilitySiteId,
+                    targetNodeId = nodeId,
+                    action = action,
+                    target = target,
+                    leaseSeconds = 5,
+                }) or sent
+            end
+        end
+        return sent
     end
 
     local function scramFacility(nodeId)
@@ -856,8 +914,8 @@ function mainframe.run(config)
                 collectorRole = "mainframe",
                 collectorPriority = 50,
                 leaseSeconds = 5,
-                telemetryOnly = true,
-                remoteCommands = false,
+                telemetryOnly = false,
+                remoteCommands = true,
             })
         end
         return true

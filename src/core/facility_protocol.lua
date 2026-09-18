@@ -10,6 +10,7 @@ local kinds = {
     welcome = true,
     heartbeat = true,
     telemetry = true,
+    control_command = true,
     emergency_command = true,
     ui_offer = true,
     ui_request = true,
@@ -216,7 +217,7 @@ function protocol.describe()
         version = protocol.version,
         rednetProtocol = protocol.rednetProtocol,
         messageKinds = supported,
-        remoteCommands = false,
+        remoteCommands = true,
         emergencyCommands = true,
     }
 end
