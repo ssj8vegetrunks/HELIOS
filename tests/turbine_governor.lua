@@ -566,4 +566,25 @@ do
     equal(plan.recommendedFlow, 1500, "spooling restores learned steam flow")
 end
 
+-- New plant calibration is coordinated: reactors finish first, then only one
+-- unprofiled turbine may consume calibration steam at a time.
+do
+    local memory = governor.new()
+    control.turbineProfiles.queue_a = nil
+    control.turbineProfiles.queue_b = nil
+    local first = turbine("queue_a", 0, 0)
+    local second = turbine("queue_b", 0, 0)
+    governor.evaluateAll(memory, { first, second }, control, {
+        now = 1,
+        calibrationBlocked = true,
+        calibrationBlockReason = "Waiting for sequential reactor commissioning",
+    })
+    equal(first.governor.state, "QUEUED", "reactor commissioning blocks first turbine")
+    equal(second.governor.state, "QUEUED", "reactor commissioning blocks second turbine")
+
+    governor.evaluateAll(memory, { first, second }, control, { now = 2 })
+    assert(first.governor.state ~= "QUEUED", "first turbine begins sequential calibration")
+    equal(second.governor.state, "QUEUED", "second turbine waits for first turbine")
+end
+
 print("turbine governor tests passed")

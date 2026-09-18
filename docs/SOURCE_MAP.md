@@ -26,7 +26,7 @@ It downloads only the packages selected for one computer from `packages/manifest
 ### `mainframe` — Mainframe
 
 - Kind: `role`
-- Direct payload: 352942 bytes
+- Direct payload: 354409 bytes
 - Required packages: `core`, `official_hardware`
 
 - `core/boot.lua` ← `src/core/boot.lua` (4914 bytes)
@@ -42,10 +42,10 @@ It downloads only the packages selected for one computer from `packages/manifest
 - `core/ui.lua` ← `src/core/ui.lua` (5075 bytes)
 - `core/ui_contract.lua` ← `src/core/ui_contract.lua` (3726 bytes)
 - `mainframe/device_registry.lua` ← `src/mainframe/device_registry.lua` (4219 bytes)
-- `mainframe/main.lua` ← `src/mainframe/main.lua` (170892 bytes)
+- `mainframe/main.lua` ← `src/mainframe/main.lua` (171138 bytes)
 - `mainframe/manual_control.lua` ← `src/mainframe/manual_control.lua` (1990 bytes)
-- `mainframe/reactor_governor.lua` ← `src/mainframe/reactor_governor.lua` (66372 bytes)
-- `mainframe/turbine_governor.lua` ← `src/mainframe/turbine_governor.lua` (46462 bytes)
+- `mainframe/reactor_governor.lua` ← `src/mainframe/reactor_governor.lua` (66479 bytes)
+- `mainframe/turbine_governor.lua` ← `src/mainframe/turbine_governor.lua` (47576 bytes)
 
 ### `terminal` — Remote Terminal
 

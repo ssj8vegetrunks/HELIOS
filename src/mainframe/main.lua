@@ -596,6 +596,9 @@ function mainframe.run(config)
             mainframeId = os.getComputerID(),
             idConflicts = idConflicts,
             now = now,
+            calibrationBlocked = reactorGovernorMemory.commissioningActive == true,
+            calibrationBlockReason = reactorGovernorMemory.commissioningActive == true and
+                "Waiting for sequential reactor commissioning" or nil,
             steamSourceManaged = steamSource.managed,
             steamSourceReady = steamSource.ready,
             steamSourceReason = steamSource.reason,

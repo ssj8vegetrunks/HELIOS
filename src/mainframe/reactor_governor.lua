@@ -1107,6 +1107,8 @@ function governor.evaluateAll(memory, reactors, turbines, control, context)
         end
     end
     local commissioningTotal = #memory.commissioningOrder
+    memory.commissioningActive = commissioningName ~= nil
+    memory.commissioningName = commissioningName
     if commissioningName then
         local unit = known[commissioningName]
         local previous = memory.reactors[commissioningName] or {}

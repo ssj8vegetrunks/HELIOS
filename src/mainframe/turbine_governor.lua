@@ -154,6 +154,9 @@ function governor.evaluate(memory, turbine, control, context)
         result = hold("NO TRUSTED DATA", "Mainframe computer ID is conflicting", false)
     elseif turbine.error then
         result = hold("NO TRUSTED DATA", tostring(turbine.error), false)
+    elseif context.calibrationBlocked == true and not profile then
+        result = hold("QUEUED", tostring(context.calibrationBlockReason or
+            "Waiting for earlier plant calibration"))
     elseif turbine.active == false then
         local dispatchMode = tostring(context.dispatchMode or "COASTING")
         local shouldStart = profile == nil or dispatchMode == "GENERATING" or
@@ -924,10 +927,29 @@ end
 
 function governor.evaluateAll(memory, turbines, control, context)
     local present = {}
+    local calibrationName
+    if not (context and context.calibrationBlocked == true) then
+        for _, turbine in ipairs(turbines or {}) do
+            local name = tostring(turbine.name)
+            if not turbine.error and profileFor(control or {}, name) == nil then
+                calibrationName = name
+                break
+            end
+        end
+    end
     for _, turbine in ipairs(turbines or {}) do
-        present[tostring(turbine.name)] = true
+        local name = tostring(turbine.name)
+        present[name] = true
         local turbineContext = {}
         for key, value in pairs(context or {}) do turbineContext[key] = value end
+        if profileFor(control or {}, name) == nil and
+           ((context and context.calibrationBlocked == true) or name ~= calibrationName) then
+            turbineContext.calibrationBlocked = true
+            turbineContext.calibrationBlockReason = context and context.calibrationBlocked == true and
+                context.calibrationBlockReason or
+                (calibrationName and ("Waiting for turbine " .. calibrationName .. " calibration") or
+                    "Waiting for turbine calibration")
+        end
         turbineContext.dispatchMode = turbine.dispatchMode or "GENERATING"
         turbine.governor = governor.evaluate(memory, turbine, control, turbineContext)
     end

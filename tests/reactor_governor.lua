@@ -930,6 +930,8 @@ do
         "commissioning advances to the next queued reactor")
     equal(second.governor.commissioningIndex, 2,
         "commissioning progress reports the fleet index")
+    equal(memory.commissioningActive, true,
+        "reactor fleet exposes active commissioning to turbine scheduling")
 
     local fullMemory = governor.new()
     local fullControl = {}

@@ -120,7 +120,7 @@
         {
           "source": "src/mainframe/main.lua",
           "path": "mainframe/main.lua",
-          "bytes": 170892
+          "bytes": 171138
         },
         {
           "source": "src/mainframe/manual_control.lua",
@@ -130,12 +130,12 @@
         {
           "source": "src/mainframe/reactor_governor.lua",
           "path": "mainframe/reactor_governor.lua",
-          "bytes": 66372
+          "bytes": 66479
         },
         {
           "source": "src/mainframe/turbine_governor.lua",
           "path": "mainframe/turbine_governor.lua",
-          "bytes": 46462
+          "bytes": 47576
         }
       ]
     },
