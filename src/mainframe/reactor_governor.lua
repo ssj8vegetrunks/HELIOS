@@ -265,9 +265,22 @@ function governor.steamDemand(turbines, control)
     end
     control = control or {}
     local total, active = 0, 0
+    local calibrationName
     for _, turbine in ipairs(turbines or {}) do
+        local name = tostring(turbine.name)
+        if not turbine.error and
+           type((control.turbineProfiles or {})[name]) ~= "table" then
+            calibrationName = name
+            break
+        end
+    end
+    for _, turbine in ipairs(turbines or {}) do
+        local name = tostring(turbine.name)
+        local profile = (control.turbineProfiles or {})[name]
+        local calibrating = profile == nil and name == calibrationName
         if turbine.active == true and
-           (turbine.dispatchRequested == nil or turbine.dispatchRequested == true or
+           (calibrating or turbine.dispatchRequested == nil or
+            turbine.dispatchRequested == true or
             (tonumber(turbine.requestedSteam) or 0) > 0) then
             if turbine.error then
                 return nil, active, "Active turbine telemetry is unavailable"
@@ -275,10 +288,20 @@ function governor.steamDemand(turbines, control)
             if turbine.governor and turbine.governor.trusted == false then
                 return nil, active, "Active turbine telemetry is untrusted"
             end
-            local profile = (control.turbineProfiles or {})[tostring(turbine.name)]
-            local requested = tonumber(turbine.requestedSteam) or
-                (profile and tonumber(profile.flowLimit)) or
-                tonumber(turbine.flowRateLimit) or tonumber(turbine.flowRateMax)
+            local requested = tonumber(turbine.requestedSteam)
+            -- The plant dispatch planner deliberately gives non-dispatched
+            -- turbines a zero request.  During first calibration that zero is
+            -- not a real operating demand: the one sequential calibration
+            -- candidate needs its advertised hard intake so a managed steam
+            -- reactor can be started and primed for it.
+            if calibrating and (requested == nil or requested <= 0) then
+                requested = tonumber(turbine.flowRateLimit) or
+                    tonumber(turbine.flowRateMax)
+            else
+                requested = requested or
+                    (profile and tonumber(profile.flowLimit)) or
+                    tonumber(turbine.flowRateLimit) or tonumber(turbine.flowRateMax)
+            end
             if requested == nil then
                 return nil, active, "Active turbine intake setting is unavailable"
             end

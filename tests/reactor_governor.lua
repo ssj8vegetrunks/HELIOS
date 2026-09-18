@@ -201,6 +201,26 @@ do
 end
 
 do
+    local first = turbine(500, {
+        name = "turbine_0",
+        flowRateLimit = 2000,
+        dispatchRequested = false,
+        requestedSteam = 0,
+    })
+    local second = turbine(500, {
+        name = "turbine_1",
+        flowRateLimit = 2000,
+        dispatchRequested = false,
+        requestedSteam = 0,
+    })
+    local demand, active = governor.steamDemand({ first, second }, control)
+    equal(demand, 2000,
+        "sequential turbine calibration overrides zero plant dispatch demand")
+    equal(active, 1,
+        "only the first uncalibrated turbine requests calibration steam")
+end
+
+do
     -- Alpha.22 could only use buffer feedback after a reactor profile had
     -- already been saved. A naturally pulsing first calibration therefore sat
     -- at RESPONDING forever with 10/10 averages and 0/8 stable samples.
