@@ -12,6 +12,7 @@ local COMMISSION_START_FLOW, COMMISSION_SAMPLES = 50000, 20
 local COMMISSION_FIELD_FLOOR, COMMISSION_TEMP_LIMIT = 17, 7500
 local COMMISSION_STEP_RATIO, COMMISSION_MIN_STEP = 1.25, 50000
 local COMMISSION_SHORTFALL_SAMPLES = 20
+local COMMISSION_FIELD_TARGET, COMMISSION_FIELD_TUNE_SAMPLES = 45, 10
 -- A cool reactor ramps up to a new export request over several seconds.  This
 -- is a settling period, not evidence that the output path has reached its
 -- ceiling, so do not score it as a failed sample.
@@ -36,7 +37,7 @@ local FIELD_RECOVERY_RATIO, MINIMUM_FIELD_INPUT = .05, 50000
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.11"
+local GUARDIAN_VERSION = "1.2.0-alpha.12"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -342,7 +343,7 @@ local function vertical(t,x,y,h,label,now,maximum,c)
   t.setBackgroundColor(colors.black);text(t,x,y+h+1,string.format("%3.0f%%",f*100),c)
 end
 local function load()
-  local d={mode="AUTO",request="OFF",rated=nil,commissioned=false,commissioning=false,commissionFlow=nil,commissionSamples=0,commissionShortfallSamples=0,commissionSettleSamples=0,commissionLastSafe=nil,recovery=false,arm=0,initialRequested=false,startActivated=false,liveGatesSelected=false,message="Automatic safe supervision"}
+  local d={mode="AUTO",request="OFF",rated=nil,commissioned=false,commissioning=false,commissionFlow=nil,commissionSamples=0,commissionShortfallSamples=0,commissionSettleSamples=0,commissionFieldInput=nil,commissionFieldTuneSamples=0,commissionLastSafe=nil,recovery=false,arm=0,initialRequested=false,startActivated=false,liveGatesSelected=false,message="Automatic safe supervision"}
   local s
   -- A world save or chunk unload can interrupt a direct file replacement. Use
   -- the first intact checkpoint, including the pending/backup copies left by
@@ -351,7 +352,7 @@ local function load()
     if fs.exists(path) then local ok,value=pcall(dofile,path);if ok and type(value)=="table" then s=value;break end end
   end
   if not s then return d end
-  d.mode=(s.mode=="ASSISTED" or s.mode=="UNRESTRICTED") and s.mode or "AUTO";d.request=(FRACTION[s.request] or s.request=="MANUAL" or s.request=="OVERDRIVE") and s.request or "OFF";d.rated=tonumber(s.rated);d.lifecycleCeilings=type(s.lifecycleCeilings)=="table" and s.lifecycleCeilings or {};d.currentCycleCeilings=type(s.currentCycleCeilings)=="table" and s.currentCycleCeilings or {};d.injectorBaseline=positive(s.injectorBaseline);d.manualField=positive(s.manualField);d.manualExport=positive(s.manualExport) or 0;d.overdriveField=positive(s.overdriveField);d.overdriveExport=positive(s.overdriveExport);d.commissioned=s.commissioned==true;d.commissioning=s.commissioning==true;d.commissionFlow=positive(s.commissionFlow);d.commissionSamples=math.max(0,math.floor(tonumber(s.commissionSamples) or 0));d.commissionShortfallSamples=math.max(0,math.floor(tonumber(s.commissionShortfallSamples) or 0));d.commissionSettleSamples=math.max(0,math.floor(tonumber(s.commissionSettleSamples) or 0));d.commissionLastSafe=positive(s.commissionLastSafe);d.recovery=s.recovery==true;d.lifecycleApplied=positive(s.lifecycleApplied);d.lifecycleFieldApplied=positive(s.lifecycleFieldApplied);d.lifecycleSamples=math.max(0,math.floor(tonumber(s.lifecycleSamples) or 0));d.lifecycleBandKey=s.lifecycleBandKey and tostring(s.lifecycleBandKey) or nil;d.lifecycleStartField=tonumber(s.lifecycleStartField);d.fieldTuneSamples=math.max(0,math.floor(tonumber(s.fieldTuneSamples) or 0));d.lastFuelConversion=tonumber(s.lastFuelConversion);d.overdriveApplied=tonumber(s.overdriveApplied);d.message=tostring(s.message or d.message);return d
+  d.mode=(s.mode=="ASSISTED" or s.mode=="UNRESTRICTED") and s.mode or "AUTO";d.request=(FRACTION[s.request] or s.request=="MANUAL" or s.request=="OVERDRIVE") and s.request or "OFF";d.rated=tonumber(s.rated);d.lifecycleCeilings=type(s.lifecycleCeilings)=="table" and s.lifecycleCeilings or {};d.currentCycleCeilings=type(s.currentCycleCeilings)=="table" and s.currentCycleCeilings or {};d.injectorBaseline=positive(s.injectorBaseline);d.manualField=positive(s.manualField);d.manualExport=positive(s.manualExport) or 0;d.overdriveField=positive(s.overdriveField);d.overdriveExport=positive(s.overdriveExport);d.commissioned=s.commissioned==true;d.commissioning=s.commissioning==true;d.commissionFlow=positive(s.commissionFlow);d.commissionSamples=math.max(0,math.floor(tonumber(s.commissionSamples) or 0));d.commissionShortfallSamples=math.max(0,math.floor(tonumber(s.commissionShortfallSamples) or 0));d.commissionSettleSamples=math.max(0,math.floor(tonumber(s.commissionSettleSamples) or 0));d.commissionFieldInput=positive(s.commissionFieldInput);d.commissionFieldTuneSamples=math.max(0,math.floor(tonumber(s.commissionFieldTuneSamples) or 0));d.commissionLastSafe=positive(s.commissionLastSafe);d.recovery=s.recovery==true;d.lifecycleApplied=positive(s.lifecycleApplied);d.lifecycleFieldApplied=positive(s.lifecycleFieldApplied);d.lifecycleSamples=math.max(0,math.floor(tonumber(s.lifecycleSamples) or 0));d.lifecycleBandKey=s.lifecycleBandKey and tostring(s.lifecycleBandKey) or nil;d.lifecycleStartField=tonumber(s.lifecycleStartField);d.fieldTuneSamples=math.max(0,math.floor(tonumber(s.fieldTuneSamples) or 0));d.lastFuelConversion=tonumber(s.lastFuelConversion);d.overdriveApplied=tonumber(s.overdriveApplied);d.message=tostring(s.message or d.message);return d
 end
 local function save(c)
   local parent=fs.getDir(SETTINGS);if parent~="" and not fs.exists(parent) then fs.makeDir(parent) end
@@ -534,7 +535,9 @@ local function supervise(b,d,c)
       return
     end
     local trial=math.max(COMMISSION_START_FLOW,tonumber(c.commissionFlow) or COMMISSION_START_FLOW)
-    gate(b.input,injectorCap)
+    local fieldInput=math.max(injectorCap,positive(c.commissionFieldInput) or injectorCap)
+    c.commissionFieldInput=fieldInput
+    gate(b.input,fieldInput)
     gate(b.output,trial)
     -- Stop just above the hard 15% interlock. A 17% calibration cutoff leaves
     -- the guardian room to close export and rebuild the field safely.
@@ -544,6 +547,31 @@ local function supervise(b,d,c)
       c.message=tr("guardian.commission_edge",{ceiling=fmt(c.rated or 0)},"Calibration reached the 17% field edge; output closed. Last verified ceiling {ceiling} RF/t")
       return
     end
+    -- The adopted injector value is a safe starting point, not a hard ceiling.
+    -- If an export trial settles below the proof band, raise containment input
+    -- gradually before deciding whether that output can be sustained.
+    if field<COMMISSION_FIELD_TARGET then
+      c.commissionSamples=0;c.commissionShortfallSamples=0;c.commissionSettleSamples=0
+      c.commissionFieldTuneSamples=(tonumber(c.commissionFieldTuneSamples) or 0)+1
+      local drain=positive(r.fieldDrainRate) or 0
+      -- This is a derived runaway guard, not a configured operating ceiling:
+      -- one trial never needs more than its export or twice the observed drain.
+      local fieldLimit=math.max(injectorCap,trial,drain*2)
+      if c.commissionFieldTuneSamples>=COMMISSION_FIELD_TUNE_SAMPLES then
+        if fieldInput>=fieldLimit then
+          gate(b.output,0);c.commissioning=false;c.initialRequested=false;c.request="OFF";c.recovery=true
+          c.commissioned=(tonumber(c.commissionLastSafe) or 0)>0;c.rated=c.commissionLastSafe
+          c.message="Calibration complete: containment stabilized below 45% at the trial field-input limit; verified ceiling "..fmt(c.rated or 0).." RF/t"
+          return
+        end
+        fieldInput=math.min(fieldLimit,math.max(fieldInput+COMMISSION_MIN_STEP,math.floor(fieldInput*(1+FIELD_RECOVERY_RATIO))))
+        c.commissionFieldInput=fieldInput;c.commissionFieldTuneSamples=0
+        gate(b.input,fieldInput)
+      end
+      c.message=string.format("Raising containment for %s RF/t trial: field %.1f%%, injector %s RF/t (%d/%d)",fmt(trial),field,fmt(fieldInput),c.commissionFieldTuneSamples,COMMISSION_FIELD_TUNE_SAMPLES)
+      return
+    end
+    c.commissionFieldTuneSamples=0
     -- A Flux Gate's reported flow is not a trustworthy measure of reactor
     -- generation on every DE/ATM configuration.  The reactor component is
     -- authoritative: only count a trial as proven when its generation rate
@@ -567,7 +595,7 @@ local function supervise(b,d,c)
     end
     c.commissionSettleSamples=0;c.commissionShortfallSamples=0;c.commissionSamples=stable and (tonumber(c.commissionSamples) or 0)+1 or 0
     if c.commissionSamples>=COMMISSION_SAMPLES then
-      c.rated=trial;c.commissionLastSafe=trial;c.commissionSamples=0;c.commissionSettleSamples=0
+      c.rated=trial;c.commissionLastSafe=trial;c.injectorBaseline=fieldInput;c.commissionSamples=0;c.commissionSettleSamples=0
       c.commissionFlow=math.max(trial+COMMISSION_MIN_STEP,math.floor(trial*COMMISSION_STEP_RATIO))
       c.message=tr("guardian.commission_proved",{trial=fmt(trial),next=fmt(c.commissionFlow)},"Calibration proved {trial} RF/t; advancing to {next} RF/t")
     else
@@ -793,7 +821,7 @@ local function cycleValue(values,current)
   return values[1]
 end
 local function beginCalibration()
-  controls.commissioning=true;controls.commissionFlow=COMMISSION_START_FLOW;controls.commissionSamples=0;controls.commissionShortfallSamples=0;controls.commissionSettleSamples=0;controls.commissionLastSafe=nil;controls.recovery=false;controls.commissioned=false;controls.rated=nil;controls.lifecycleCeilings={};controls.currentCycleCeilings={};controls.lifecycleApplied=nil;controls.lifecycleFieldApplied=nil;controls.lifecycleSamples=0;controls.lifecycleBandKey=nil;controls.lastFuelConversion=nil;controls.request="OFF"
+  controls.commissioning=true;controls.commissionFlow=COMMISSION_START_FLOW;controls.commissionSamples=0;controls.commissionShortfallSamples=0;controls.commissionSettleSamples=0;controls.commissionFieldInput=positive(controls.injectorBaseline);controls.commissionFieldTuneSamples=0;controls.commissionLastSafe=nil;controls.recovery=false;controls.commissioned=false;controls.rated=nil;controls.lifecycleCeilings={};controls.currentCycleCeilings={};controls.lifecycleApplied=nil;controls.lifecycleFieldApplied=nil;controls.lifecycleSamples=0;controls.lifecycleBandKey=nil;controls.lastFuelConversion=nil;controls.request="OFF"
   controls.initialRequested=true;controls.startActivated=false;controls.message="Automatic calibration requested by operator"
 end
 local function act(choice,d)
