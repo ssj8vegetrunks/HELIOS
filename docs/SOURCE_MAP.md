@@ -4,7 +4,7 @@
 
 Core version: **1.6.0-alpha.27**
 
-The bootstrap `install.lua` is 341 readable lines and contains no runtime payload.
+The bootstrap `install.lua` is 344 readable lines and contains no runtime payload.
 It downloads only the packages selected for one computer from `packages/manifest.json`.
 
 ## Packages
@@ -50,7 +50,7 @@ It downloads only the packages selected for one computer from `packages/manifest
 ### `terminal` — Remote Terminal
 
 - Kind: `role`
-- Direct payload: 73423 bytes
+- Direct payload: 73987 bytes
 - Required packages: `core`
 
 - `core/boot.lua` ← `src/core/boot.lua` (4914 bytes)
@@ -61,7 +61,7 @@ It downloads only the packages selected for one computer from `packages/manifest
 - `core/network_security.lua` ← `src/core/network_security.lua` (4819 bytes)
 - `core/ui.lua` ← `src/core/ui.lua` (5075 bytes)
 - `core/ui_contract.lua` ← `src/core/ui_contract.lua` (3726 bytes)
-- `terminal/main.lua` ← `src/terminal/main.lua` (32253 bytes)
+- `terminal/main.lua` ← `src/terminal/main.lua` (32817 bytes)
 
 ### `guardian` — Draconic Guardian
 

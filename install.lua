@@ -303,7 +303,10 @@ local function run()
     local config = configure(previous, role, language, accessibility, logging, renderer, display, guardianId, networkEnabled, networkKey)
     local required, localFree = payloadBytes + (32 * 1024), fs.getFreeSpace("/")
     local stage, mount = LOCAL_STAGE
-    if type(localFree) == "number" and localFree < required then stage, mount = externalStage(required) end
+    if type(localFree) == "number" and localFree < required then
+        local external, externalMount = externalStage(required)
+        if external then stage, mount = external, externalMount end
+    end
     local lowSpace = not mount and type(localFree) == "number" and localFree < required
     if lowSpace then
         title("Low-Space Upgrade")

@@ -332,6 +332,12 @@ function terminal.run(config)
         local width = select(1, term.getSize())
         if not snapshot then
             gui.text(1, 7, tr("remote.searching_mainframe"), colors.orange)
+            gui.text(1, 9, "MODEMS  " .. tostring(modemCount),
+                modemCount > 0 and colors.cyan or colors.red)
+            gui.text(1, 10, "NETWORK  " .. network.networkId(), colors.cyan)
+            gui.text(1, 11, network.securityEnabled() and
+                "PROTECTION ENABLED - CODES MUST MATCH" or
+                "PROTECTION OPEN - MAINFRAME MUST ALSO BE OPEN", colors.lightGray)
             return
         end
         local state, detail, colour = graphicalStatus()
@@ -483,6 +489,8 @@ function terminal.run(config)
             ui.status(tr("remote.display_assignment"), tv(config.display or "all"), colors.cyan)
             local link, colour = statusLine()
             ui.status(tr("remote.mainframe_link"), tv(link), colour)
+            ui.status("Modems", modemCount, modemCount > 0 and colors.cyan or colors.red)
+            ui.status("Network code", network.networkId(), colors.cyan)
             print("")
             print(tr("remote.no_control_authority"))
             print(tr("remote.speaker_hint"))
