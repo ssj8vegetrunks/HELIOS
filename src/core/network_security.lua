@@ -12,7 +12,9 @@ local function canonical(value, seen)
     local kind = type(value)
     if kind == "nil" then return "n" end
     if kind == "boolean" then return value and "b1" or "b0" end
-    if kind == "number" then return "d" .. string.format("%.17g", value) end
+    -- Rednet serializes Lua numbers using their ordinary string form. Using
+    -- higher precision here can sign digits which do not survive transport.
+    if kind == "number" then return "d" .. tostring(value) end
     if kind == "string" then return "s" .. #value .. ":" .. value end
     if kind ~= "table" then return nil, "unsupported value" end
     seen = seen or {}
@@ -72,7 +74,8 @@ function security.sign(message, config, protocol)
     if type(message) ~= "table" then return nil, "message must be a table" end
     message.networkId = security.networkId(config)
     message.networkProtocol = tostring(protocol or "")
-    message.networkSentAt = os.epoch("utc") / 1000
+    -- An integer millisecond timestamp survives Rednet's serialization exactly.
+    message.networkSentAt = math.floor(os.epoch("utc"))
     message.networkNonce = table.concat({ tostring(os.getComputerID()), tostring(message.networkSentAt),
         tostring(math.random(1, 2147483647)) }, ":")
     local encoded, reason = canonical(message)
@@ -89,7 +92,11 @@ function security.verify(message, config, protocol, now)
     end
     local sentAt = tonumber(message.networkSentAt)
     now = tonumber(now) or os.epoch("utc") / 1000
-    if not sentAt or math.abs(now - sentAt) > 30 then return false, "network message expired" end
+    if not sentAt then return false, "network message expired" end
+    local sentSeconds = sentAt >= 100000000000 and sentAt / 1000 or sentAt
+    local nowSeconds = now >= 100000000000 and now / 1000 or now
+    local age = math.abs(nowSeconds - sentSeconds)
+    if age > 30 then return false, "network message expired" end
     local encoded, reason = canonical(message)
     if not encoded then return false, reason end
     if digest(config.network.securityKey, encoded) ~= message.networkAuth then

@@ -14,6 +14,10 @@ local message = assert(security.sign({ helios=true, kind="hello", payload={ b=2,
     protected, "helios.v1"))
 assert(security.verify(message, protected, "helios.v1", message.networkSentAt),
     "the matching network must accept an intact packet")
+local numeric = assert(security.sign({ helios=true, kind="snapshot", value=1 / 3 },
+    protected, "helios.v1"))
+assert(security.verify(numeric, protected, "helios.v1", numeric.networkSentAt / 1000),
+    "telemetry numbers and millisecond timestamps must verify")
 assert(not security.verify(message, other, "helios.v1", message.networkSentAt),
     "a different network key must be rejected")
 message.payload.a = 9

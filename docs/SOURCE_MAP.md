@@ -26,7 +26,7 @@ It downloads only the packages selected for one computer from `packages/manifest
 ### `mainframe` — Mainframe
 
 - Kind: `role`
-- Direct payload: 352491 bytes
+- Direct payload: 352942 bytes
 - Required packages: `core`, `official_hardware`
 
 - `core/boot.lua` ← `src/core/boot.lua` (4914 bytes)
@@ -38,7 +38,7 @@ It downloads only the packages selected for one computer from `packages/manifest
 - `core/module_loader.lua` ← `src/core/module_loader.lua` (5288 bytes)
 - `core/module_manager.lua` ← `src/core/module_manager.lua` (5967 bytes)
 - `core/network.lua` ← `src/core/network.lua` (3383 bytes)
-- `core/network_security.lua` ← `src/core/network_security.lua` (4819 bytes)
+- `core/network_security.lua` ← `src/core/network_security.lua` (5270 bytes)
 - `core/ui.lua` ← `src/core/ui.lua` (5075 bytes)
 - `core/ui_contract.lua` ← `src/core/ui_contract.lua` (3726 bytes)
 - `mainframe/device_registry.lua` ← `src/mainframe/device_registry.lua` (4219 bytes)
@@ -50,7 +50,7 @@ It downloads only the packages selected for one computer from `packages/manifest
 ### `terminal` — Remote Terminal
 
 - Kind: `role`
-- Direct payload: 73987 bytes
+- Direct payload: 74438 bytes
 - Required packages: `core`
 
 - `core/boot.lua` ← `src/core/boot.lua` (4914 bytes)
@@ -58,7 +58,7 @@ It downloads only the packages selected for one computer from `packages/manifest
 - `core/gui.lua` ← `src/core/gui.lua` (3556 bytes)
 - `core/gui_loader.lua` ← `src/core/gui_loader.lua` (8631 bytes)
 - `core/network.lua` ← `src/core/network.lua` (3383 bytes)
-- `core/network_security.lua` ← `src/core/network_security.lua` (4819 bytes)
+- `core/network_security.lua` ← `src/core/network_security.lua` (5270 bytes)
 - `core/ui.lua` ← `src/core/ui.lua` (5075 bytes)
 - `core/ui_contract.lua` ← `src/core/ui_contract.lua` (3726 bytes)
 - `terminal/main.lua` ← `src/terminal/main.lua` (32817 bytes)
@@ -66,22 +66,22 @@ It downloads only the packages selected for one computer from `packages/manifest
 ### `guardian` — Draconic Guardian
 
 - Kind: `role`
-- Direct payload: 102318 bytes
+- Direct payload: 102769 bytes
 - Required packages: `core`
 
 - `core/boot.lua` ← `src/core/boot.lua` (4914 bytes)
 - `core/facility_protocol.lua` ← `src/core/facility_protocol.lua` (8025 bytes)
 - `core/network.lua` ← `src/core/network.lua` (3383 bytes)
-- `core/network_security.lua` ← `src/core/network_security.lua` (4819 bytes)
+- `core/network_security.lua` ← `src/core/network_security.lua` (5270 bytes)
 - `draconic/controller.lua` ← `draconic_guardian.lua` (81177 bytes)
 
 ### `profiler` — Draconic Profiler
 
 - Kind: `role`
-- Direct payload: 22142 bytes
+- Direct payload: 22593 bytes
 - Required packages: `core`
 
-- `core/network_security.lua` ← `src/core/network_security.lua` (4819 bytes)
+- `core/network_security.lua` ← `src/core/network_security.lua` (5270 bytes)
 - `draconic/profiler.lua` ← `src/draconic/profiler.lua` (9906 bytes)
 - `draconic/profiler_engine.lua` ← `src/draconic/profiler_engine.lua` (7417 bytes)
 

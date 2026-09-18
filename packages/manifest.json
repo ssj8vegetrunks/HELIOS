@@ -100,7 +100,7 @@
         {
           "source": "src/core/network_security.lua",
           "path": "core/network_security.lua",
-          "bytes": 4819
+          "bytes": 5270
         },
         {
           "source": "src/core/ui.lua",
@@ -174,7 +174,7 @@
         {
           "source": "src/core/network_security.lua",
           "path": "core/network_security.lua",
-          "bytes": 4819
+          "bytes": 5270
         },
         {
           "source": "src/core/ui.lua",
@@ -218,7 +218,7 @@
         {
           "source": "src/core/network_security.lua",
           "path": "core/network_security.lua",
-          "bytes": 4819
+          "bytes": 5270
         },
         {
           "source": "draconic_guardian.lua",
@@ -237,7 +237,7 @@
         {
           "source": "src/core/network_security.lua",
           "path": "core/network_security.lua",
-          "bytes": 4819
+          "bytes": 5270
         },
         {
           "source": "src/draconic/profiler.lua",
