@@ -1,9 +1,9 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.13
+-- HELIOS Draconic Guardian v1.2.0-alpha.14
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
 local FIELD_TARGET, FIELD_EMERGENCY = 50, 15
-local MAX_TEMPERATURE, MINIMUM_FUEL = 8000, 10
+local MAX_TEMPERATURE, MINIMUM_FUEL = 8000, 5
 -- Draconic's peripheral telemetry reports live generation but not a safe
 -- maximum output. Establish one by proving progressively larger exports.
 -- The calibration may approach the real limit, but never crosses the 15%
@@ -37,7 +37,7 @@ local FIELD_RECOVERY_RATIO, MINIMUM_FIELD_INPUT = .05, 50000
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.13"
+local GUARDIAN_VERSION = "1.2.0-alpha.14"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -352,7 +352,7 @@ local function load()
     if fs.exists(path) then local ok,value=pcall(dofile,path);if ok and type(value)=="table" then s=value;break end end
   end
   if not s then return d end
-  d.mode=(s.mode=="ASSISTED" or s.mode=="UNRESTRICTED") and s.mode or "AUTO";d.request=(FRACTION[s.request] or s.request=="MANUAL" or s.request=="OVERDRIVE") and s.request or "OFF";d.rated=tonumber(s.rated);d.lifecycleCeilings=type(s.lifecycleCeilings)=="table" and s.lifecycleCeilings or {};d.currentCycleCeilings=type(s.currentCycleCeilings)=="table" and s.currentCycleCeilings or {};d.injectorBaseline=positive(s.injectorBaseline);d.manualField=positive(s.manualField);d.manualExport=positive(s.manualExport) or 0;d.overdriveField=positive(s.overdriveField);d.overdriveExport=positive(s.overdriveExport);d.commissioned=s.commissioned==true;d.commissioning=s.commissioning==true;d.commissionFlow=positive(s.commissionFlow);d.commissionSamples=math.max(0,math.floor(tonumber(s.commissionSamples) or 0));d.commissionShortfallSamples=math.max(0,math.floor(tonumber(s.commissionShortfallSamples) or 0));d.commissionSettleSamples=math.max(0,math.floor(tonumber(s.commissionSettleSamples) or 0));d.commissionFieldInput=positive(s.commissionFieldInput);d.commissionFieldTuneSamples=math.max(0,math.floor(tonumber(s.commissionFieldTuneSamples) or 0));d.commissionLastSafe=positive(s.commissionLastSafe);d.recovery=s.recovery==true;d.lifecycleApplied=positive(s.lifecycleApplied);d.lifecycleFieldApplied=positive(s.lifecycleFieldApplied);d.lifecycleSamples=math.max(0,math.floor(tonumber(s.lifecycleSamples) or 0));d.lifecycleBandKey=s.lifecycleBandKey and tostring(s.lifecycleBandKey) or nil;d.lifecycleStartField=tonumber(s.lifecycleStartField);d.fieldTuneSamples=math.max(0,math.floor(tonumber(s.fieldTuneSamples) or 0));d.lastFuelConversion=tonumber(s.lastFuelConversion);d.overdriveApplied=tonumber(s.overdriveApplied);d.message=tostring(s.message or d.message);return d
+  d.mode=(s.mode=="ASSISTED" or s.mode=="UNRESTRICTED") and s.mode or "AUTO";d.request=(FRACTION[s.request] or s.request=="MANUAL" or s.request=="OVERDRIVE" or s.request=="IDLE") and s.request or "OFF";d.rated=tonumber(s.rated);d.lifecycleCeilings=type(s.lifecycleCeilings)=="table" and s.lifecycleCeilings or {};d.currentCycleCeilings=type(s.currentCycleCeilings)=="table" and s.currentCycleCeilings or {};d.injectorBaseline=positive(s.injectorBaseline);d.manualField=positive(s.manualField);d.manualExport=positive(s.manualExport) or 0;d.overdriveField=positive(s.overdriveField);d.overdriveExport=positive(s.overdriveExport);d.commissioned=s.commissioned==true;d.commissioning=s.commissioning==true;d.commissionFlow=positive(s.commissionFlow);d.commissionSamples=math.max(0,math.floor(tonumber(s.commissionSamples) or 0));d.commissionShortfallSamples=math.max(0,math.floor(tonumber(s.commissionShortfallSamples) or 0));d.commissionSettleSamples=math.max(0,math.floor(tonumber(s.commissionSettleSamples) or 0));d.commissionFieldInput=positive(s.commissionFieldInput);d.commissionFieldTuneSamples=math.max(0,math.floor(tonumber(s.commissionFieldTuneSamples) or 0));d.commissionLastSafe=positive(s.commissionLastSafe);d.recovery=s.recovery==true;d.lifecycleApplied=positive(s.lifecycleApplied);d.lifecycleFieldApplied=positive(s.lifecycleFieldApplied);d.lifecycleSamples=math.max(0,math.floor(tonumber(s.lifecycleSamples) or 0));d.lifecycleBandKey=s.lifecycleBandKey and tostring(s.lifecycleBandKey) or nil;d.lifecycleStartField=tonumber(s.lifecycleStartField);d.fieldTuneSamples=math.max(0,math.floor(tonumber(s.fieldTuneSamples) or 0));d.lastFuelConversion=tonumber(s.lastFuelConversion);d.overdriveApplied=tonumber(s.overdriveApplied);d.message=tostring(s.message or d.message);return d
 end
 local function save(c)
   local parent=fs.getDir(SETTINGS);if parent~="" and not fs.exists(parent) then fs.makeDir(parent) end
@@ -476,10 +476,11 @@ local function supervise(b,d,c)
     local margin=field>=SHUTDOWN_FIELD_TARGET and 1.05 or field>=75 and 1.15 or 1.25
     return math.min(injectorCap,math.max(MINIMUM_FIELD_INPUT,math.ceil(drain*margin)))
   end
-  local function stop(reason,charge)
+  local function stop(reason,charge,thermalRecovery)
     gate(b.output,0);reactor(b.reactor,"stopReactor")
     if charge then reactor(b.reactor,"chargeReactor") end
     local input=charge and injectorCap or shutdownInput();gate(b.input,input)
+    if thermalRecovery then c.safetyRecovery=reason end
     c.message="SAFETY INTERLOCK: "..reason.."; shutdown injector "..fmt(input).." RF/t"
     return true
   end
@@ -497,7 +498,7 @@ local function supervise(b,d,c)
     return
   end
   if not free then
-    if fuel<=MINIMUM_FUEL then return stop("fuel reserve below "..MINIMUM_FUEL.."%") end
+    if fuel<=MINIMUM_FUEL then c.request="OFF";return stop("fuel reserve below "..MINIMUM_FUEL.."%") end
     -- WARMING_UP legitimately reports zero containment before activation has
     -- completed. Applying the live-reactor interlock there creates a loop of
     -- stop -> charge -> activate -> stop. Once the reactor is live (or is
@@ -505,10 +506,21 @@ local function supervise(b,d,c)
     if containmentRequired and field<=FIELD_EMERGENCY then
       return stop("field below "..FIELD_EMERGENCY.."%",true)
     end
-    if temp>MAX_TEMPERATURE then return stop("temperature above "..MAX_TEMPERATURE.." C") end
+    if temp>MAX_TEMPERATURE then return stop("temperature above "..MAX_TEMPERATURE.." C",false,true) end
   else
     local imminent,warning=imminentMeltdown(r)
     if imminent then c.message="UNRESTRICTED WARNING: "..warning end
+  end
+  if c.safetyRecovery then
+    gate(b.output,0);gate(b.input,shutdownInput());reactor(b.reactor,"stopReactor")
+    if temp<=5000 and not live then
+      c.safetyRecovery=nil;c.initialRequested=false;c.startActivated=false
+      c.remoteApplied=0;c.remotePrimed=false
+      c.message="Thermal recovery complete; remote demand may restart safely"
+    else
+      c.message="Thermal recovery: holding shutdown until core is below 5000 C"
+    end
+    return
   end
   if status=="charging" then gate(b.input,injectorCap);c.message="Charging containment";return end
   if c.initialRequested then
@@ -603,6 +615,15 @@ local function supervise(b,d,c)
     end
     return
   end
+  if c.mode=="AUTO" and c.request=="IDLE" then
+    if not c.commissioned or not c.rated then gate(b.output,0);gate(b.input,injectorCap);c.message="Automatic idle unavailable until commissioning completes";return end
+    if not live then gate(b.output,0);gate(b.input,0);c.message="Automatic idle: core retired; awaiting demand";return end
+    local fieldTarget=lifecycleFieldTarget(c,r,injectorCap)
+    local idleTarget=math.min(lifecycleCeiling(c,r),math.max(MINIMUM_FIELD_INPUT,fieldTarget))
+    gate(b.input,fieldTarget);gate(b.output,idleTarget)
+    c.message="Automatic idle: sustaining containment at "..fmt(idleTarget).." RF/t"
+    return
+  end
   if c.mode=="AUTO" and c.request~="REMOTE" then gate(b.input,injectorCap);gate(b.output,0);c.message="Automatic standby: adopted "..fmt(injectorCap).." RF/t injector limit; export closed";return end
   if not c.commissioned or not c.rated then c.message="Control locked: run automatic commissioning first";return end
   -- A remote target is a leased request, never authority over the safety
@@ -611,21 +632,38 @@ local function supervise(b,d,c)
   if c.mode=="AUTO" and c.request=="REMOTE" then
     local now=facilityNetwork and facilityNetwork.now() or os.epoch("utc")/1000
     if not tonumber(c.remoteLeaseUntil) or now>=tonumber(c.remoteLeaseUntil) then
-      c.request="OFF";c.remoteTarget=nil;c.remoteLeaseUntil=nil
+      c.request="IDLE";c.remoteTarget=nil;c.remoteLeaseUntil=nil;c.remoteLevel=nil
       gate(b.input,injectorCap);gate(b.output,0)
       c.message="Remote command lease expired; export closed"
       return
     end
     local ceiling=lifecycleCeiling(c,r)
-    local target=math.max(0,math.min(tonumber(c.remoteTarget) or 0,ceiling))
+    local note
+    local level=FRACTION[tostring(c.remoteLevel or "MAX")] and tostring(c.remoteLevel) or "MAX"
+    if level=="MAX" then ceiling,note=lifecycleTarget(c,r) end
+    local fieldTarget=lifecycleFieldTarget(c,r,injectorCap)
+    local target=math.max(0,ceiling*(FRACTION[level] or 1))
     if target<=0 then
-      gate(b.input,injectorCap);gate(b.output,0)
+      gate(b.input,fieldTarget);gate(b.output,0)
       c.message="Mainframe standby: export closed"
       return
     end
-    if not live then ensureStarted(b,c,status,"Mainframe power demand",injectorCap,r);return end
-    gate(b.input,injectorCap);gate(b.output,target)
-    c.message="Mainframe demand "..fmt(target).." RF/t (local ceiling "..fmt(ceiling)..")"
+    if not live then ensureStarted(b,c,status,"Mainframe "..level.." demand",fieldTarget,r);return end
+    gate(b.input,fieldTarget)
+    local applied=math.max(0,tonumber(c.remoteApplied) or 0)
+    if not c.remotePrimed then
+      if field>=90 and temp<=LIFECYCLE_TEMP_LIMIT then c.remotePrimed=true
+      else applied=0 end
+    end
+    if c.remotePrimed then
+      if temp>7000 or field<LIFECYCLE_FIELD_FLOOR then
+        applied=math.max(0,math.min(applied-PRESET_RAMP_STEP*2,applied*.85))
+      elseif field>=FIELD_TARGET then
+        applied=math.min(target,applied+PRESET_RAMP_STEP)
+      end
+    end
+    c.remoteApplied=applied;gate(b.output,applied)
+    c.message="Mainframe "..level.." ramp "..fmt(applied).." / "..fmt(target).." RF/t, field "..fmt(fieldTarget)..(note and " - "..note or "")
     return
   end
   -- Manual Gates and the saved Overdrive preset use the operator's exact
@@ -1044,7 +1082,7 @@ local function facilityWorker()
       fieldGate=tonumber(data and data.inputSet),exportGate=tonumber(data and data.outputSet),
       fieldInput=tonumber(data and data.inputFlow),exportFlow=tonumber(data and data.outputFlow),
       mode=controls.mode,request=controls.request,commissioned=controls.commissioned==true,
-      ratedOutput=tonumber(controls.rated),remoteTarget=tonumber(controls.remoteTarget),
+      ratedOutput=tonumber(controls.rated),remoteTarget=tonumber(controls.remoteTarget),remoteLevel=controls.remoteLevel,
       remoteLeaseUntil=tonumber(controls.remoteLeaseUntil),localAuthority=true,remoteCommands=true,
       guardianMessage=tostring(controls.message or ""),telemetryStale=controls.telemetryStale==true,
       alarmLevel=imminent and 3 or nil,
@@ -1072,8 +1110,8 @@ local function facilityWorker()
       end
       if controls.request=="REMOTE" and tonumber(controls.remoteLeaseUntil) and
          now>=tonumber(controls.remoteLeaseUntil) then
-        controls.request="OFF";controls.remoteTarget=nil;controls.remoteLeaseUntil=nil
-        controls.message="Remote command lease expired; export closing"
+        controls.request="IDLE";controls.remoteTarget=nil;controls.remoteLevel=nil;controls.remoteLeaseUntil=nil
+        controls.message="Remote command lease expired; entering self-sustaining idle"
         requestDraw()
       end
       -- Broadcast read-only telemetry so Mainframes coming back from an
@@ -1113,20 +1151,23 @@ local function facilityWorker()
             detail="Guardian is not in automatic mode"
           elseif controls.commissioned~=true or not positive(controls.rated) then
             detail="Guardian has no commissioned output ceiling"
-          elseif action=="standby" then
-            controls.request="OFF";controls.remoteTarget=nil;controls.remoteLeaseUntil=nil
-            controls.initialRequested=false;controls.startActivated=false
-            controls.message="Mainframe requested standby; export closing"
+          elseif action=="idle" or action=="standby" then
+            controls.request="IDLE";controls.remoteTarget=nil;controls.remoteLevel=nil;controls.remoteLeaseUntil=nil
+            controls.initialRequested=false;controls.startActivated=false;controls.remoteApplied=nil;controls.remotePrimed=nil
+            controls.message="Mainframe requested idle; sustaining containment"
             accepted=true
           elseif action=="generate" then
-            local requested=positive(message.payload.target)
-            if not requested then detail="Generation target must be positive"
+            local level=string.upper(tostring(message.payload.level or ""))
+            if not FRACTION[level] or level=="OFF" then detail="Generation level must be MIN, MED, or MAX"
             else
               local lease=math.max(2,math.min(10,tonumber(message.payload.leaseSeconds) or 5))
-              controls.remoteTarget=math.min(requested,positive(controls.rated))
+              if controls.remoteLevel~=level or controls.request~="REMOTE" then
+                controls.remoteApplied=0;controls.remotePrimed=false
+              end
+              controls.remoteLevel=level;controls.remoteTarget=positive(controls.rated)*(FRACTION[level] or 1)
               controls.remoteLeaseUntil=facilityNetwork.now()+lease
-              controls.request="REMOTE";controls.startActivated=false
-              controls.message="Mainframe requested "..fmt(controls.remoteTarget).." RF/t"
+              controls.request="REMOTE"
+              controls.message="Mainframe requested "..level.." generation"
               accepted=true
             end
           else detail="Unsupported control action" end

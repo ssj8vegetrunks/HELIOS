@@ -313,9 +313,10 @@ control these peripherals through its modem network.
 
 The Guardian presents four familiar Draconic-style instruments (saturation,
 field strength, fuel reserve, and output) plus live raw telemetry. In `AUTO`,
-the Mainframe can dispatch a commissioned Guardian by requested RF/t while the
-Guardian retains containment control, clamps demand to its proven ceiling, and
-closes export if its renewable command lease expires. `ASSISTED MANUAL` offers
+the Mainframe can dispatch a commissioned Guardian at `MIN`, `MED`, or `MAX`.
+The Guardian establishes containment before ramping, retains thermal and field
+authority, and falls back to self-sustaining idle if its renewable command lease
+expires. `ASSISTED MANUAL` offers
 OFF/MIN/MED/MAX output selections
 after automatic commissioning. The Guardian performs this entirely locally: it
 starts the reactor if required, sets a conservative 50k RF/t export, holds the

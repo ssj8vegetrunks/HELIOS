@@ -99,6 +99,11 @@ The mainframe runs a guarded reactor-fleet governor:
   threshold. The storage bank is treated as productive load even when measured
   grid flow is already positive. Outside a recharge cycle, turbines coast with
   steam closed and inductors disengaged.
+- Mainframe dispatches a remote Draconic Guardian by `MIN`, `MED`, or `MAX`
+  service level. The Guardian establishes containment before ramping toward its
+  locally proven value and retains all thermal and field authority. When demand
+  ends it remains online in a self-sustaining idle until 95% fuel conversion;
+  only emergency protection or fuel retirement stops the core.
 - Each calibrated turbine has a persistent **Steam-assisted idle** option.
   Enabled turbines remain as warm reserve: HELIOS sends a limited steam pulse
   only after rotor speed falls below its standby floor; disabled turbines simply

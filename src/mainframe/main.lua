@@ -830,12 +830,15 @@ function mainframe.run(config)
                facility.id and telemetry.remoteCommands == true then
                 local target = not paused and facility.dispatchRequested == true and
                     math.max(0, tonumber(facility.dispatchTarget) or 0) or 0
-                local action = target > 0 and "generate" or "standby"
+                local rated = math.max(0, tonumber(telemetry.ratedOutput) or 0)
+                local ratio = rated > 0 and target / rated or 0
+                local level = ratio <= 0.25 and "MIN" or ratio <= 0.50 and "MED" or "MAX"
+                local action = target > 0 and "generate" or "idle"
                 sent = sendFacility("control_command", facility.id, {
                     siteId = facilitySiteId,
                     targetNodeId = nodeId,
                     action = action,
-                    target = target,
+                    level = target > 0 and level or nil,
                     leaseSeconds = 5,
                 }) or sent
             end

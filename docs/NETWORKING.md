@@ -46,8 +46,9 @@ determined hostile player with packet-sniffing or filesystem access.
 ## Facility network Alpha 1
 
 `helios.facility.v1` is the Guardian/facility discovery, telemetry, and guarded
-dispatch contract. Normal output requests are renewable leases; the Guardian
-clamps them to its locally proven ceiling and closes export when they expire.
+dispatch contract. Normal output requests are renewable `MIN`, `MED`, or `MAX`
+leases. The Guardian establishes containment, ramps locally, and enters a
+self-sustaining idle rather than shutting down when demand or its lease ends.
 
 Supported traffic:
 
