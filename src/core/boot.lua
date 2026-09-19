@@ -106,7 +106,9 @@ function boot.run(config, target)
         pause(0.35)
     end
     logo(target, config, firstBoot)
-    pause(firstBoot and 4.25 or 3.45)
+    -- Keep the identification screen visible while the role initializes, but
+    -- do not impose a multi-second unresponsive pause on every restart.
+    pause(firstBoot and 1.25 or 0.25)
 
     if firstBoot then
         local parent = fs.getDir(MARKER)
@@ -114,10 +116,8 @@ function boot.run(config, target)
         local handle = fs.open(MARKER, "w")
         if handle then handle.write(tostring(os.epoch and os.epoch("utc") or os.clock()));handle.close() end
     end
-    target.setBackgroundColor(colors.black)
-    target.setTextColor(colors.white)
-    target.clear()
-    target.setCursorPos(1, 1)
+    -- The role replaces this screen when its first frame is ready. Leaving it
+    -- visible avoids a blank monitor during peripheral discovery.
     return report
 end
 

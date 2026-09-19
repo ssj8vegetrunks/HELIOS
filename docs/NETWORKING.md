@@ -59,7 +59,7 @@ Supported traffic:
 - `welcome` — Mainframe identity and accepted compatibility policy;
 - `heartbeat` — liveness without a full telemetry payload;
 - `telemetry` — normalized, serializable facility state;
-- `control_command` — authenticated leased generation or standby request;
+- `control_command` — authenticated revisioned generation or standby mailbox request;
 - `emergency_command` — authenticated collector-to-Guardian SCRAM request only;
 - `ui_offer` / `ui_request` — optional declarative GUI negotiation;
 - `acknowledgement` — accepted, rejected, or duplicate processing result;
@@ -74,7 +74,7 @@ timestamp, deterministic message ID, and a safe payload.
 - Guardians retain local control authority and continue operating offline.
 - The elected Mainframe may request a bounded generation target, but never
   receives direct gate or reactor actuator access. The Guardian independently
-  validates mode, commissioning state, lease, containment, temperature, fuel,
+  validates mode, commissioning state, containment, temperature, fuel,
   and its locally proven ceiling before applying output.
 - During a Guardian critical alarm, an operator may explicitly request SCRAM;
   the Guardian executes that request locally and reports status.
@@ -92,7 +92,7 @@ Guardian                         HELIOS Mainframe
    |<-- acknowledgement ---------------|
    |<-- welcome -----------------------|
    |--- telemetry / heartbeat -------->|
-   |<-- leased generation / standby ---|
+   |<-- revisioned generation/standby -|
    |--- status / telemetry ------------>|
    |<-- emergency SCRAM (operator) -----|
    |--- status ------------------------>|
@@ -102,15 +102,19 @@ Guardian                         HELIOS Mainframe
 
 The Draconic Guardian advertises itself at startup, publishes one-second
 telemetry, and continues operating safely if HELIOS is absent. The
-Mainframe validates and registers Guardian traffic, acknowledges accepted
-messages, negotiates guarded dispatch, and persists facility registration
+Mainframe validates and registers Guardian traffic, negotiates guarded
+dispatch, and persists facility registration
 metadata in `/helios/data/facilities.lua`. Live telemetry remains in memory so
 the one-second stream does not churn the computer disk.
 
-`helios facilities` lists registered facility identities. Dispatch commands
-carry a fifteen-second lease renewed every control cycle by the active collector;
-loss of that lease
-closes export locally. SCRAM remains a separate emergency path.
+`helios facilities` lists registered facility identities. Ordinary dispatch is
+a durable mailbox: the Mainframe emits a new monotonically revisioned request
+only when desired state changes, the Guardian applies or rejects it once, and
+reports the handled revision in both status and telemetry. An unread request is
+retried with bounded backoff instead of being resent every control cycle. Loss
+of contact does not erase an accepted request; the Guardian continues locally
+safe autonomous control until newer mail arrives. SCRAM remains a separate,
+immediate emergency path.
 
 ## Collector authority and fallback
 

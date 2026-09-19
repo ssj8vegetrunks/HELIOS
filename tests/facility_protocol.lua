@@ -60,11 +60,11 @@ local command = assert(protocol.make("control_command", mainframe, 2, {
     siteId = "default",
     targetNodeId = guardian.nodeId,
     action = "generate",
-    target = 1000000,
-    leaseSeconds = 5,
+    level = "MAX",
+    commandRevision = 1002001,
 }, 1002))
 assert(protocol.validate(command, "control_command"),
-    "facility v1 must permit authenticated leased control commands")
+    "facility v1 must permit authenticated revisioned mailbox commands")
 
 local scram = assert(protocol.make("emergency_command", mainframe, 3, {
     siteId = "default",

@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.17
+-- HELIOS Draconic Guardian v1.2.0-alpha.18
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -37,7 +37,7 @@ local FIELD_RECOVERY_RATIO, MINIMUM_FIELD_INPUT = .05, 50000
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.17"
+local GUARDIAN_VERSION = "1.2.0-alpha.18"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -215,7 +215,12 @@ local function ensureStarted(b,c,status,reason,fieldTarget,telemetry)
   c.initialRequested=true
   gate(b.output,0)
   gate(b.input,fieldSupply)
-  if status=="offline" or status=="stopping" or status=="cooling" then
+  if status=="stopping" or status=="cooling" then
+    c.startActivated=false
+    c.message=reason..": waiting for controlled stop before charging"
+    return true
+  end
+  if status=="offline" then
     reactor(b.reactor,"chargeReactor")
     c.startActivated=false
     c.message=reason..": charging containment"
@@ -367,6 +372,30 @@ local function save(c)
   return true
 end
 
+-- Mail already accepted by this facility survives a Guardian reboot. The
+-- wider settings loader predates remote dispatch and intentionally filters
+-- transient fields, so restore only the durable mailbox receipt and intent.
+local function restoreMailbox(c)
+  local saved
+  for _,path in ipairs({SETTINGS,SETTINGS_PENDING,SETTINGS_BACKUP}) do
+    if fs.exists(path) then
+      local ok,value=pcall(dofile,path)
+      if ok and type(value)=="table" then saved=value;break end
+    end
+  end
+  if not saved then return end
+  c.lastAppliedCommandRevision=tonumber(saved.lastAppliedCommandRevision)
+  c.lastCommandStatus=saved.lastCommandStatus and tostring(saved.lastCommandStatus) or nil
+  c.lastCommandDetail=saved.lastCommandDetail and tostring(saved.lastCommandDetail) or nil
+  if saved.request=="REMOTE" and FRACTION[tostring(saved.remoteLevel or "")] then
+    c.request="REMOTE";c.remoteLevel=tostring(saved.remoteLevel)
+    c.remoteTarget=positive(saved.remoteTarget);c.remoteApplied=tonumber(saved.remoteApplied)
+    c.remotePrimed=saved.remotePrimed==true
+  elseif saved.request=="IDLE" and c.lastAppliedCommandRevision then
+    c.request="IDLE"
+  end
+end
+
 local function lifecycleBand(r)
   local conversion=pct(r.fuelConversion,r.maxFuelConversion) or 0
   local band=math.floor(math.max(0,math.min(99.999,conversion))/LIFECYCLE_BAND)*LIFECYCLE_BAND
@@ -497,7 +526,7 @@ local function supervise(b,d,c)
   -- may be the tail of an earlier shutdown and WARMING_UP has no containment
   -- yet. Let the shared charge/activate state machine finish before applying
   -- interlocks which are intended for a reactor that has already been live.
-  if c.initialRequested and not live then
+  if c.initialRequested and not live and not c.safetyRecovery then
     ensureStarted(b,c,status,"Initial start",injectorCap,r)
     return
   end
@@ -638,17 +667,10 @@ local function supervise(b,d,c)
   end
   if c.mode=="AUTO" and c.request~="REMOTE" then gate(b.input,injectorCap);gate(b.output,0);c.message="Automatic standby: adopted "..fmt(injectorCap).." RF/t injector limit; export closed";return end
   if not c.commissioned or not c.rated then c.message="Control locked: run automatic commissioning first";return end
-  -- A remote target is a leased request, never authority over the safety
-  -- system. The Guardian clamps it to the locally proven ceiling, retains
-  -- containment control, and closes export when Mainframe renewals stop.
+  -- A remote target is durable mailbox intent, never authority over the
+  -- safety system. The Guardian retains it through network loss and clamps it
+  -- to the locally proven safe ceiling until a newer request arrives.
   if c.mode=="AUTO" and c.request=="REMOTE" then
-    local now=facilityNetwork and facilityNetwork.now() or os.epoch("utc")/1000
-    if not tonumber(c.remoteLeaseUntil) or now>=tonumber(c.remoteLeaseUntil) then
-      c.request="IDLE";c.remoteTarget=nil;c.remoteLeaseUntil=nil;c.remoteLevel=nil
-      gate(b.input,injectorCap);gate(b.output,0)
-      c.message="Remote command lease expired; export closed"
-      return
-    end
     local ceiling=lifecycleCeiling(c,r)
     local note
     local level=FRACTION[tostring(c.remoteLevel or "MAX")] and tostring(c.remoteLevel) or "MAX"
@@ -871,6 +893,7 @@ if rawget(_G,"HELIOS_GUARDIAN_TEST") then
     updateMeltdownTrend=updateMeltdownTrend,imminentMeltdown=imminentMeltdown}
 end
 local binding,page,controls,buttons=inspect(),"overview",load(),{}
+restoreMailbox(controls)
 if accessibility and binding and binding.target then accessibility.apply(binding.target,guardianConfig) end
 controls.inputControlVerified=false;controls.outputControlVerified=false;controls.gatesOwned=false;controls.telemetryStale=false
 local computer=term.current();local target=binding.monitor and peripheral.wrap(binding.monitor) or computer;compactMonitor(target,binding.monitor~=nil)
@@ -1095,7 +1118,8 @@ local function facilityWorker()
       fieldInput=tonumber(data and data.inputFlow),exportFlow=tonumber(data and data.outputFlow),
       mode=controls.mode,request=controls.request,commissioned=controls.commissioned==true,
       ratedOutput=tonumber(controls.rated),remoteTarget=tonumber(controls.remoteTarget),remoteLevel=controls.remoteLevel,
-      remoteLeaseUntil=tonumber(controls.remoteLeaseUntil),localAuthority=true,remoteCommands=true,
+      lastAppliedCommandRevision=tonumber(controls.lastAppliedCommandRevision),
+      lastCommandStatus=controls.lastCommandStatus,localAuthority=true,remoteCommands=true,
       guardianMessage=tostring(controls.message or ""),telemetryStale=controls.telemetryStale==true,
       alarmLevel=imminent and 3 or nil,
       alarmCode=imminent and "draconic_meltdown_imminent" or nil,
@@ -1119,12 +1143,6 @@ local function facilityWorker()
       local now=facilityNetwork.now()
       if facilityCollectorId and now>=facilityCollectorLeaseUntil then
         releaseCollector()
-      end
-      if controls.request=="REMOTE" and tonumber(controls.remoteLeaseUntil) and
-         now>=tonumber(controls.remoteLeaseUntil) then
-        controls.request="IDLE";controls.remoteTarget=nil;controls.remoteLevel=nil;controls.remoteLeaseUntil=nil
-        controls.message="Remote command lease expired; entering self-sustaining idle"
-        requestDraw()
       end
       -- Broadcast read-only telemetry so Mainframes coming back from an
       -- upgrade immediately refresh their cached registration. Only the
@@ -1158,13 +1176,22 @@ local function facilityWorker()
                (role=="mainframe" or role=="overseer") and
                message.payload.targetNodeId==facilityIdentity.nodeId then
           local action=tostring(message.payload.action or "")
+          local revision=tonumber(message.payload.commandRevision)
           local accepted,detail=false
-          if controls.mode~="AUTO" then
+          if not revision then
+            detail="Missing command revision"
+          elseif revision==tonumber(controls.lastAppliedCommandRevision) then
+            accepted=controls.lastCommandStatus=="accepted"
+            detail=controls.lastCommandDetail
+          elseif tonumber(controls.lastAppliedCommandRevision) and
+                 revision<tonumber(controls.lastAppliedCommandRevision) then
+            detail="Stale command revision"
+          elseif controls.mode~="AUTO" then
             detail="Guardian is not in automatic mode"
           elseif controls.commissioned~=true or not positive(controls.rated) then
             detail="Guardian has no commissioned output ceiling"
           elseif action=="idle" or action=="standby" then
-            controls.request="IDLE";controls.remoteTarget=nil;controls.remoteLevel=nil;controls.remoteLeaseUntil=nil
+            controls.request="IDLE";controls.remoteTarget=nil;controls.remoteLevel=nil
             controls.initialRequested=false;controls.startActivated=false;controls.remoteApplied=nil;controls.remotePrimed=nil
             controls.message="Mainframe requested idle; sustaining containment"
             accepted=true
@@ -1172,19 +1199,25 @@ local function facilityWorker()
             local level=string.upper(tostring(message.payload.level or ""))
             if not FRACTION[level] or level=="OFF" then detail="Generation level must be MIN, MED, or MAX"
             else
-              local lease=math.max(2,math.min(30,tonumber(message.payload.leaseSeconds) or 15))
               if controls.remoteLevel~=level or controls.request~="REMOTE" then
                 controls.remoteApplied=0;controls.remotePrimed=false
               end
               controls.remoteLevel=level;controls.remoteTarget=positive(controls.rated)*(FRACTION[level] or 1)
-              controls.remoteLeaseUntil=facilityNetwork.now()+lease
               controls.request="REMOTE"
               controls.message="Mainframe requested "..level.." generation"
               accepted=true
             end
           else detail="Unsupported control action" end
+          if revision and (not tonumber(controls.lastAppliedCommandRevision) or
+             revision>=tonumber(controls.lastAppliedCommandRevision)) then
+            controls.lastAppliedCommandRevision=revision
+            controls.lastCommandStatus=accepted and "accepted" or "rejected"
+            controls.lastCommandDetail=detail
+            save(controls)
+          end
           send("status",{
             siteId=facilitySiteId,commandMessageId=message.messageId,
+            commandRevision=revision,
             action=action,status=accepted and "accepted" or "rejected",
             detail=detail,target=tonumber(controls.remoteTarget),
           },a)

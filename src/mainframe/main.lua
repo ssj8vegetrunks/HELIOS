@@ -5,6 +5,8 @@ function mainframe.run(config)
     -- Facility links must tolerate a slow monitor redraw or brief world hitch.
     local FACILITY_ONLINE_WINDOW = 20
     local FACILITY_LEASE_SECONDS = 15
+    local FACILITY_MAIL_RETRY_MIN = 3
+    local FACILITY_MAIL_RETRY_MAX = 15
     local display = dofile("/helios/core/display.lua")
     display.start(config)
     local accessibility = dofile("/helios/core/accessibility.lua")
@@ -87,6 +89,7 @@ function mainframe.run(config)
         softwareVersion = config.version,
     }))
     local facilitySequence = 0
+    local facilityCommandRevision = math.floor((os.epoch and os.epoch("utc") or network.now() * 1000))
     local facilityTracker = facilityProtocol.newSequenceTracker()
     local facilitySiteId = tostring((config.network or {}).siteId or "default")
     local overseerCollectorLeaseUntil = 0
@@ -370,6 +373,7 @@ function mainframe.run(config)
     end
 
     local function rescan(acceptChanges)
+        display.refresh()
         modemCount = network.openAll()
         local previous = {}
         if acceptChanges then
@@ -392,15 +396,13 @@ function mainframe.run(config)
         end
         devices = scanned
         registry.save(devices)
-        reactors = reactorAdapter.readAll(devices)
-        turbines = turbineAdapter.readAll(devices)
-        storages = storageAdapter.readAll(devices, config.power)
         registryStale = false
         local missingCount=0;for _ in pairs(missingDevices) do missingCount=missingCount+1 end
-        local discoverySignature=table.concat({#reactors,#turbines,#storages,missingCount},":")
+        local counts=registry.countByCategory(devices)
+        local discoverySignature=table.concat({counts.reactor,counts.turbine,counts.battery,missingCount},":")
         if loggedStates.discovery~=discoverySignature then
             recordEvent("log.discovery_complete", missingCount>0 and "warning" or "info", "discovery",
-                { reactors=#reactors, turbines=#turbines, storage=#storages, missing=missingCount })
+                { reactors=counts.reactor, turbines=counts.turbine, storage=counts.battery, missing=missingCount })
             loggedStates.discovery=discoverySignature
         end
     end
@@ -817,7 +819,7 @@ function mainframe.run(config)
         local outgoing = facilityProtocol.make(kind, facilityIdentity,
             facilitySequence, payload, network.now())
         if outgoing then
-            return network.sendOn(facilityProtocol.rednetProtocol, target, outgoing)
+            return network.sendOn(facilityProtocol.rednetProtocol, target, outgoing), outgoing
         end
         return false
     end
@@ -837,13 +839,37 @@ function mainframe.run(config)
                 local ratio = rated > 0 and target / rated or 0
                 local level = ratio <= 0.25 and "MIN" or ratio <= 0.50 and "MED" or "MAX"
                 local action = target > 0 and "generate" or "idle"
-                sent = sendFacility("control_command", facility.id, {
-                    siteId = facilitySiteId,
-                    targetNodeId = nodeId,
-                    action = action,
-                    level = target > 0 and level or nil,
-                    leaseSeconds = FACILITY_LEASE_SECONDS,
-                }) or sent
+                local key = action .. ":" .. (target > 0 and level or "")
+                if facility.commandDesiredKey ~= key then
+                    facilityCommandRevision = math.max(facilityCommandRevision + 1,
+                        math.floor((os.epoch and os.epoch("utc") or now * 1000)))
+                    facility.commandDesiredKey = key
+                    facility.commandRevision = facilityCommandRevision
+                    facility.commandAction = action
+                    facility.commandLevel = target > 0 and level or nil
+                    facility.commandStatus = "pending"
+                    facility.commandAttempts = 0
+                    facility.commandNextSend = 0
+                end
+                local applied = tonumber(telemetry.lastAppliedCommandRevision)
+                if applied and applied == tonumber(facility.commandRevision) then
+                    facility.commandStatus = tostring(telemetry.lastCommandStatus or "accepted")
+                end
+                if facility.commandStatus == "pending" and now >= (tonumber(facility.commandNextSend) or 0) then
+                    local delivered, outgoing = sendFacility("control_command", facility.id, {
+                        siteId = facilitySiteId,
+                        targetNodeId = nodeId,
+                        action = facility.commandAction,
+                        level = facility.commandLevel,
+                        commandRevision = facility.commandRevision,
+                    })
+                    facility.commandAttempts = (tonumber(facility.commandAttempts) or 0) + 1
+                    facility.commandMessageId = outgoing and outgoing.messageId or nil
+                    local delay = math.min(FACILITY_MAIL_RETRY_MAX,
+                        FACILITY_MAIL_RETRY_MIN * 2 ^ math.min(2, facility.commandAttempts - 1))
+                    facility.commandNextSend = now + delay
+                    sent = delivered or sent
+                end
             end
         end
         return sent
@@ -887,7 +913,24 @@ function mainframe.run(config)
             uiProfile = clean.payload.uiProfile or previous.uiProfile,
             telemetry = clean.kind == "telemetry" and clean.payload or previous.telemetry,
             lastSeen = network.now(),
+            commandDesiredKey = previous.commandDesiredKey,
+            commandRevision = previous.commandRevision,
+            commandAction = previous.commandAction,
+            commandLevel = previous.commandLevel,
+            commandStatus = previous.commandStatus,
+            commandAttempts = previous.commandAttempts,
+            commandNextSend = previous.commandNextSend,
+            commandMessageId = previous.commandMessageId,
         }
+        local facility = facilities[nodeId]
+        if clean.kind == "status" and tonumber(clean.payload.commandRevision) ==
+           tonumber(facility.commandRevision) then
+            facility.commandStatus = tostring(clean.payload.status or "accepted")
+            facility.commandDetail = clean.payload.detail
+        elseif clean.kind == "telemetry" and
+               tonumber(clean.payload.lastAppliedCommandRevision) == tonumber(facility.commandRevision) then
+            facility.commandStatus = tostring(clean.payload.lastCommandStatus or "accepted")
+        end
         -- Persist registration metadata, not the one-second telemetry stream.
         -- Live telemetry stays in memory to avoid needless disk churn.
         if clean.kind == "hello" then saveFacilities() end
@@ -904,9 +947,9 @@ function mainframe.run(config)
                 loggedStates.reactors[stateSlot] = state
             end
         end
-        -- Every Mainframe may retain read-only facility telemetry. Only the
-        -- elected collector acknowledges packets or offers command authority.
-        if collector then
+        -- Telemetry and status are one-way mailbox receipts. Acknowledging
+        -- every one-second sample doubles steady-state network traffic.
+        if collector and (clean.kind == "hello" or clean.kind == "ui_offer") then
             local acknowledgement = facilityProtocol.acknowledge(clean, facilityIdentity,
                 facilitySequence + 1, "accepted", nil, network.now())
             if acknowledgement then

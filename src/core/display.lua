@@ -61,10 +61,7 @@ local function buildProxy()
     local target = {}
     target.write = function(...) return mirror("write", ...) end
     target.blit = function(...) return mirror("blit", ...) end
-    target.clear = function(...)
-        refreshMonitors()
-        return mirror("clear", ...)
-    end
+    target.clear = function(...) return mirror("clear", ...) end
     target.clearLine = function(...) return mirror("clearLine", ...) end
     target.getCursorPos = function(...) return native.getCursorPos(...) end
     target.setCursorPos = function(...) return mirror("setCursorPos", ...) end
@@ -104,7 +101,7 @@ local function buildMonitorProxy()
     local target = {}
     target.write = function(...) return monitorMirror("write", ...) end
     target.blit = function(...) return monitorMirror("blit", ...) end
-    target.clear = function(...) refreshMonitors(); return monitorMirror("clear", ...) end
+    target.clear = function(...) return monitorMirror("clear", ...) end
     target.clearLine = function(...) return monitorMirror("clearLine", ...) end
     target.getCursorPos = function(...) return monitorValue("getCursorPos", native, ...) end
     target.setCursorPos = function(...) return monitorMirror("setCursorPos", ...) end
@@ -157,19 +154,21 @@ function display.useNative()
 end
 
 function display.useMonitors()
-    refreshMonitors()
     term.redirect(monitorProxy)
 end
 
 function display.useMirrored()
-    refreshMonitors()
     term.redirect(proxy)
 end
 
 function display.monitorSize()
-    refreshMonitors()
     if #monitors == 0 then return nil end
     return monitorProxy.getSize()
+end
+
+function display.refresh()
+    refreshMonitors()
+    return #monitors
 end
 
 function display.stop()
@@ -179,7 +178,6 @@ function display.stop()
 end
 
 function display.count()
-    refreshMonitors()
     return #monitors
 end
 

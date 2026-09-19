@@ -62,7 +62,7 @@ function registry.scan()
     local names = peripheral.getNames()
     table.sort(names)
 
-    for _, name in ipairs(names) do
+    for index, name in ipairs(names) do
         local types = { peripheral.getType(name) }
         local methods = peripheral.getMethods(name) or {}
         table.sort(types)
@@ -73,6 +73,7 @@ function registry.scan()
             methods = methods,
             category = classify(name, types, methods),
         }
+        if index % 16 == 0 and type(sleep) == "function" then sleep(0) end
     end
     return devices
 end
