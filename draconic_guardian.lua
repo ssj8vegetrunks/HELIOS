@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.16
+-- HELIOS Draconic Guardian v1.2.0-alpha.17
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -37,7 +37,7 @@ local FIELD_RECOVERY_RATIO, MINIMUM_FIELD_INPUT = .05, 50000
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.16"
+local GUARDIAN_VERSION = "1.2.0-alpha.17"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -441,6 +441,7 @@ end
 local function lifecycleFieldTarget(c,r,baseline)
   local field=pct(r.fieldStrength,r.maxFieldStrength) or 0
   local applied=positive(c.lifecycleFieldApplied) or positive(baseline) or MINIMUM_FIELD_INPUT
+  local generation=tonumber(r.generationRate) or 0
   c.fieldTuneSamples=(tonumber(c.fieldTuneSamples) or 0)+1
   c.fieldTuneStart=tonumber(c.fieldTuneStart) or field
   if field<35 then
@@ -448,7 +449,10 @@ local function lifecycleFieldTarget(c,r,baseline)
     c.fieldTuneSamples=0;c.fieldTuneStart=field
   elseif c.fieldTuneSamples>=FIELD_TUNE_SAMPLES then
     local drift=field-c.fieldTuneStart
-    if field>60 and drift>=0 then
+    -- Reduce containment cost only after the reactor proves a genuine power
+    -- surplus while containment is full and stable/rising. Never optimize the
+    -- field merely because it has not fallen yet.
+    if field>=FIELD_TARGET and drift>=0 and generation>=applied*1.05 then
       applied=math.max(MINIMUM_FIELD_INPUT,math.floor(applied*(1-FIELD_TUNE_RATIO)))
     elseif drift<-.5 then
       applied=math.max(applied+LIFECYCLE_MIN_STEP,math.floor(applied*(1+FIELD_RECOVERY_RATIO)))
@@ -618,10 +622,10 @@ local function supervise(b,d,c)
   if c.mode=="AUTO" and c.request=="IDLE" then
     if not c.commissioned or not c.rated then gate(b.output,0);gate(b.input,injectorCap);c.message="Automatic idle unavailable until commissioning completes";return end
     if not live then gate(b.output,0);gate(b.input,0);c.message="Automatic idle: core retired; awaiting demand";return end
-    -- Containment is never traded for electrical breakeven. Keep the full
-    -- locally proven injector limit while the adaptive cycle raises generation
-    -- until export can carry that cost. A reserve-dependent state is explicit.
-    local fieldTarget=injectorCap
+    -- Begin at the full proven injector limit. lifecycleFieldTarget may trim it
+    -- only after generation covers it with margin and the field remains full
+    -- and stable/rising; any declining field reverses the tuning.
+    local fieldTarget=lifecycleFieldTarget(c,r,injectorCap)
     local ceiling,note=lifecycleTarget(c,r)
     local idleTarget=math.min(ceiling,math.max(MINIMUM_FIELD_INPUT,fieldTarget))
     gate(b.input,fieldTarget);gate(b.output,idleTarget)

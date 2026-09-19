@@ -42,10 +42,16 @@ controls = { rated = 1000000, lifecycleCeilings = { ["10"]={export=1050000} }, c
 target = governor.lifecycleTarget(controls, reactor(10, 60, 1050000, 7751))
 assert(target == 1000000, "adaptive probing must always roll back above 7,750 C")
 
--- Sustained excess containment permits a small field-input trim.
+-- Excess containment alone must never justify reducing injector power. A trim
+-- is permitted only once generation covers containment with margin while the
+-- field is full and stable.
 controls.lifecycleFieldApplied = 1600000
-for _ = 1, 150 do governor.lifecycleFieldTarget(controls, reactor(10, 70, 1000000), 1600000) end
-assert(controls.lifecycleFieldApplied == 1568000, "stable high containment should trim field input by two percent")
+for _ = 1, 150 do governor.lifecycleFieldTarget(controls, reactor(10, 95, 1000000), 1600000) end
+assert(controls.lifecycleFieldApplied == 1600000,
+    "containment must remain at its proven input until generation reaches breakeven")
+for _ = 1, 150 do governor.lifecycleFieldTarget(controls, reactor(10, 95, 2000000), 1600000) end
+assert(controls.lifecycleFieldApplied == 1568000,
+    "stable full containment with generation surplus should trim field input by two percent")
 
 -- Late-cycle heat is expected and must not be mislabeled as an imminent
 -- meltdown while containment remains healthy. A cascade requires both a hot,
