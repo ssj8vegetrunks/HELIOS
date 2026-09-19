@@ -88,10 +88,10 @@ It downloads only the packages selected for one computer from `packages/manifest
 ### `official_hardware` — Official Hardware Modules
 
 - Kind: `hardware`
-- Direct payload: 38519 bytes
+- Direct payload: 38541 bytes
 - Required packages: `core`
 
-- `modules/manifest.json` ← `module-pack/manifest.json` (1599 bytes)
+- `modules/manifest.json` ← `module-pack/manifest.json` (1621 bytes)
 - `modules/extreme_reactors/reactor_adapter.lua` ← `module-pack/extreme_reactors/reactor_adapter.lua` (16991 bytes)
 - `modules/extreme_reactors/turbine_adapter.lua` ← `module-pack/extreme_reactors/turbine_adapter.lua` (9482 bytes)
 - `modules/universal_energy/storage_adapter.lua` ← `module-pack/universal_energy/storage_adapter.lua` (10447 bytes)
