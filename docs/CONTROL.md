@@ -93,11 +93,12 @@ The mainframe runs a guarded reactor-fleet governor:
   standby until reserve falls below the low threshold again. Full storage also
   pauses unfinished power-reactor commissioning.
 - Steam demand is assigned across calibrated steam reactors by learned capacity.
-- A plant dispatcher first decides whether storage requires recharge. It stages
-  only enough learned generation capacity for the measured draw, preferring
-  steam-assisted idle turbines, then already-warm equipment, before cold
-  turbines. Undispatched turbines coast with steam closed and inductors
-  disengaged.
+- A plant dispatcher first decides whether storage requires recharge. Once the
+  low threshold starts a recharge cycle, it dispatches every commissioned
+  generator at its learned safe capacity until storage reaches the high
+  threshold. The storage bank is treated as productive load even when measured
+  grid flow is already positive. Outside a recharge cycle, turbines coast with
+  steam closed and inductors disengaged.
 - Each calibrated turbine has a persistent **Steam-assisted idle** option.
   Enabled turbines remain as warm reserve: HELIOS sends a limited steam pulse
   only after rotor speed falls below its standby floor; disabled turbines simply

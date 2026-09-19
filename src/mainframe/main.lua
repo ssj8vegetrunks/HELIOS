@@ -222,11 +222,11 @@ function mainframe.run(config)
         end
         local rechargeTarget = 0
         if plantRechargeActive and powerReserve ~= nil and totalCapacity > 0 then
-            -- A near-empty grid needs decisive recharge, while a grid closer to
-            -- the high threshold is replenished with progressively less capacity.
-            local fraction = math.max(0.10, math.min(1,
-                (high - powerReserve) / math.max(1, high - low)))
-            rechargeTarget = totalCapacity * fraction
+            -- Storage is the plant's load while a recharge cycle is active.
+            -- Run every commissioned source at its proven safe capacity until
+            -- the high threshold is reached; do not taper merely because the
+            -- bank is large or the instantaneous grid flow is already positive.
+            rechargeTarget = totalCapacity
         end
         local remaining = plantRechargeActive and math.max(1,
             tonumber(powerDemand) or 0, rechargeTarget) or 0
@@ -234,12 +234,14 @@ function mainframe.run(config)
         for _, source in ipairs(sources) do
             if remaining > 0 then
                 local knownCapacity = (tonumber(source.capacity) or 0) > 0
-                -- Select at most one unlearned fallback.  Crucially, do not
-                -- consume the demand with it: later calibrated sources still
-                -- need to be dispatched to satisfy the recharge target.
-                local select = knownCapacity or not unknownFallbackAssigned
+                -- During full-fleet recharge, select every source. Outside
+                -- that cycle, select at most one unlearned fallback and do not
+                -- let it consume demand needed by later calibrated sources.
+                local select = plantRechargeActive or knownCapacity or
+                    not unknownFallbackAssigned
                 local assigned = knownCapacity and
-                    math.min(remaining, source.capacity) or remaining
+                    (plantRechargeActive and source.capacity or
+                        math.min(remaining, source.capacity)) or remaining
                 if not knownCapacity then unknownFallbackAssigned = true end
                 if select then
                 if source.kind == "turbine" then
@@ -254,7 +256,7 @@ function mainframe.run(config)
                     source.unit.dispatchTarget = assigned
                 end
                 end
-                if knownCapacity then
+                if knownCapacity and not plantRechargeActive then
                     remaining = math.max(0, remaining - source.capacity)
                 end
             end

@@ -145,7 +145,8 @@ The existing touch interface and network-ID protection remain online:
 - newly discovered steam and power reactors enter a sequential commissioning
   queue, learn their capability, and return to ready/standby when unneeded;
 - calibrated power reactors recharge against the combined, capacity-weighted
-  storage reserve with low/high hysteresis;
+  storage reserve with low/high hysteresis, dispatching the full commissioned
+  generation fleet throughout an active recharge cycle;
 - reactor exposure is spread as evenly as possible across every fuel column;
 - one-percent insertion differences provide 0.01 rod-equivalent fine control;
 - steam control uses a rolling average and a 2.5% reserve above turbine demand;
