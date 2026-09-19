@@ -2,6 +2,10 @@ HELIOS_GUARDIAN_TEST = true
 fs = { exists = function() return false end }
 
 local governor = assert(dofile("draconic_guardian.lua"))
+assert(governor.chargeableStatus("cold") and governor.chargeableStatus("offline"),
+    "both Draconic stopped-state names must enter the charging sequence")
+assert(not governor.chargeableStatus("cooling"),
+    "a cooling reactor must finish stopping before it is charged")
 local function reactor(conversion, field, generation, temperature)
     return {
         status = "running",

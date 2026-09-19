@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.19
+-- HELIOS Draconic Guardian v1.2.0-alpha.20
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -37,7 +37,7 @@ local FIELD_RECOVERY_RATIO, MINIMUM_FIELD_INPUT = .05, 50000
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.19"
+local GUARDIAN_VERSION = "1.2.0-alpha.20"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -200,6 +200,11 @@ local function reactor(n,m)
   return ok,result
 end
 
+local function chargeableStatus(status)
+  status=string.lower(tostring(status or ""))
+  return status=="offline" or status=="cold"
+end
+
 -- A requested export is only meaningful once the core is actually online.
 -- Keep the entire charge -> activate sequence in one place so the manual
 -- selector, commissioning, and the explicit activation control behave alike.
@@ -220,7 +225,9 @@ local function ensureStarted(b,c,status,reason,fieldTarget,telemetry)
     c.message=reason..": waiting for controlled stop before charging"
     return true
   end
-  if status=="offline" then
+  -- Draconic Evolution exposes a fully stopped reactor as COLD in some
+  -- versions and OFFLINE in others. Both are chargeable terminal states.
+  if chargeableStatus(status) then
     reactor(b.reactor,"chargeReactor")
     c.startActivated=false
     c.message=reason..": charging containment"
@@ -913,7 +920,7 @@ local function drawComputer(t,d,c)
 end
 if rawget(_G,"HELIOS_GUARDIAN_TEST") then
   return {lifecycleTarget=lifecycleTarget,lifecycleFieldTarget=lifecycleFieldTarget,lifecycleCeiling=lifecycleCeiling,
-    emergencyFieldTarget=emergencyFieldTarget,
+    emergencyFieldTarget=emergencyFieldTarget,chargeableStatus=chargeableStatus,
     updateMeltdownTrend=updateMeltdownTrend,imminentMeltdown=imminentMeltdown}
 end
 local binding,page,controls,buttons=inspect(),"overview",load(),{}
