@@ -53,6 +53,16 @@ for _ = 1, 150 do governor.lifecycleFieldTarget(controls, reactor(10, 95, 200000
 assert(controls.lifecycleFieldApplied == 1568000,
     "stable full containment with generation surplus should trim field input by two percent")
 
+-- Falling below the emergency band must request enough positive field flow to
+-- recover online; it must not remain pinned to an insufficient calibration
+-- baseline and force a stop/start cycle.
+controls.lifecycleFieldApplied = 1600000
+local recovery = governor.emergencyFieldTarget(controls, {
+    fieldDrainRate = 1900000,
+}, 1600000)
+assert(recovery == 2850000,
+    "emergency containment recovery must exceed measured field drain")
+
 -- Late-cycle heat is expected and must not be mislabeled as an imminent
 -- meltdown while containment remains healthy. A cascade requires both a hot,
 -- rising core and a low, falling field for consecutive samples.

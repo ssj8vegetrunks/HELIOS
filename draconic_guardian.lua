@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.18
+-- HELIOS Draconic Guardian v1.2.0-alpha.19
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -37,7 +37,7 @@ local FIELD_RECOVERY_RATIO, MINIMUM_FIELD_INPUT = .05, 50000
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.18"
+local GUARDIAN_VERSION = "1.2.0-alpha.19"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -492,6 +492,16 @@ local function lifecycleFieldTarget(c,r,baseline)
   return applied
 end
 
+local function emergencyFieldTarget(c,r,baseline)
+  local proven=positive(baseline) or MINIMUM_FIELD_INPUT
+  local current=positive(c.lifecycleFieldApplied) or proven
+  local drain=positive(r.fieldDrainRate) or 0
+  -- A live low-field core needs recovery headroom, not a shutdown. Closing
+  -- export removes its avoidable load while 150% of measured drain gives the
+  -- field enough positive flow to rebuild instead of hovering at the edge.
+  return math.ceil(math.max(proven,current*1.25,drain*1.50,MINIMUM_FIELD_INPUT))
+end
+
 -- AUTO and ASSISTED retain containment. UNRESTRICTED is visibly armed and lets
 -- the operator's command stand, while warnings remain live.
 local function supervise(b,d,c)
@@ -532,6 +542,20 @@ local function supervise(b,d,c)
   end
   if not free then
     if fuel<=MINIMUM_FUEL then c.request="OFF";return stop("fuel reserve below "..MINIMUM_FUEL.."%") end
+    if temp>MAX_TEMPERATURE then return stop("temperature above "..MAX_TEMPERATURE.." C",false,true) end
+    if live and (c.fieldRecovery or field<=FIELD_EMERGENCY) then
+      c.fieldRecovery=true
+      local recoveryInput=emergencyFieldTarget(c,r,injectorCap)
+      c.lifecycleFieldApplied=recoveryInput
+      gate(b.output,0);gate(b.input,recoveryInput)
+      if field>=FIELD_TARGET then
+        c.fieldRecovery=false
+        c.message="Containment recovery complete; resuming accepted demand"
+      else
+        c.message="CONTAINMENT RECOVERY: reactor remains online; export closed, field input "..fmt(recoveryInput).." RF/t"
+      end
+      return
+    end
     -- WARMING_UP legitimately reports zero containment before activation has
     -- completed. Applying the live-reactor interlock there creates a loop of
     -- stop -> charge -> activate -> stop. Once the reactor is live (or is
@@ -539,7 +563,6 @@ local function supervise(b,d,c)
     if containmentRequired and field<=FIELD_EMERGENCY then
       return stop("field below "..FIELD_EMERGENCY.."%",true)
     end
-    if temp>MAX_TEMPERATURE then return stop("temperature above "..MAX_TEMPERATURE.." C",false,true) end
   else
     local imminent,warning=imminentMeltdown(r)
     if imminent then c.message="UNRESTRICTED WARNING: "..warning end
@@ -890,6 +913,7 @@ local function drawComputer(t,d,c)
 end
 if rawget(_G,"HELIOS_GUARDIAN_TEST") then
   return {lifecycleTarget=lifecycleTarget,lifecycleFieldTarget=lifecycleFieldTarget,lifecycleCeiling=lifecycleCeiling,
+    emergencyFieldTarget=emergencyFieldTarget,
     updateMeltdownTrend=updateMeltdownTrend,imminentMeltdown=imminentMeltdown}
 end
 local binding,page,controls,buttons=inspect(),"overview",load(),{}
