@@ -36,6 +36,27 @@ local function displayedReactors(snapshot)
     return result
 end
 
+-- Keep the dashboard geometry fixed and reveal long status messages in place.
+-- The text pauses at both ends and then travels back, avoiding an abrupt wrap
+-- or a layout that grows with increasingly descriptive governor messages.
+local function marquee(text, width, state, key)
+    text, width = tostring(text or ""), math.max(1, math.floor(width or 1))
+    if #text <= width then return text end
+    state.marquees = state.marquees or {}
+    local slot = state.marquees[key] or { text = text, started = os.clock() }
+    if slot.text ~= text then slot = { text = text, started = os.clock() } end
+    state.marquees[key] = slot
+    local overflow, pause, secondsPerStep = #text - width, 3, 0.8
+    local travel = overflow + pause
+    local phase = math.floor((os.clock() - slot.started) / secondsPerStep) % (travel * 2)
+    local offset
+    if phase < pause then offset = 0
+    elseif phase < travel then offset = phase - pause
+    elseif phase < travel + pause then offset = overflow
+    else offset = overflow - (phase - travel - pause) end
+    return text:sub(offset + 1, offset + width)
+end
+
 function renderer.render(snapshot, state, services)
     local gui, formatter = services.gui, services.powerFormat
     local function tr(key, fallback)
@@ -114,30 +135,38 @@ function renderer.render(snapshot, state, services)
         gui.text(rightX, 6, "+" .. string.rep("-", rightWidth - 2) .. "+", colors.gray)
         gui.text(rightX + 2, 7, tr("dashboard.activity", "HELIOS ACTIVITY"), colors.cyan)
         local row = 9
-        local function line(text, colour)
-            if row < height - 1 then gui.text(rightX + 2, row, text, colour or colors.white, colors.black, rightWidth - 4); row = row + 1 end
+        local function line(text, colour, key)
+            if row < height - 1 then
+                local available = rightWidth - 4
+                gui.text(rightX + 2, row, marquee(text, available, state,
+                    "home:" .. tostring(key or row)), colour or colors.white, colors.black, available)
+                row = row + 1
+            end
         end
-        if alarm then line("! " .. tostring(alarm.message), alarmLevel >= 3 and colors.red or colors.orange) end
-        for _, reactor in ipairs(snapshot.reactors or {}) do
+        if alarm then line("! " .. tostring(alarm.message), alarmLevel >= 3 and colors.red or colors.orange, "alarm") end
+        for index, reactor in ipairs(snapshot.reactors or {}) do
             local plan = reactor.governor or {}
-            line("R " .. nameOf(reactor.name, snapshot) .. ": " .. tv(plan.state or "MONITORING"), colors.orange)
+            local key = "reactor:" .. tostring(reactor.name or index)
+            line("R " .. nameOf(reactor.name, snapshot) .. ": " .. tv(plan.state or "MONITORING"), colors.orange, key .. ":state")
             local dispatch = plan.dispatchRequested == true and tv("DISPATCHED") or
                 (reactor.mode == "power" and tv("STANDBY") or nil)
             line("  " .. (dispatch and (dispatch .. " - ") or "") ..
-                (plan.reason and tv(plan.reason) or tv(reactor.active and "ONLINE" or "OFFLINE")), colors.lightGray)
+                (plan.reason and tv(plan.reason) or tv(reactor.active and "ONLINE" or "OFFLINE")), colors.lightGray, key .. ":reason")
         end
-        for _, reactor in ipairs(snapshot.facilityReactors or {}) do
+        for index, reactor in ipairs(snapshot.facilityReactors or {}) do
+            local key = "facility:" .. tostring(reactor.name or index)
             line("F " .. nameOf(reactor.name, snapshot) .. ": " ..
                 (reactor.online and tv(reactor.state or "ONLINE") or tv("STALE")),
-                reactor.online and colors.magenta or colors.orange)
+                reactor.online and colors.magenta or colors.orange, key .. ":state")
             line("  DRACONIC " .. tr("common.guardian", "GUARDIAN") .. " - " ..
-                tv(reactor.guardianMessage or reactor.mode or "MONITORING"), colors.lightGray)
+                tv(reactor.guardianMessage or reactor.mode or "MONITORING"), colors.lightGray, key .. ":message")
         end
-        for _, turbine in ipairs(snapshot.turbines or {}) do
+        for index, turbine in ipairs(snapshot.turbines or {}) do
             local plan = turbine.governor or {}
-            line("T " .. nameOf(turbine.name, snapshot) .. ": " .. tv(plan.state or "MONITORING"), colors.cyan)
+            local key = "turbine:" .. tostring(turbine.name or index)
+            line("T " .. nameOf(turbine.name, snapshot) .. ": " .. tv(plan.state or "MONITORING"), colors.cyan, key .. ":state")
             line("  " .. tv(plan.dispatchMode or turbine.dispatchMode or "UNKNOWN") ..
-                " - " .. tv(plan.reason or (turbine.active and "ONLINE" or "OFFLINE")), colors.lightGray)
+                " - " .. tv(plan.reason or (turbine.active and "ONLINE" or "OFFLINE")), colors.lightGray, key .. ":reason")
         end
         line(tr("dashboard.storage_reserve", "Storage reserve {percent}%"):gsub("{percent}", ("%.1f"):format(reserve)), reserve < 20 and colors.orange or colors.lime)
         gui.text(rightX, height - 1, "+" .. string.rep("-", rightWidth - 2) .. "+", colors.gray)
@@ -175,7 +204,8 @@ function renderer.render(snapshot, state, services)
                     end
                 end
                 if item.guardianMessage and row < height - 3 then
-                    gui.text(1, row, tostring(item.guardianMessage), colors.lightGray, colors.black, width)
+                    gui.text(1, row, marquee(item.guardianMessage, width, state,
+                        "detail:guardian:" .. tostring(item.name)), colors.lightGray, colors.black, width)
                 end
             else
                 local labels = {
@@ -204,7 +234,8 @@ function renderer.render(snapshot, state, services)
             end
             local plan = item.governor or {}
             if plan.state then gui.text(1, row + 1, tr("common.governor", "GOVERNOR") .. ": " .. tv(plan.state), colors.orange) end
-            if plan.reason then gui.text(1, row + 2, tv(plan.reason), colors.lightGray, colors.black, width) end
+            if plan.reason then gui.text(1, row + 2, marquee(tv(plan.reason), width, state,
+                "detail:reason:" .. tostring(item.name)), colors.lightGray, colors.black, width) end
             buttons.previous = gui.button(1, height - 2, "< " .. tr("common.previous", "PREVIOUS"), colors.cyan, colors.black)
             buttons.next = gui.button(16, height - 2, tr("common.next", "NEXT") .. " >", colors.cyan, colors.black)
         end
