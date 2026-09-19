@@ -2,6 +2,9 @@ local mainframe = {}
 
 -- @section STARTUP AND RUNTIME STATE
 function mainframe.run(config)
+    -- Facility links must tolerate a slow monitor redraw or brief world hitch.
+    local FACILITY_ONLINE_WINDOW = 20
+    local FACILITY_LEASE_SECONDS = 15
     local display = dofile("/helios/core/display.lua")
     display.start(config)
     local accessibility = dofile("/helios/core/accessibility.lua")
@@ -147,7 +150,7 @@ function mainframe.run(config)
             facility.dispatchRequested = false
             facility.dispatchTarget = 0
             local telemetry = facility.telemetry or {}
-            local online = linkNow - (tonumber(facility.lastSeen) or 0) <= 7
+            local online = linkNow - (tonumber(facility.lastSeen) or 0) <= FACILITY_ONLINE_WINDOW
             local capacity = tonumber(telemetry.ratedOutput) or 0
             if facility.facilityType == "draconic_reactor" and online and
                telemetry.commissioned == true and telemetry.remoteCommands == true and
@@ -311,7 +314,7 @@ function mainframe.run(config)
                 siteId = facilitySiteId,
                 collectorRole = "mainframe",
                 collectorPriority = 50,
-                leaseSeconds = 5,
+                leaseSeconds = FACILITY_LEASE_SECONDS,
             }, network.now())
         if not message then return false end
         return network.broadcastOn(facilityProtocol.rednetProtocol, message)
@@ -489,7 +492,7 @@ function mainframe.run(config)
         for nodeId, facility in pairs(facilities) do
             local telemetry = facility.telemetry
             local age = facilityNow - (tonumber(facility.lastSeen) or 0)
-            if type(telemetry) == "table" and age <= 7 and
+            if type(telemetry) == "table" and age <= FACILITY_ONLINE_WINDOW and
                tonumber(telemetry.alarmLevel) then
                 local level = math.max(1, math.min(3, tonumber(telemetry.alarmLevel)))
                 addConfirmed(level, nodeId .. ":" ..
@@ -675,7 +678,7 @@ function mainframe.run(config)
         end
         local linkNow = network.now()
         for nodeId, facility in pairs(facilities) do
-            local online = linkNow - (tonumber(facility.lastSeen) or 0) <= 7
+            local online = linkNow - (tonumber(facility.lastSeen) or 0) <= FACILITY_ONLINE_WINDOW
             if loggedStates.facilities[nodeId] == nil and online then
                 recordEvent("log.facility_connected", "info", "network",
                     { device=nodeId, role=facility.role or "facility" })
@@ -716,7 +719,7 @@ function mainframe.run(config)
                     facilityType = facility.facilityType,
                     softwareVersion = facility.softwareVersion,
                     computerId = facility.id,
-                    online = age <= 7,
+                    online = age <= FACILITY_ONLINE_WINDOW,
                     telemetryAge = age,
                     active = state == "running" or state == "online",
                     state = state,
@@ -825,7 +828,7 @@ function mainframe.run(config)
         local sent = false
         for nodeId, facility in pairs(facilities) do
             local telemetry = facility.telemetry or {}
-            local online = now - (tonumber(facility.lastSeen) or 0) <= 7
+            local online = now - (tonumber(facility.lastSeen) or 0) <= FACILITY_ONLINE_WINDOW
             if facility.facilityType == "draconic_reactor" and online and
                facility.id and telemetry.remoteCommands == true then
                 local target = not paused and facility.dispatchRequested == true and
@@ -839,7 +842,7 @@ function mainframe.run(config)
                     targetNodeId = nodeId,
                     action = action,
                     level = target > 0 and level or nil,
-                    leaseSeconds = 5,
+                    leaseSeconds = FACILITY_LEASE_SECONDS,
                 }) or sent
             end
         end
@@ -918,7 +921,7 @@ function mainframe.run(config)
                 acceptedVersion = facilityProtocol.version,
                 collectorRole = "mainframe",
                 collectorPriority = 50,
-                leaseSeconds = 5,
+                leaseSeconds = FACILITY_LEASE_SECONDS,
                 telemetryOnly = false,
                 remoteCommands = true,
             })

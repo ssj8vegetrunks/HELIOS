@@ -108,7 +108,8 @@ metadata in `/helios/data/facilities.lua`. Live telemetry remains in memory so
 the one-second stream does not churn the computer disk.
 
 `helios facilities` lists registered facility identities. Dispatch commands
-carry a five-second lease renewed by the active collector; loss of that lease
+carry a fifteen-second lease renewed every control cycle by the active collector;
+loss of that lease
 closes export locally. SCRAM remains a separate emergency path.
 
 ## Collector authority and fallback

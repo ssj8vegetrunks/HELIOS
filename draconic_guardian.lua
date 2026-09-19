@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.14
+-- HELIOS Draconic Guardian v1.2.0-alpha.15
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -37,7 +37,7 @@ local FIELD_RECOVERY_RATIO, MINIMUM_FIELD_INPUT = .05, 50000
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.14"
+local GUARDIAN_VERSION = "1.2.0-alpha.15"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -618,10 +618,18 @@ local function supervise(b,d,c)
   if c.mode=="AUTO" and c.request=="IDLE" then
     if not c.commissioned or not c.rated then gate(b.output,0);gate(b.input,injectorCap);c.message="Automatic idle unavailable until commissioning completes";return end
     if not live then gate(b.output,0);gate(b.input,0);c.message="Automatic idle: core retired; awaiting demand";return end
-    local fieldTarget=lifecycleFieldTarget(c,r,injectorCap)
-    local idleTarget=math.min(lifecycleCeiling(c,r),math.max(MINIMUM_FIELD_INPUT,fieldTarget))
+    -- Idle must be electrically self-supporting. Use measured containment drain
+    -- instead of the installation's maximum injector setting, and keep probing
+    -- the safe generation ceiling until it can cover that containment cost.
+    local fieldTarget=shutdownInput()
+    local ceiling,note=lifecycleTarget(c,r)
+    local idleTarget=math.min(ceiling,math.max(MINIMUM_FIELD_INPUT,fieldTarget))
     gate(b.input,fieldTarget);gate(b.output,idleTarget)
-    c.message="Automatic idle: sustaining containment at "..fmt(idleTarget).." RF/t"
+    if idleTarget>=fieldTarget then
+      c.message="Automatic idle: self-sustaining containment at "..fmt(fieldTarget).." RF/t"
+    else
+      c.message="Automatic idle: proving breakeven "..fmt(idleTarget).." / "..fmt(fieldTarget).." RF/t"..(note and " - "..note or "")
+    end
     return
   end
   if c.mode=="AUTO" and c.request~="REMOTE" then gate(b.input,injectorCap);gate(b.output,0);c.message="Automatic standby: adopted "..fmt(injectorCap).." RF/t injector limit; export closed";return end
@@ -1160,7 +1168,7 @@ local function facilityWorker()
             local level=string.upper(tostring(message.payload.level or ""))
             if not FRACTION[level] or level=="OFF" then detail="Generation level must be MIN, MED, or MAX"
             else
-              local lease=math.max(2,math.min(10,tonumber(message.payload.leaseSeconds) or 5))
+              local lease=math.max(2,math.min(30,tonumber(message.payload.leaseSeconds) or 15))
               if controls.remoteLevel~=level or controls.request~="REMOTE" then
                 controls.remoteApplied=0;controls.remotePrimed=false
               end
