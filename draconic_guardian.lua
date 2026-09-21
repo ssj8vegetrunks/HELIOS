@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.20
+-- HELIOS Draconic Guardian v1.2.0-alpha.21
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -37,7 +37,7 @@ local FIELD_RECOVERY_RATIO, MINIMUM_FIELD_INPUT = .05, 50000
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.20"
+local GUARDIAN_VERSION = "1.2.0-alpha.21"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -420,6 +420,11 @@ local function lifecycleCeiling(c,r)
   end
   return proven,key,band
 end
+local function lifecycleUnsafe(field,temp)
+  field,temp=tonumber(field) or 0,tonumber(temp) or math.huge
+  return temp>LIFECYCLE_TEMP_LEEWAY or
+    (temp>LIFECYCLE_TEMP_LIMIT and field<LIFECYCLE_LEEWAY_FIELD)
+end
 local function lifecycleTarget(c,r)
   local historical,key,band=lifecycleCeiling(c,r)
   c.currentCycleCeilings=type(c.currentCycleCeilings)=="table" and c.currentCycleCeilings or {}
@@ -447,8 +452,7 @@ local function lifecycleTarget(c,r)
   -- Above 7,500 C, probing is allowed only while containment remains strong.
   -- 7,750 C is always the adaptive ceiling; the 8,000 C interlock remains the
   -- final independent emergency boundary in supervise().
-  local temperatureUnsafe=temp>LIFECYCLE_TEMP_LEEWAY or
-    (temp>LIFECYCLE_TEMP_LIMIT and field<LIFECYCLE_LEEWAY_FIELD)
+  local temperatureUnsafe=lifecycleUnsafe(field,temp)
   if field<LIFECYCLE_FIELD_FLOOR or temperatureUnsafe then
     c.lifecycleApplied=proven;c.lifecycleSamples=0;c.lifecycleStartField=nil
     return proven,"adaptive rollback to proven band ceiling"
@@ -716,11 +720,14 @@ local function supervise(b,d,c)
     gate(b.input,fieldTarget)
     local applied=math.max(0,tonumber(c.remoteApplied) or 0)
     if not c.remotePrimed then
-      if field>=90 and temp<=LIFECYCLE_TEMP_LIMIT then c.remotePrimed=true
+      -- Prime inside the same proven lifecycle envelope used everywhere else.
+      -- Requiring 90% field and <=7,500 C deadlocks reactors whose safe
+      -- zero-export equilibrium naturally settles just outside that box.
+      if field>=FIELD_TARGET and not lifecycleUnsafe(field,temp) then c.remotePrimed=true
       else applied=0 end
     end
     if c.remotePrimed then
-      if temp>7000 or field<LIFECYCLE_FIELD_FLOOR then
+      if lifecycleUnsafe(field,temp) or field<LIFECYCLE_FIELD_FLOOR then
         applied=math.max(0,math.min(applied-PRESET_RAMP_STEP*2,applied*.85))
       elseif field>=FIELD_TARGET then
         applied=math.min(target,applied+PRESET_RAMP_STEP)
@@ -920,7 +927,7 @@ local function drawComputer(t,d,c)
 end
 if rawget(_G,"HELIOS_GUARDIAN_TEST") then
   return {lifecycleTarget=lifecycleTarget,lifecycleFieldTarget=lifecycleFieldTarget,lifecycleCeiling=lifecycleCeiling,
-    emergencyFieldTarget=emergencyFieldTarget,chargeableStatus=chargeableStatus,
+    lifecycleUnsafe=lifecycleUnsafe,emergencyFieldTarget=emergencyFieldTarget,chargeableStatus=chargeableStatus,
     updateMeltdownTrend=updateMeltdownTrend,imminentMeltdown=imminentMeltdown}
 end
 local binding,page,controls,buttons=inspect(),"overview",load(),{}

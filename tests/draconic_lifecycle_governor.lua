@@ -6,6 +6,10 @@ assert(governor.chargeableStatus("cold") and governor.chargeableStatus("offline"
     "both Draconic stopped-state names must enter the charging sequence")
 assert(not governor.chargeableStatus("cooling"),
     "a cooling reactor must finish stopping before it is charged")
+assert(not governor.lifecycleUnsafe(89, 7700),
+    "strong containment may use the proven 7,500-7,750 C lifecycle leeway")
+assert(governor.lifecycleUnsafe(39, 7700),
+    "the temperature leeway must close when containment falls below 40%")
 local function reactor(conversion, field, generation, temperature)
     return {
         status = "running",
