@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.21
+-- HELIOS Draconic Guardian v1.2.0-alpha.22
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -37,7 +37,7 @@ local FIELD_RECOVERY_RATIO, MINIMUM_FIELD_INPUT = .05, 50000
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.21"
+local GUARDIAN_VERSION = "1.2.0-alpha.22"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -382,6 +382,11 @@ end
 -- Mail already accepted by this facility survives a Guardian reboot. The
 -- wider settings loader predates remote dispatch and intentionally filters
 -- transient fields, so restore only the durable mailbox receipt and intent.
+local function mailboxHasRemoteDemand(saved)
+  return type(saved)=="table" and saved.lastCommandStatus=="accepted" and
+    FRACTION[tostring(saved.remoteLevel or "")]~=nil and
+    tostring(saved.remoteLevel)~="OFF"
+end
 local function restoreMailbox(c)
   local saved
   for _,path in ipairs({SETTINGS,SETTINGS_PENDING,SETTINGS_BACKUP}) do
@@ -394,7 +399,10 @@ local function restoreMailbox(c)
   c.lastAppliedCommandRevision=tonumber(saved.lastAppliedCommandRevision)
   c.lastCommandStatus=saved.lastCommandStatus and tostring(saved.lastCommandStatus) or nil
   c.lastCommandDetail=saved.lastCommandDetail and tostring(saved.lastCommandDetail) or nil
-  if saved.request=="REMOTE" and FRACTION[tostring(saved.remoteLevel or "")] then
+  -- alpha.21 and older shutdown cleanup wrote request=OFF but left the
+  -- accepted mailbox revision and remote level intact. Recover that durable
+  -- intent as well as normally persisted REMOTE state.
+  if saved.request=="REMOTE" or mailboxHasRemoteDemand(saved) then
     c.request="REMOTE";c.remoteLevel=tostring(saved.remoteLevel)
     c.remoteTarget=positive(saved.remoteTarget);c.remoteApplied=tonumber(saved.remoteApplied)
     c.remotePrimed=saved.remotePrimed==true
@@ -927,7 +935,8 @@ local function drawComputer(t,d,c)
 end
 if rawget(_G,"HELIOS_GUARDIAN_TEST") then
   return {lifecycleTarget=lifecycleTarget,lifecycleFieldTarget=lifecycleFieldTarget,lifecycleCeiling=lifecycleCeiling,
-    lifecycleUnsafe=lifecycleUnsafe,emergencyFieldTarget=emergencyFieldTarget,chargeableStatus=chargeableStatus,
+    lifecycleUnsafe=lifecycleUnsafe,emergencyFieldTarget=emergencyFieldTarget,
+    chargeableStatus=chargeableStatus,mailboxHasRemoteDemand=mailboxHasRemoteDemand,
     updateMeltdownTrend=updateMeltdownTrend,imminentMeltdown=imminentMeltdown}
 end
 local binding,page,controls,buttons=inspect(),"overview",load(),{}
@@ -1370,20 +1379,38 @@ local function emergencyHold(reason)
   save(controls)
 end
 
--- On a world/server reload the reactor may resume ticking before the first
--- 0.2-second supervision timer. Apply a synchronous fail-safe before starting
--- UI and networking: full learned containment, export closed, reactor stopped.
--- A reactor which was live before an unclean shutdown therefore stays down
--- until an operator deliberately starts it again.
+local function handoffHold(reason)
+  if not binding or not binding.ready then return end
+  local current=read(binding)
+  if current then data=current;acquireGates(binding,current,controls) end
+  -- An update/reboot is a controller handoff, not a reactor emergency. Keep
+  -- the live core and accepted mailbox demand intact while making export safe
+  -- until the replacement process takes over.
+  gate(binding.output,0)
+  gate(binding.input,math.max(positive(controls.lifecycleFieldApplied) or 0,
+    positive(controls.injectorBaseline) or 0,
+    positive(current and current.inputSet) or 0,
+    positive(current and current.inputFlow) or 0))
+  controls.message="CONTROLLER HANDOFF: export closed; reactor remains online"
+  save(controls)
+end
+
+-- On a world/server reload, synchronously close export and retain containment
+-- before workers start. Do not stop a healthy live reactor merely because its
+-- controller process is being replaced.
 if binding.ready and data then
   local reactorStatus=string.lower(tostring(data.reactor and data.reactor.status or "unknown"))
   if reactorStatus=="online" or reactorStatus=="running" or reactorStatus=="stopping" or reactorStatus=="cooling" then
-    emergencyHold("startup/reload interlock; manual restart required")
+    handoffHold("startup/reload controller handoff")
   end
 end
 
 local ok,reason=pcall(parallel.waitForAny,
   resilient("input",inputWorker),controlWorker,resilient("display",displayWorker),
   resilient("facility network",facilityWorker),resilient("profiler",profilerWorker))
-emergencyHold(ok and "Guardian control loop stopped" or reason)
+if not ok and tostring(reason):find("Terminated",1,true) then
+  handoffHold("Guardian update/reboot")
+else
+  emergencyHold(ok and "Guardian control loop stopped" or reason)
+end
 if not ok then error(reason,0) end

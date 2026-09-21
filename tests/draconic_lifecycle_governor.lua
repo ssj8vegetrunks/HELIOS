@@ -10,6 +10,12 @@ assert(not governor.lifecycleUnsafe(89, 7700),
     "strong containment may use the proven 7,500-7,750 C lifecycle leeway")
 assert(governor.lifecycleUnsafe(39, 7700),
     "the temperature leeway must close when containment falls below 40%")
+assert(governor.mailboxHasRemoteDemand({
+    lastCommandStatus = "accepted", remoteLevel = "MAX", request = "OFF",
+}), "legacy shutdown cleanup must not erase an accepted remote demand")
+assert(not governor.mailboxHasRemoteDemand({
+    lastCommandStatus = "accepted", request = "IDLE",
+}), "an accepted idle request must remain idle")
 local function reactor(conversion, field, generation, temperature)
     return {
         status = "running",
