@@ -16,12 +16,13 @@ assert(governor.mailboxHasRemoteDemand({
 assert(not governor.mailboxHasRemoteDemand({
     lastCommandStatus = "accepted", request = "IDLE",
 }), "an accepted idle request must remain idle")
-local function reactor(conversion, field, generation, temperature)
+local function reactor(conversion, field, generation, temperature, sampleTime)
     return {
         status = "running",
         fuelConversion = conversion, maxFuelConversion = 100,
         fieldStrength = field, maxFieldStrength = 100,
         generationRate = generation, temperature = temperature or 3000,
+        sampleTime = sampleTime,
     }
 end
 
@@ -37,12 +38,21 @@ assert(target == 1000000, "fresh core must return to commissioned export")
 assert(next(controls.currentCycleCeilings) == nil, "fresh core must clear current-cycle proofs")
 
 -- A healthy point becomes proven only after the full observation window.
-controls = { rated = 1000000, injectorBaseline = 1600000, lifecycleCeilings = {}, currentCycleCeilings = {} }
-for _ = 1, 149 do target = governor.lifecycleTarget(controls, reactor(10, 70, 1000000)) end
-assert(target == 1000000, "unproven output must remain at the current point")
-target = governor.lifecycleTarget(controls, reactor(10, 70, 1000000))
-assert(target == 1050000, "stable output must advance by the conservative minimum step")
-assert(controls.currentCycleCeilings["10"] == 1000000, "stable point must be recorded for this cycle")
+controls = { rated = 1000000, injectorBaseline = 1600000, lifecycleCeilings = {},
+    currentCycleCeilings = {}, lifecycleBandKey = "10", lifecycleNextProbeAt = 0 }
+for second = 1, 119 do
+    target = governor.lifecycleTarget(controls, reactor(10, 70, 1050000, nil, second))
+end
+assert(target == 1050000 and controls.lifecycleSamples == 119,
+    "adaptive proof must collect no faster than one sample per second")
+target = governor.lifecycleTarget(controls, reactor(10, 70, 1050000, nil, 120))
+assert(target == 1050000, "120 stable seconds must prove the adaptive trial")
+assert(controls.currentCycleCeilings["10"] == 1050000,
+    "stable trial must be recorded for this fuel band")
+target = governor.lifecycleTarget(controls, reactor(10, 70, 1050000, nil, 121))
+assert(target == 1050000, "a new adaptive trial must not begin immediately")
+target = governor.lifecycleTarget(controls, reactor(10, 70, 1100000, nil, 1020))
+assert(target > 1050000, "the next adaptive trial may begin after fifteen minutes")
 
 -- The lifecycle governor may use the 7,500-7,750 C efficiency band only when
 -- containment is at least 40%; 7,750 C remains an unconditional ceiling.

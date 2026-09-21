@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.22
+-- HELIOS Draconic Guardian v1.2.0-alpha.23
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -24,7 +24,8 @@ local PRESET_RAMP_STEP = 50000
 -- initial commissioning result as a permanent limit.  A trial must remain
 -- healthy for 30 seconds before it is remembered, and containment degradation
 -- immediately rolls it back to the last proven value.
-local LIFECYCLE_BAND, LIFECYCLE_PROOF_SAMPLES = 5, 150
+local LIFECYCLE_BAND, LIFECYCLE_PROOF_SAMPLES = 5, 120
+local LIFECYCLE_SAMPLE_INTERVAL, LIFECYCLE_PROBE_INTERVAL = 1, 15*60
 local LIFECYCLE_FIELD_FLOOR, LIFECYCLE_PROBE_FIELD = 30, 35
 local LIFECYCLE_TEMP_LIMIT, LIFECYCLE_TEMP_LEEWAY = 7500, 7750
 local LIFECYCLE_LEEWAY_FIELD, LIFECYCLE_FIELD_DRIFT = 40, .5
@@ -37,7 +38,7 @@ local FIELD_RECOVERY_RATIO, MINIMUM_FIELD_INPUT = .05, 50000
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.22"
+local GUARDIAN_VERSION = "1.2.0-alpha.23"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -131,7 +132,7 @@ local function call(n,m,...)
   if not n then return nil,"missing" end
   local ok,v=pcall(peripheral.call,n,m,...); if not ok then return nil,tostring(v) end; return v
 end
-local gateApplied,gateCommands={},{}
+local gateApplied,gateCommands,gateTargets={},{},{}
 local function read(b)
   local r,e=call(b.reactor,"getReactorInfo"); if type(r)~="table" then return nil,e or "getReactorInfo failed" end
   local inputSet=call(b.input,"getFlowOverride");if inputSet==nil then inputSet=call(b.input,"getSignalLowFlow") end
@@ -142,6 +143,7 @@ local function read(b)
 end
 local function gate(n,v,force)
   local flow=math.max(0,math.floor(tonumber(v) or 0))
+  gateTargets[n]=flow
   local applied=tonumber(gateApplied[n])
   if not force and applied and math.abs(applied-flow)<1 then return true end
   local previous=gateCommands[n]
@@ -399,6 +401,8 @@ local function restoreMailbox(c)
   c.lastAppliedCommandRevision=tonumber(saved.lastAppliedCommandRevision)
   c.lastCommandStatus=saved.lastCommandStatus and tostring(saved.lastCommandStatus) or nil
   c.lastCommandDetail=saved.lastCommandDetail and tostring(saved.lastCommandDetail) or nil
+  c.lifecycleLastSampleAt=tonumber(saved.lifecycleLastSampleAt)
+  c.lifecycleNextProbeAt=tonumber(saved.lifecycleNextProbeAt)
   -- alpha.21 and older shutdown cleanup wrote request=OFF but left the
   -- accepted mailbox revision and remote level intact. Recover that durable
   -- intent as well as normally persisted REMOTE state.
@@ -433,13 +437,19 @@ local function lifecycleUnsafe(field,temp)
   return temp>LIFECYCLE_TEMP_LEEWAY or
     (temp>LIFECYCLE_TEMP_LIMIT and field<LIFECYCLE_LEEWAY_FIELD)
 end
+local function lifecycleNow(r)
+  return tonumber(r and r.sampleTime) or
+    (os.epoch and os.epoch("utc")/1000 or os.clock())
+end
 local function lifecycleTarget(c,r)
+  local now=lifecycleNow(r)
   local historical,key,band=lifecycleCeiling(c,r)
   c.currentCycleCeilings=type(c.currentCycleCeilings)=="table" and c.currentCycleCeilings or {}
   local conversion=pct(r.fuelConversion,r.maxFuelConversion) or 0
   if tonumber(c.lastFuelConversion) and conversion+2<tonumber(c.lastFuelConversion) then
     c.currentCycleCeilings={};c.lifecycleApplied=tonumber(c.rated) or 0;c.lifecycleFieldApplied=positive(c.injectorBaseline)
-    c.lifecycleSamples=0;c.fieldTuneSamples=0;c.lifecycleBandKey=nil;c.message=tr("guardian.fresh_core",nil,"Fresh fuel cycle detected; returning to commissioned baseline")
+    c.lifecycleSamples=0;c.lifecycleLastSampleAt=nil;c.lifecycleNextProbeAt=now+LIFECYCLE_PROBE_INTERVAL
+    c.fieldTuneSamples=0;c.lifecycleBandKey=nil;c.message=tr("guardian.fresh_core",nil,"Fresh fuel cycle detected; returning to commissioned baseline")
   end
   c.lastFuelConversion=conversion
   local proven=tonumber(c.rated) or 0
@@ -451,7 +461,8 @@ local function lifecycleTarget(c,r)
     c.lifecycleBandKey=key
     if previousBand and band<previousBand then c.lifecycleApplied=tonumber(c.rated) or 0
     else c.lifecycleApplied=math.max(tonumber(c.rated) or 0,math.min(tonumber(c.lifecycleApplied) or proven,historical)) end
-    c.lifecycleSamples=0;c.lifecycleStartField=nil;c.fieldTuneSamples=0
+    c.lifecycleSamples=0;c.lifecycleLastSampleAt=nil;c.lifecycleStartField=nil;c.fieldTuneSamples=0
+    c.lifecycleNextProbeAt=now+LIFECYCLE_PROBE_INTERVAL
   end
   local applied=math.max(proven,tonumber(c.lifecycleApplied) or proven)
   local field=pct(r.fieldStrength,r.maxFieldStrength) or 0
@@ -462,10 +473,24 @@ local function lifecycleTarget(c,r)
   -- final independent emergency boundary in supervise().
   local temperatureUnsafe=lifecycleUnsafe(field,temp)
   if field<LIFECYCLE_FIELD_FLOOR or temperatureUnsafe then
-    c.lifecycleApplied=proven;c.lifecycleSamples=0;c.lifecycleStartField=nil
+    c.lifecycleApplied=proven;c.lifecycleSamples=0;c.lifecycleLastSampleAt=nil;c.lifecycleStartField=nil
+    c.lifecycleNextProbeAt=now+LIFECYCLE_PROBE_INTERVAL
     return proven,"adaptive rollback to proven band ceiling"
   end
+  if applied<=proven then
+    c.lifecycleNextProbeAt=tonumber(c.lifecycleNextProbeAt) or now+LIFECYCLE_PROBE_INTERVAL
+    if now<c.lifecycleNextProbeAt then
+      return proven,"next adaptive calibration in "..math.max(1,math.ceil((c.lifecycleNextProbeAt-now)/60)).." min"
+    end
+    applied=math.max(proven+LIFECYCLE_MIN_STEP,math.floor(proven*LIFECYCLE_STEP_RATIO))
+    c.lifecycleApplied=applied;c.lifecycleSamples=0;c.lifecycleLastSampleAt=nil;c.lifecycleStartField=nil
+  end
   if field>=LIFECYCLE_PROBE_FIELD and generation>=applied*.9 then
+    local lastSample=tonumber(c.lifecycleLastSampleAt)
+    if lastSample and now-lastSample<LIFECYCLE_SAMPLE_INTERVAL then
+      return applied,"proving adaptive ceiling in "..band.."% fuel band ("..(tonumber(c.lifecycleSamples) or 0).."/"..LIFECYCLE_PROOF_SAMPLES..")"
+    end
+    c.lifecycleLastSampleAt=now
     c.lifecycleSamples=(tonumber(c.lifecycleSamples) or 0)+1
     c.lifecycleStartField=tonumber(c.lifecycleStartField) or field
     if c.lifecycleSamples>=LIFECYCLE_PROOF_SAMPLES then
@@ -474,16 +499,17 @@ local function lifecycleTarget(c,r)
         local old=c.lifecycleCeilings[key];local oldExport=tonumber(type(old)=="table" and old.export or old) or 0
         c.lifecycleCeilings[key]={export=math.max(oldExport,applied),fieldInput=positive(c.lifecycleFieldApplied) or positive(c.injectorBaseline),field=field,temperature=temp,conversion=conversion}
         proven=math.max(proven,applied)
-        c.lifecycleApplied=math.max(applied+LIFECYCLE_MIN_STEP,math.floor(applied*LIFECYCLE_STEP_RATIO))
-        c.lifecycleSamples=0;c.lifecycleStartField=field
-        return c.lifecycleApplied,"proved "..fmt(proven).." RF/t in "..band.."% fuel band; probing higher"
+        c.lifecycleApplied=proven;c.lifecycleSamples=0;c.lifecycleLastSampleAt=nil;c.lifecycleStartField=nil
+        c.lifecycleNextProbeAt=now+LIFECYCLE_PROBE_INTERVAL
+        return proven,"proved "..fmt(proven).." RF/t in "..band.."% fuel band; next adaptive calibration in 15 min"
       end
-      c.lifecycleApplied=proven;c.lifecycleSamples=0;c.lifecycleStartField=nil
+      c.lifecycleApplied=proven;c.lifecycleSamples=0;c.lifecycleLastSampleAt=nil;c.lifecycleStartField=nil
+      c.lifecycleNextProbeAt=now+LIFECYCLE_PROBE_INTERVAL
       return proven,"field trend declined; holding proven band ceiling"
     end
     return applied,"proving adaptive ceiling in "..band.."% fuel band ("..c.lifecycleSamples.."/"..LIFECYCLE_PROOF_SAMPLES..")"
   end
-  c.lifecycleSamples=0;c.lifecycleStartField=nil
+  c.lifecycleSamples=0;c.lifecycleLastSampleAt=nil;c.lifecycleStartField=nil
   return applied,"adaptive ceiling held until field and generation stabilize"
 end
 local function lifecycleFieldTarget(c,r,baseline)
@@ -853,8 +879,8 @@ local function draw(t,b,d,page,c,bs)
     liveLine(ty+7,"Saturation: "..string.format("%.1f%%",pct(r.energySaturation,r.maxEnergySaturation) or 0))
     liveLine(ty+8,"Fuel conversion: "..string.format("%.1f%%",pct(r.fuelConversion,r.maxFuelConversion) or 0))
     local inputControlled=d.inputOverride==true or c.inputControlVerified==true
-    liveLine(ty+10,"Field live/set: "..fmt(d.inputFlow).." / "..fmt(d.inputSet),inputControlled and colors.lime or colors.red)
-    liveLine(ty+11,"Export live/set: "..fmt(d.outputFlow).." / "..fmt(d.outputSet),exportApplied and colors.lime or colors.orange)
+    liveLine(ty+10,"Field actual: "..fmt(d.inputFlow).."  command: "..fmt(gateTargets[b.input]),inputControlled and colors.lime or colors.red)
+    liveLine(ty+11,"Export actual: "..fmt(d.outputFlow).."  command: "..fmt(gateTargets[b.output]),exportApplied and colors.lime or colors.orange)
     return
   end
   local r=d.reactor;if w<54 or h<25 then text(t,1,5,"Large monitor required for the Guardian console.",colors.orange);text(t,1,7,"State: "..tostring(r.status).."  Temp: "..fmt(r.temperature).." C");text(t,1,8,"Generation: "..fmt(r.generationRate).." RF/t");return end
@@ -881,7 +907,10 @@ local function draw(t,b,d,page,c,bs)
   center(9,tr("common.core_temperature",nil,"Core temperature")..": "..fmt(r.temperature).." C",colors.orange);center(10,tr("common.field_strength",nil,"Containment field strength")..": "..fmt(r.fieldStrength).." / "..fmt(r.maxFieldStrength));center(11,tr("common.saturation",nil,"Energy saturation")..": "..fmt(r.energySaturation).." / "..fmt(r.maxEnergySaturation));center(12,tr("common.fuel_conversion",nil,"Fuel conversion")..": "..fmt(r.fuelConversion).." / "..fmt(r.maxFuelConversion))
   local inputControlled=d.inputOverride==true or c.inputControlVerified==true
   local outputControlled=d.outputOverride==true or c.outputControlVerified==true
-  center(14,tr("guardian.gate_control",nil,"GATE CONTROL"),colors.cyan);center(15,tr("guardian.field",nil,"Field")..": "..fmt(d.inputFlow).." / "..fmt(d.inputSet),inputControlled and colors.lime or colors.red);center(16,tr("guardian.export",nil,"Export")..": "..fmt(d.outputFlow).." / "..fmt(d.outputSet),outputControlled and colors.lime or colors.red);center(17,tr("guardian.gate_roles",{output=tostring(b.output)},"modem=field; {output}=export"),colors.lightGray);centerWrap(18,tr("common.guardian",nil,"GUARDIAN")..": "..c.message,c.mode=="UNRESTRICTED" and colors.red or colors.lightGray,3)
+  center(14,tr("guardian.gate_control",nil,"GATE CONTROL"),colors.cyan)
+  center(15,"Field actual "..fmt(d.inputFlow).."  command "..fmt(gateTargets[b.input]),inputControlled and colors.lime or colors.red)
+  center(16,"Export actual "..fmt(d.outputFlow).."  command "..fmt(gateTargets[b.output]),outputControlled and colors.lime or colors.red)
+  center(17,tr("guardian.gate_roles",{output=tostring(b.output)},"modem=field; {output}=export"),colors.lightGray);centerWrap(18,tr("common.guardian",nil,"GUARDIAN")..": "..c.message,c.mode=="UNRESTRICTED" and colors.red or colors.lightGray,3)
   local y=h-7;if not c.gatesOwned then
     text(t,1,y-2,"GATE CONTROL NOT ACQUIRED - REACTOR START DISABLED",colors.red)
     text(t,1,y-1,"Field control: "..tostring(c.inputControlVerified).."  Export control: "..tostring(c.outputControlVerified),colors.orange)
@@ -1083,7 +1112,7 @@ local function inputWorker()
       target=binding.monitor and peripheral.wrap(binding.monitor) or computer
       compactMonitor(target,binding.monitor~=nil)
       if accessibility then accessibility.apply(computer,guardianConfig);if target~=computer then accessibility.apply(target,guardianConfig) end end
-      gateApplied={};gateCommands={};reactorCommands={}
+      gateApplied={};gateCommands={};gateTargets={};reactorCommands={}
       controls.inputControlVerified=false;controls.outputControlVerified=false;controls.gatesOwned=false
       data=nil
       requestDraw()
