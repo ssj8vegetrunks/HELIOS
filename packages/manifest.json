@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "core_version": "1.6.0-alpha.42",
+  "core_version": "1.6.0-alpha.43",
   "packages": {
     "core": {
       "kind": "core",
@@ -130,7 +130,7 @@
         {
           "source": "src/mainframe/reactor_governor.lua",
           "path": "mainframe/reactor_governor.lua",
-          "bytes": 67523
+          "bytes": 67905
         },
         {
           "source": "src/mainframe/turbine_governor.lua",
@@ -261,7 +261,7 @@
         {
           "source": "module-pack/manifest.json",
           "path": "modules/manifest.json",
-          "bytes": 1885
+          "bytes": 1907
         },
         {
           "source": "module-pack/extreme_reactors/reactor_adapter.lua",
@@ -307,7 +307,7 @@
         {
           "source": "src/gui/control-room/manifest.lua",
           "path": "gui/control-room/manifest.lua",
-          "bytes": 938
+          "bytes": 956
         },
         {
           "source": "src/gui/control-room/renderer.lua",

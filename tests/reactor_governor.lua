@@ -201,6 +201,33 @@ do
 end
 
 do
+    -- The 90% prime margin is a starting estimate, not a ceiling. A fleet can
+    -- consume more than the sequential calibration demand advertises, so an
+    -- empty, non-filling reactor buffer must keep opening rods during priming.
+    local primeControl = {}
+    for key, value in pairs(control) do primeControl[key] = value end
+    primeControl.reactorProfiles = {
+        reactor_0 = { exposure = 0.5, steam = 3800, targetSteam = 3800 },
+    }
+    local memory = governor.new()
+    local source = reactor(3800, 0.5, { hotFluidPercent = 0 })
+    local plan
+    for now = 1, 12 do
+        plan = governor.evaluate(memory, source, primeControl, {
+            now = now,
+            steamPrimeRequested = true,
+        }, 2000, 1)
+    end
+    equal(plan.targetSteam, 3800, "prime estimate remains visible")
+    equal(plan.state, "BUFFER RECOVERY",
+        "empty source buffer overrides the fixed prime estimate")
+    equal(plan.action, "INCREASE EXPOSURE",
+        "priming steadily raises reactor output until its buffer fills")
+    assert(plan.recommendedRodExposure > 0.5,
+        "prime buffer recovery must open additional rod exposure")
+end
+
+do
     local first = turbine(500, {
         name = "turbine_0",
         flowRateLimit = 2000,
@@ -358,8 +385,10 @@ do
             steamPrimeRequested = true,
         }, 2000, 1)
     end
-    equal(plan.state, "PRIMING STEAM",
-        "elevated output is held until both buffers report ready")
+    equal(plan.state, "BUFFER RECOVERY",
+        "a flat source buffer raises output beyond the initial prime estimate")
+    equal(plan.action, "INCREASE EXPOSURE",
+        "priming continues opening rods while the source buffer is not filling")
     equal(primeControl.reactorProfiles.prime_source.targetSteam, 2300,
         "temporary prime does not overwrite the learned reactor profile")
 

@@ -713,12 +713,18 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
                 previous.recalibrating == true and
                 calibrationPhase == "ADJUSTING" and averageReady and
                 production >= target - deadband
-            local bufferFeedbackEnabled = not primeRequested and
-                (activeTurbines or 0) > 0 and bufferTelemetryReady and
-                turbineBuffer ~= nil and (
-                    (type(profile) == "table" and
-                        previous.recalibrating ~= true) or
-                    firstCalibrationBufferFeedback)
+            -- Priming's calculated target is only an initial estimate. The
+            -- source buffer remains authoritative while turbines are charging:
+            -- if their combined draw exceeds that estimate, a flat/draining
+            -- reactor buffer must continue opening rods until it truly fills.
+            local bufferFeedbackEligible =
+                (type(profile) == "table" and
+                    previous.recalibrating ~= true) or
+                firstCalibrationBufferFeedback
+            local bufferFeedbackEnabled =
+                (activeTurbines or 0) > 0 and bufferFeedbackEligible and
+                (primeRequested or
+                    (bufferTelemetryReady and turbineBuffer ~= nil))
             if previous.bufferExposureFloor == nil and type(profile) == "table" and
                tonumber(profile.bufferExposure) ~= nil and
                tonumber(profile.bufferDemand) ~= nil and
