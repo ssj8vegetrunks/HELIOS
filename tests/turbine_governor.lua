@@ -573,18 +573,39 @@ do
     control.turbineProfiles.queue_a = nil
     control.turbineProfiles.queue_b = nil
     local first = turbine("queue_a", 0, 0)
-    local second = turbine("queue_b", 0, 0)
+    local second = turbine("queue_b", 900, 2000)
     governor.evaluateAll(memory, { first, second }, control, {
         now = 1,
         calibrationBlocked = true,
         calibrationBlockReason = "Waiting for sequential reactor commissioning",
     })
-    equal(first.governor.state, "QUEUED", "reactor commissioning blocks first turbine")
-    equal(second.governor.state, "QUEUED", "reactor commissioning blocks second turbine")
+    equal(first.governor.state, "QUEUED / ISOLATED", "reactor commissioning isolates first turbine")
+    equal(second.governor.state, "QUEUED / ISOLATED", "reactor commissioning isolates second turbine")
+    equal(first.governor.recommendedActive, false, "queued turbine is deactivated")
+    equal(first.governor.recommendedFlow, 0, "queued turbine steam is closed")
+    equal(first.governor.recommendedInductor, false, "queued turbine load is released")
 
     governor.evaluateAll(memory, { first, second }, control, { now = 2 })
-    assert(first.governor.state ~= "QUEUED", "first turbine begins sequential calibration")
-    equal(second.governor.state, "QUEUED", "second turbine waits for first turbine")
+    assert(first.governor.state ~= "QUEUED / ISOLATED", "first turbine begins sequential calibration")
+    equal(second.governor.state, "QUEUED / ISOLATED", "second turbine waits isolated for first turbine")
+    local writes = {}
+    governor.apply(memory, second, control, { now = 2 }, {
+        setInductor = function(_, enabled)
+            writes[#writes + 1] = "inductor:" .. tostring(enabled)
+            return true, enabled
+        end,
+        setFlowLimit = function(_, flow)
+            writes[#writes + 1] = "flow:" .. tostring(flow)
+            return true, flow
+        end,
+        setActive = function(_, active)
+            writes[#writes + 1] = "active:" .. tostring(active)
+            return true, active
+        end,
+    })
+    equal(table.concat(writes, ","),
+        "inductor:false,flow:0,active:false",
+        "queued turbine releases load and steam before deactivation")
 end
 
 print("turbine governor tests passed")

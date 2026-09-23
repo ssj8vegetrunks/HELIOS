@@ -155,8 +155,25 @@ function governor.evaluate(memory, turbine, control, context)
     elseif turbine.error then
         result = hold("NO TRUSTED DATA", tostring(turbine.error), false)
     elseif context.calibrationBlocked == true and not profile then
-        result = hold("QUEUED", tostring(context.calibrationBlockReason or
-            "Waiting for earlier plant calibration"))
+        local action = "ISOLATE TURBINE"
+        previous.actionSamples = previous.action == action and
+            ((previous.actionSamples or 0) + 1) or 1
+        previous.action = action
+        result = {
+            mode = "automatic",
+            state = "QUEUED / ISOLATED",
+            action = action,
+            reason = tostring(context.calibrationBlockReason or
+                "Waiting for earlier plant calibration"),
+            trusted = true,
+            currentActive = turbine.active,
+            recommendedActive = false,
+            currentFlow = tonumber(turbine.flowRateMax),
+            recommendedFlow = 0,
+            currentInductor = turbine.inductorEngaged,
+            recommendedInductor = false,
+            actionSamples = previous.actionSamples,
+        }
     elseif turbine.active == false then
         local dispatchMode = tostring(context.dispatchMode or "COASTING")
         local shouldStart = profile == nil or dispatchMode == "GENERATING" or
@@ -872,15 +889,20 @@ function governor.apply(memory, turbine, control, context, writers)
         previous.lastAttemptAt = now
         local ok, appliedActive, appliedFlow, appliedInductor, reason =
             true, nil, nil, nil, nil
-        if needsActive then
-            ok, appliedActive, reason = writers.setActive(
-                turbine, plan.recommendedActive)
+        -- Isolate a queued turbine before deactivating it so it cannot consume
+        -- another unit's calibration steam during the state transition.
+        local stopping = needsActive and plan.recommendedActive == false
+        if not stopping and needsActive then
+            ok, appliedActive, reason = writers.setActive(turbine, true)
         end
         if ok and needsInductor then
             ok, appliedInductor, reason = writers.setInductor(turbine, plan.recommendedInductor)
         end
         if ok and needsFlow then
             ok, appliedFlow, reason = writers.setFlowLimit(turbine, proposed)
+        end
+        if ok and stopping then
+            ok, appliedActive, reason = writers.setActive(turbine, false)
         end
         if ok then
             previous.lastAppliedAt = now
