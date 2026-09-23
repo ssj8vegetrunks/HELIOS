@@ -10,6 +10,13 @@ assert(not governor.lifecycleUnsafe(89, 7700),
     "strong containment may use the proven 7,500-7,750 C lifecycle leeway")
 assert(governor.lifecycleUnsafe(39, 7700),
     "the temperature leeway must close when containment falls below 40%")
+local thermal = {}
+assert(governor.thermalHoldRequired(thermal, 8050),
+    "crossing the thermal limit must enter a gate hold")
+assert(governor.thermalHoldRequired(thermal, 7600),
+    "thermal gate hold must use hysteresis instead of immediately resuming")
+assert(not governor.thermalHoldRequired(thermal, 7500),
+    "a cooled, contained reactor may resume without a stop/start cycle")
 assert(governor.mailboxHasRemoteDemand({
     lastCommandStatus = "accepted", remoteLevel = "MAX", request = "OFF",
 }), "legacy shutdown cleanup must not erase an accepted remote demand")

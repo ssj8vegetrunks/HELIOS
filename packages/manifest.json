@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "core_version": "1.6.0-alpha.41",
+  "core_version": "1.6.0-alpha.42",
   "packages": {
     "core": {
       "kind": "core",
@@ -223,7 +223,7 @@
         {
           "source": "draconic_guardian.lua",
           "path": "draconic/controller.lua",
-          "bytes": 96275
+          "bytes": 97295
         }
       ]
     },
@@ -261,7 +261,7 @@
         {
           "source": "module-pack/manifest.json",
           "path": "modules/manifest.json",
-          "bytes": 1863
+          "bytes": 1885
         },
         {
           "source": "module-pack/extreme_reactors/reactor_adapter.lua",
@@ -307,7 +307,7 @@
         {
           "source": "src/gui/control-room/manifest.lua",
           "path": "gui/control-room/manifest.lua",
-          "bytes": 920
+          "bytes": 938
         },
         {
           "source": "src/gui/control-room/renderer.lua",

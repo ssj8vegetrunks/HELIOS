@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.23
+-- HELIOS Draconic Guardian v1.2.0-alpha.24
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -38,7 +38,7 @@ local FIELD_RECOVERY_RATIO, MINIMUM_FIELD_INPUT = .05, 50000
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.23"
+local GUARDIAN_VERSION = "1.2.0-alpha.24"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -437,6 +437,12 @@ local function lifecycleUnsafe(field,temp)
   return temp>LIFECYCLE_TEMP_LEEWAY or
     (temp>LIFECYCLE_TEMP_LIMIT and field<LIFECYCLE_LEEWAY_FIELD)
 end
+local function thermalHoldRequired(c,temp)
+  temp=tonumber(temp) or math.huge
+  if temp>MAX_TEMPERATURE then c.thermalHold=true end
+  if c.thermalHold and temp<=LIFECYCLE_TEMP_LIMIT then c.thermalHold=false end
+  return c.thermalHold==true
+end
 local function lifecycleNow(r)
   return tonumber(r and r.sampleTime) or
     (os.epoch and os.epoch("utc")/1000 or os.clock())
@@ -587,7 +593,20 @@ local function supervise(b,d,c)
   end
   if not free then
     if fuel<=MINIMUM_FUEL then c.request="OFF";return stop("fuel reserve below "..MINIMUM_FUEL.."%") end
-    if temp>MAX_TEMPERATURE then return stop("temperature above "..MAX_TEMPERATURE.." C",false,true) end
+    local imminent,warning=imminentMeltdown(r)
+    if imminent then return stop(warning,false,true) end
+    -- Heat alone is not a reason to cycle a contained Draconic reactor. Close
+    -- export, restore the proven containment input, and resume the accepted
+    -- demand after the core falls back into the normal lifecycle envelope.
+    if thermalHoldRequired(c,temp) then
+      local recoveryInput=math.max(injectorCap,positive(c.lifecycleFieldApplied) or 0)
+      gate(b.output,0);gate(b.input,recoveryInput)
+      c.lifecycleApplied=tonumber(c.rated) or c.lifecycleApplied
+      c.lifecycleSamples=0;c.lifecycleLastSampleAt=nil;c.lifecycleStartField=nil
+      c.remoteApplied=0;c.remotePrimed=false
+      c.message="THERMAL GATE HOLD: reactor remains online; export closed, containment "..fmt(recoveryInput).." RF/t"
+      return
+    end
     if live and (c.fieldRecovery or field<=FIELD_EMERGENCY) then
       c.fieldRecovery=true
       local recoveryInput=emergencyFieldTarget(c,r,injectorCap)
@@ -652,10 +671,10 @@ local function supervise(b,d,c)
     c.commissionFieldInput=fieldInput
     gate(b.input,fieldInput)
     gate(b.output,trial)
-    -- Stop just above the hard 15% interlock. A 17% calibration cutoff leaves
-    -- the guardian room to close export and rebuild the field safely.
+    -- End the trial above the 15% emergency field boundary. Keep the reactor
+    -- live in IDLE while export closes and containment rebuilds.
     if field<COMMISSION_FIELD_FLOOR or temp>COMMISSION_TEMP_LIMIT or fuel<=MINIMUM_FUEL then
-      gate(b.output,0);gate(b.input,injectorCap);c.commissioning=false;c.initialRequested=false;c.commissionSamples=0;c.commissionShortfallSamples=0;c.commissionSettleSamples=0;c.request="OFF";c.recovery=true
+      gate(b.output,0);gate(b.input,injectorCap);c.commissioning=false;c.initialRequested=false;c.commissionSamples=0;c.commissionShortfallSamples=0;c.commissionSettleSamples=0;c.request="IDLE";c.recovery=true
       c.commissioned=tonumber(c.commissionLastSafe) and c.commissionLastSafe>0 or false;c.rated=c.commissionLastSafe
       c.message=tr("guardian.commission_edge",{ceiling=fmt(c.rated or 0)},"Calibration reached the 17% field edge; output closed. Last verified ceiling {ceiling} RF/t")
       return
@@ -672,7 +691,7 @@ local function supervise(b,d,c)
       local fieldLimit=math.max(injectorCap,trial,drain*2)
       if c.commissionFieldTuneSamples>=COMMISSION_FIELD_TUNE_SAMPLES then
         if fieldInput>=fieldLimit then
-          gate(b.output,0);c.commissioning=false;c.initialRequested=false;c.request="OFF";c.recovery=true
+          gate(b.output,0);c.commissioning=false;c.initialRequested=false;c.request="IDLE";c.recovery=true
           c.commissioned=(tonumber(c.commissionLastSafe) or 0)>0;c.rated=c.commissionLastSafe
           c.message="Calibration complete: containment stabilized below 45% at the trial field-input limit; verified ceiling "..fmt(c.rated or 0).." RF/t"
           return
@@ -701,7 +720,7 @@ local function supervise(b,d,c)
       end
       c.commissionSamples=0;c.commissionShortfallSamples=(tonumber(c.commissionShortfallSamples) or 0)+1
       if c.commissionShortfallSamples>=COMMISSION_SHORTFALL_SAMPLES then
-        gate(b.output,0);c.commissioning=false;c.initialRequested=false;c.request="OFF";c.commissioned=(tonumber(c.commissionLastSafe) or 0)>0;c.rated=c.commissionLastSafe
+        gate(b.output,0);c.commissioning=false;c.initialRequested=false;c.request="IDLE";c.commissioned=(tonumber(c.commissionLastSafe) or 0)>0;c.rated=c.commissionLastSafe
         c.message=tr("guardian.commission_complete",{ceiling=fmt(c.rated or 0)},"Calibration complete: output path stopped accepting higher export; verified ceiling {ceiling} RF/t")
       else c.message=tr("guardian.commission_testing",{trial=fmt(trial),generation=fmt(generation),sample=c.commissionShortfallSamples,total=COMMISSION_SHORTFALL_SAMPLES},"Testing {trial} RF/t: reactor generation {generation} RF/t ({sample}/{total})") end
       return
@@ -964,7 +983,7 @@ local function drawComputer(t,d,c)
 end
 if rawget(_G,"HELIOS_GUARDIAN_TEST") then
   return {lifecycleTarget=lifecycleTarget,lifecycleFieldTarget=lifecycleFieldTarget,lifecycleCeiling=lifecycleCeiling,
-    lifecycleUnsafe=lifecycleUnsafe,emergencyFieldTarget=emergencyFieldTarget,
+    lifecycleUnsafe=lifecycleUnsafe,thermalHoldRequired=thermalHoldRequired,emergencyFieldTarget=emergencyFieldTarget,
     chargeableStatus=chargeableStatus,mailboxHasRemoteDemand=mailboxHasRemoteDemand,
     updateMeltdownTrend=updateMeltdownTrend,imminentMeltdown=imminentMeltdown}
 end
