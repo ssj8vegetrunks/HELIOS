@@ -790,7 +790,12 @@ function governor.evaluate(memory, reactor, control, context, targetSteam, activ
                 previous.bufferExposureFloor = nil
                 previous.bufferExposureDemand = nil
             end
-            if type(profile) ~= "table" or target <= 0 then
+            -- A first calibration has no profile yet, but its buffer-recovery
+            -- floor is still real plant evidence. Preserve that floor while
+            -- the pipe network catches up; otherwise delayed transport makes
+            -- the governor undo each successful recovery step and oscillate.
+            if (type(profile) ~= "table" and
+                previous.recalibrating ~= true) or target <= 0 then
                 previous.bufferExposureFloor = nil
                 previous.bufferExposureDemand = nil
             end

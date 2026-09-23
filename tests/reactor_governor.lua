@@ -295,6 +295,23 @@ do
     equal(applied, 0.83,
         "first-run buffer recovery reaches the reactor actuator")
 
+    -- A large external pipe buffer delays the reactor-buffer response. The
+    -- recovered exposure must survive high production readings during that
+    -- delay instead of being immediately cut and producing a control loop.
+    local delayed = reactor(13600, 0.83, {
+        casingTemperature = 144,
+        hotFluidPercent = 0,
+    })
+    for now = 60, 72 do
+        governor.evaluateAll(memory, { delayed }, { first, second },
+            rangeControl, { now = now })
+        plan = delayed.governor
+    end
+    equal(plan.bufferExposureFloor, 0.83,
+        "first calibration preserves its recovery floor through pipe delay")
+    assert(plan.recommendedRodExposure >= 0.83,
+        "delayed high steam telemetry cannot undo buffer recovery")
+
     source = reactor(6000, 0.83, {
         casingTemperature = 144,
         hotFluidPercent = 0,
