@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.25
+-- HELIOS Draconic Guardian v1.2.0-alpha.26
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -9,7 +9,7 @@ local MAX_TEMPERATURE, MINIMUM_FUEL = 8000, 5
 -- The calibration may approach the real limit, but never crosses the 15%
 -- hard shutdown interlock: 17% is the operating-edge cutoff.
 local COMMISSION_START_FLOW, COMMISSION_SAMPLES = 50000, 20
-local COMMISSION_FIELD_FLOOR, COMMISSION_TEMP_LIMIT = 17, 7500
+local COMMISSION_FIELD_FLOOR, COMMISSION_TEMP_LIMIT = 40, 7500
 local COMMISSION_STEP_RATIO, COMMISSION_MIN_STEP = 1.25, 50000
 local COMMISSION_SHORTFALL_SAMPLES = 20
 local COMMISSION_FIELD_TARGET, COMMISSION_FIELD_TUNE_SAMPLES = 45, 10
@@ -38,7 +38,7 @@ local FIELD_RECOVERY_RATIO, MINIMUM_FIELD_INPUT = .05, 50000
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.25"
+local GUARDIAN_VERSION = "1.2.0-alpha.26"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -584,11 +584,16 @@ local function supervise(b,d,c)
   local injectorCap=positive(c.injectorBaseline) or 0
   local function shutdownInput()
     if not containmentRequired then return 0 end
-    if field<SHUTDOWN_FIELD_EMERGENCY or (tonumber(meltdownTrend.fallingField) or 0)>=2 then return injectorCap end
+    if field<SHUTDOWN_FIELD_EMERGENCY or (tonumber(meltdownTrend.fallingField) or 0)>=2 then
+      return emergencyFieldTarget(c,r,injectorCap)
+    end
     local drain=positive(r.fieldDrainRate)
     if not drain then return injectorCap end
     local margin=field>=SHUTDOWN_FIELD_TARGET and 1.05 or field>=75 and 1.15 or 1.25
     return math.min(injectorCap,math.max(MINIMUM_FIELD_INPUT,math.ceil(drain*margin)))
+  end
+  local function recoveryInput()
+    return emergencyFieldTarget(c,r,math.max(injectorCap,positive(c.commissionFieldInput) or 0))
   end
   local function stop(reason,charge,thermalRecovery)
     gate(b.output,0);reactor(b.reactor,"stopReactor")
@@ -619,12 +624,12 @@ local function supervise(b,d,c)
     -- export, restore the proven containment input, and resume the accepted
     -- demand after the core falls back into the normal lifecycle envelope.
     if thermalHoldRequired(c,temp) then
-      local recoveryInput=math.max(injectorCap,positive(c.lifecycleFieldApplied) or 0)
-      gate(b.output,0);gate(b.input,recoveryInput)
+      local thermalInput=math.max(recoveryInput(),positive(c.lifecycleFieldApplied) or 0)
+      gate(b.output,0);gate(b.input,thermalInput)
       c.lifecycleApplied=tonumber(c.rated) or c.lifecycleApplied
       c.lifecycleSamples=0;c.lifecycleLastSampleAt=nil;c.lifecycleStartField=nil
       c.remoteApplied=0;c.remotePrimed=false
-      c.message="THERMAL GATE HOLD: reactor remains online; export closed, containment "..fmt(recoveryInput).." RF/t"
+      c.message="THERMAL GATE HOLD: reactor remains online; export closed, containment "..fmt(thermalInput).." RF/t"
       return
     end
     if live and (c.fieldRecovery or field<=FIELD_EMERGENCY) then
@@ -673,11 +678,13 @@ local function supervise(b,d,c)
   if c.recovery then
     -- A calibration that reaches its edge pauses with export closed until the
     -- field has rebuilt. This prevents an old manual request from resuming.
-    gate(b.output,0);gate(b.input,injectorCap)
+    local recoveryField=recoveryInput()
+    c.lifecycleFieldApplied=recoveryField
+    gate(b.output,0);gate(b.input,recoveryField)
     if field>=45 and temp<=COMMISSION_TEMP_LIMIT then
       c.recovery=false
       c.message=tr("guardian.recovery_complete",nil,"Calibration recovery complete; export remains OFF")
-    else c.message=tr("guardian.recovery_active",nil,"Calibration recovery: output closed while containment rebuilds") end
+    else c.message="Calibration recovery: output closed; containment "..fmt(recoveryField).." RF/t (150% measured drain minimum)" end
     return
   end
   if c.commissioning then
@@ -691,12 +698,13 @@ local function supervise(b,d,c)
     c.commissionFieldInput=fieldInput
     gate(b.input,fieldInput)
     gate(b.output,trial)
-    -- End the trial above the 15% emergency field boundary. Keep the reactor
+    -- End the trial well above the 15% emergency field boundary. Keep the reactor
     -- live in IDLE while export closes and containment rebuilds.
     if field<COMMISSION_FIELD_FLOOR or temp>COMMISSION_TEMP_LIMIT or fuel<=MINIMUM_FUEL then
-      gate(b.output,0);gate(b.input,injectorCap);c.commissioning=false;c.initialRequested=false;c.commissionSamples=0;c.commissionShortfallSamples=0;c.commissionSettleSamples=0;c.request="IDLE";c.recovery=true
+      local recoveryField=recoveryInput()
+      gate(b.output,0);gate(b.input,recoveryField);c.lifecycleFieldApplied=recoveryField;c.commissioning=false;c.initialRequested=false;c.commissionSamples=0;c.commissionShortfallSamples=0;c.commissionSettleSamples=0;c.request="IDLE";c.recovery=true
       c.commissioned=tonumber(c.commissionLastSafe) and c.commissionLastSafe>0 or false;c.rated=c.commissionLastSafe
-      c.message=tr("guardian.commission_edge",{ceiling=fmt(c.rated or 0)},"Calibration reached the 17% field edge; output closed. Last verified ceiling {ceiling} RF/t")
+      c.message="Calibration safety boundary reached; export closed, containment recovery "..fmt(recoveryField).." RF/t. Last verified ceiling "..fmt(c.rated or 0).." RF/t"
       return
     end
     -- The adopted injector value is a safe starting point, not a hard ceiling.
@@ -711,7 +719,8 @@ local function supervise(b,d,c)
       local fieldLimit=math.max(injectorCap,trial,drain*2)
       if c.commissionFieldTuneSamples>=COMMISSION_FIELD_TUNE_SAMPLES then
         if fieldInput>=fieldLimit then
-          gate(b.output,0);c.commissioning=false;c.initialRequested=false;c.request="IDLE";c.recovery=true
+          local recoveryField=recoveryInput()
+          gate(b.output,0);gate(b.input,recoveryField);c.lifecycleFieldApplied=recoveryField;c.commissioning=false;c.initialRequested=false;c.request="IDLE";c.recovery=true
           c.commissioned=(tonumber(c.commissionLastSafe) or 0)>0;c.rated=c.commissionLastSafe
           c.message="Calibration complete: containment stabilized below 45% at the trial field-input limit; verified ceiling "..fmt(c.rated or 0).." RF/t"
           return
@@ -1004,6 +1013,7 @@ end
 if rawget(_G,"HELIOS_GUARDIAN_TEST") then
   return {lifecycleTarget=lifecycleTarget,lifecycleFieldTarget=lifecycleFieldTarget,lifecycleCeiling=lifecycleCeiling,
     lifecycleUnsafe=lifecycleUnsafe,thermalHoldRequired=thermalHoldRequired,emergencyFieldTarget=emergencyFieldTarget,
+    commissionFieldFloor=COMMISSION_FIELD_FLOOR,
     chargeableStatus=chargeableStatus,mailboxHasRemoteDemand=mailboxHasRemoteDemand,
     updateMeltdownTrend=updateMeltdownTrend,imminentMeltdown=imminentMeltdown}
 end

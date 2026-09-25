@@ -13,7 +13,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "packages" / "manifest.json"
-VERSION = "1.6.0-alpha.48"
+VERSION = "1.6.0-alpha.49"
 DOFILE = re.compile(r'dofile\(\s*["\']/helios/(?P<path>[^"\']+\.lua)["\']\s*\)')
 
 
