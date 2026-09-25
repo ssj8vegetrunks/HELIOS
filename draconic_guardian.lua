@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.24
+-- HELIOS Draconic Guardian v1.2.0-alpha.25
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -38,7 +38,7 @@ local FIELD_RECOVERY_RATIO, MINIMUM_FIELD_INPUT = .05, 50000
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.24"
+local GUARDIAN_VERSION = "1.2.0-alpha.25"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -366,7 +366,7 @@ local function load()
     if fs.exists(path) then local ok,value=pcall(dofile,path);if ok and type(value)=="table" then s=value;break end end
   end
   if not s then return d end
-  d.mode=(s.mode=="ASSISTED" or s.mode=="UNRESTRICTED") and s.mode or "AUTO";d.request=(FRACTION[s.request] or s.request=="MANUAL" or s.request=="OVERDRIVE" or s.request=="IDLE") and s.request or "OFF";d.rated=tonumber(s.rated);d.lifecycleCeilings=type(s.lifecycleCeilings)=="table" and s.lifecycleCeilings or {};d.currentCycleCeilings=type(s.currentCycleCeilings)=="table" and s.currentCycleCeilings or {};d.injectorBaseline=positive(s.injectorBaseline);d.manualField=positive(s.manualField);d.manualExport=positive(s.manualExport) or 0;d.overdriveField=positive(s.overdriveField);d.overdriveExport=positive(s.overdriveExport);d.commissioned=s.commissioned==true;d.commissioning=s.commissioning==true;d.commissionFlow=positive(s.commissionFlow);d.commissionSamples=math.max(0,math.floor(tonumber(s.commissionSamples) or 0));d.commissionShortfallSamples=math.max(0,math.floor(tonumber(s.commissionShortfallSamples) or 0));d.commissionSettleSamples=math.max(0,math.floor(tonumber(s.commissionSettleSamples) or 0));d.commissionFieldInput=positive(s.commissionFieldInput);d.commissionFieldTuneSamples=math.max(0,math.floor(tonumber(s.commissionFieldTuneSamples) or 0));d.commissionLastSafe=positive(s.commissionLastSafe);d.recovery=s.recovery==true;d.lifecycleApplied=positive(s.lifecycleApplied);d.lifecycleFieldApplied=positive(s.lifecycleFieldApplied);d.lifecycleSamples=math.max(0,math.floor(tonumber(s.lifecycleSamples) or 0));d.lifecycleBandKey=s.lifecycleBandKey and tostring(s.lifecycleBandKey) or nil;d.lifecycleStartField=tonumber(s.lifecycleStartField);d.fieldTuneSamples=math.max(0,math.floor(tonumber(s.fieldTuneSamples) or 0));d.lastFuelConversion=tonumber(s.lastFuelConversion);d.overdriveApplied=tonumber(s.overdriveApplied);d.message=tostring(s.message or d.message);return d
+  d.mode=(s.mode=="ASSISTED" or s.mode=="UNRESTRICTED") and s.mode or "AUTO";d.request=(FRACTION[s.request] or s.request=="MANUAL" or s.request=="OVERDRIVE" or s.request=="IDLE") and s.request or "OFF";d.rated=tonumber(s.rated);d.lifecycleCeilings=type(s.lifecycleCeilings)=="table" and s.lifecycleCeilings or {};d.currentCycleCeilings=type(s.currentCycleCeilings)=="table" and s.currentCycleCeilings or {};d.injectorBaseline=positive(s.injectorBaseline);d.manualField=positive(s.manualField);d.manualExport=positive(s.manualExport) or 0;d.overdriveField=positive(s.overdriveField);d.overdriveExport=positive(s.overdriveExport);d.commissioned=s.commissioned==true;d.commissioning=s.commissioning==true;d.commissionFlow=positive(s.commissionFlow);d.commissionSamples=math.max(0,math.floor(tonumber(s.commissionSamples) or 0));d.commissionShortfallSamples=math.max(0,math.floor(tonumber(s.commissionShortfallSamples) or 0));d.commissionSettleSamples=math.max(0,math.floor(tonumber(s.commissionSettleSamples) or 0));d.commissionFieldInput=positive(s.commissionFieldInput);d.commissionFieldTuneSamples=math.max(0,math.floor(tonumber(s.commissionFieldTuneSamples) or 0));d.commissionLastSafe=positive(s.commissionLastSafe);d.recovery=s.recovery==true;d.lifecycleApplied=positive(s.lifecycleApplied);d.lifecycleFieldApplied=positive(s.lifecycleFieldApplied);d.lifecycleSamples=math.max(0,math.floor(tonumber(s.lifecycleSamples) or 0));d.lifecycleBandKey=s.lifecycleBandKey and tostring(s.lifecycleBandKey) or nil;d.lifecycleStartField=tonumber(s.lifecycleStartField);d.fieldTuneSamples=math.max(0,math.floor(tonumber(s.fieldTuneSamples) or 0));d.lastFuelConversion=tonumber(s.lastFuelConversion);d.observedFuelConversion=tonumber(s.observedFuelConversion);d.observedMaxFuelConversion=tonumber(s.observedMaxFuelConversion);d.overdriveApplied=tonumber(s.overdriveApplied);d.message=tostring(s.message or d.message);return d
 end
 local function save(c)
   local parent=fs.getDir(SETTINGS);if parent~="" and not fs.exists(parent) then fs.makeDir(parent) end
@@ -413,6 +413,15 @@ local function restoreMailbox(c)
   elseif saved.request=="IDLE" and c.lastAppliedCommandRevision then
     c.request="IDLE"
   end
+end
+
+local function invalidateOutputProfile(c,reason)
+  c.request="OFF";c.remoteLevel=nil;c.remoteTarget=nil;c.remoteApplied=0;c.remotePrimed=false
+  c.lastCommandStatus="revoked";c.lastCommandDetail=reason or "Local restart requires fresh commissioning"
+  c.commissioned=false;c.rated=nil;c.lifecycleCeilings={};c.currentCycleCeilings={}
+  c.lifecycleApplied=nil;c.lifecycleFieldApplied=nil;c.lifecycleSamples=0;c.lifecycleBandKey=nil
+  c.lifecycleLastSampleAt=nil;c.lifecycleNextProbeAt=nil;c.lifecycleStartField=nil
+  c.fieldTuneSamples=0;c.fieldTuneStart=nil;c.lastFuelConversion=nil
 end
 
 local function lifecycleBand(r)
@@ -561,6 +570,17 @@ local function supervise(b,d,c)
   local live=status=="online" or status=="running"
   local containmentRequired=live or status=="stopping" or status=="cooling"
   local fuel=pct((tonumber(r.maxFuelConversion) or 0)-(tonumber(r.fuelConversion) or 0),r.maxFuelConversion) or 0;local temp=tonumber(r.temperature) or math.huge;local free=c.mode=="UNRESTRICTED"
+  local conversion=pct(r.fuelConversion,r.maxFuelConversion) or 0
+  local maxConversion=tonumber(r.maxFuelConversion)
+  local refuelled=tonumber(c.observedFuelConversion) and conversion+2<tonumber(c.observedFuelConversion)
+  local geometryChanged=tonumber(c.observedMaxFuelConversion) and maxConversion and
+    math.abs(maxConversion-tonumber(c.observedMaxFuelConversion))>math.max(2,tonumber(c.observedMaxFuelConversion)*.01)
+  if (refuelled or geometryChanged) and c.mode~="UNRESTRICTED" then
+    invalidateOutputProfile(c,geometryChanged and "Reactor fuel capacity changed" or "Fresh fuel load detected")
+    c.commissioning=false;c.initialRequested=false;c.startActivated=false
+    c.message=(geometryChanged and "CORE CHANGE DETECTED" or "FRESH FUEL DETECTED")..": old output profile invalidated; initialize to recommission"
+  end
+  c.observedFuelConversion=conversion;c.observedMaxFuelConversion=maxConversion
   local injectorCap=positive(c.injectorBaseline) or 0
   local function shutdownInput()
     if not containmentRequired then return 0 end
@@ -1012,7 +1032,8 @@ local function cycleValue(values,current)
   return values[1]
 end
 local function beginCalibration()
-  controls.commissioning=true;controls.commissionFlow=COMMISSION_START_FLOW;controls.commissionSamples=0;controls.commissionShortfallSamples=0;controls.commissionSettleSamples=0;controls.commissionFieldInput=positive(controls.injectorBaseline);controls.commissionFieldTuneSamples=0;controls.commissionLastSafe=nil;controls.recovery=false;controls.commissioned=false;controls.rated=nil;controls.lifecycleCeilings={};controls.currentCycleCeilings={};controls.lifecycleApplied=nil;controls.lifecycleFieldApplied=nil;controls.lifecycleSamples=0;controls.lifecycleBandKey=nil;controls.lastFuelConversion=nil;controls.request="OFF"
+  invalidateOutputProfile(controls,"Operator requested fresh commissioning")
+  controls.commissioning=true;controls.commissionFlow=COMMISSION_START_FLOW;controls.commissionSamples=0;controls.commissionShortfallSamples=0;controls.commissionSettleSamples=0;controls.commissionFieldInput=positive(controls.injectorBaseline);controls.commissionFieldTuneSamples=0;controls.commissionLastSafe=nil;controls.recovery=false
   controls.initialRequested=true;controls.startActivated=false;controls.message="Automatic calibration requested by operator"
 end
 local function act(choice,d)
@@ -1020,7 +1041,11 @@ local function act(choice,d)
     controls.liveGatesSelected=false
   end
   if (choice=="AUTO COMMISSION" or choice=="RECALIBRATE CEILING") and controls.gatesOwned then beginCalibration()
-  elseif choice=="INITIALIZE & ACTIVATE" and controls.gatesOwned then controls.initialRequested=true;controls.startActivated=false;controls.message="Initial start requested by operator"
+  elseif choice=="INITIALIZE & ACTIVATE" and controls.gatesOwned then
+    -- A stopped/refuelled/rebuilt core is not the same machine that proved the
+    -- previous MAX profile. Start with export closed and recommission from the
+    -- conservative trial instead of allowing durable mailbox intent to resume.
+    beginCalibration();controls.message="Safe initialization requested: old output profile revoked; commissioning from 50k RF/t"
   elseif choice=="SAFE SHUTDOWN" then controls.request="OFF";controls.initialRequested=false;controls.startActivated=false;controls.message="Operator safe shutdown requested"
   elseif choice=="LANGUAGE" and type(guardianConfig)=="table" then
     local available={};local ok,module=pcall(dofile,"/helios/core/i18n.lua")
