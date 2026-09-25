@@ -165,11 +165,12 @@ end
 
 function adapter.readAll(devices)
     local turbines = {}
-    for _, device in ipairs(devices or {}) do
+    for index, device in ipairs(devices or {}) do
         local lowerName = string.lower(device.name or "")
         if device.category == "turbine" or string.find(lowerName, "turbine", 1, true) then
             turbines[#turbines + 1] = adapter.read(device)
         end
+        if index % 4 == 0 and type(sleep) == "function" then sleep(0) end
     end
     return turbines
 end

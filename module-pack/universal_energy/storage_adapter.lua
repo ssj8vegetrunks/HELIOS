@@ -198,7 +198,7 @@ end
 function adapter.readAll(devices, powerConfig)
     local storages = {}
     local present = {}
-    for _, device in ipairs(devices or {}) do
+    for index, device in ipairs(devices or {}) do
         if device.category ~= "reactor" and device.category ~= "turbine" and
            device.category ~= "monitor" and device.category ~= "modem" then
             local ok, storage = pcall(adapter.read, device, powerConfig)
@@ -215,6 +215,7 @@ function adapter.readAll(devices, powerConfig)
                 }
             end
         end
+        if index % 4 == 0 and type(sleep) == "function" then sleep(0) end
     end
     for name in pairs(previousSamples) do
         if not present[name] then previousSamples[name] = nil end

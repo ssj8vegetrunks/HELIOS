@@ -19,6 +19,14 @@ function mainframe.run(config)
     ui.setVersion(config.version)
     local language = dofile("/helios/core/i18n.lua").new(config)
     local function tr(key, values, fallback) return language.get(key, values, fallback) end
+    -- A complete plant poll can involve dozens of synchronous peripheral calls,
+    -- both governors, verified actuator writes, logging, networking, and a full
+    -- monitor redraw.  CC's watchdog measures the whole uninterrupted Lua pass,
+    -- not each individual operation.  Yield between safety-complete phases so a
+    -- larger facility cannot be killed with "Too long without yielding".
+    local function watchdogYield()
+        if type(sleep) == "function" then sleep(0) end
+    end
     local operationalLog
     if fs.exists("/helios/core/event_log.lua") then
         local ok, loaded = pcall(dofile, "/helios/core/event_log.lua")
@@ -566,8 +574,11 @@ function mainframe.run(config)
         advertiseMainframe()
         advertiseFacilityCollector()
         reactors = reactorAdapter.readAll(devices)
+        watchdogYield()
         turbines = turbineAdapter.readAll(devices)
+        watchdogYield()
         storages = storageAdapter.readAll(devices, config.power)
+        watchdogYield()
         if config.control.mode == "manual" then
             local failover, reserve = manualControl.shouldFailover(manualSafetyState,
                 storages,
@@ -610,6 +621,7 @@ function mainframe.run(config)
                 plantDispatch = true,
                 generationNeeded = generationNeeded,
             })
+        watchdogYield()
         for _, reactor in ipairs(reactors) do
             if reactor.governor and reactor.governor.calibrationCompleted == true then
                 turbineGovernor.requestSteamPrime(governorMemory)
@@ -625,6 +637,7 @@ function mainframe.run(config)
             setActive = reactorAdapter.setActive,
             setControlRodExposure = reactorAdapter.setControlRodExposure,
         })
+        watchdogYield()
 
         local steamSource = reactorGovernor.steamSourceStatus(reactors,
             steamDemand, config.control)
@@ -642,6 +655,7 @@ function mainframe.run(config)
             steamSourceBufferPercent = steamSource.bufferPercent,
             generationNeeded = generationNeeded,
         })
+        watchdogYield()
         if turbineGovernor.consumeProfileChanges(governorMemory) then
             configStore.save(config)
         end
@@ -653,6 +667,7 @@ function mainframe.run(config)
             setFlowLimit = turbineAdapter.setFlowLimit,
             setInductor = turbineAdapter.setInductor,
         })
+        watchdogYield()
         for _, reactor in ipairs(reactors) do
             local state = reactor.governor and (reactor.governor.state or reactor.governor.actuatorState) or
                 (reactor.error and "FAULT" or reactor.active and "ACTIVE" or "OFFLINE")
