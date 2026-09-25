@@ -1,7 +1,7 @@
 -- HELIOS modular bootstrap installer
 -- Downloads only the Core, role, and optional packages selected for this computer.
 
-local VERSION = "1.6.0-alpha.46"
+local VERSION = "1.6.0-alpha.47"
 local REPOSITORY = "ssj8vegetrunks/HELIOS"
 local BRANCH_API = "https://api.github.com/repos/" .. REPOSITORY .. "/commits/testing%2Fpublic-alpha"
 local BASE_URL

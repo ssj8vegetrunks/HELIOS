@@ -24,8 +24,27 @@ function mainframe.run(config)
     -- monitor redraw.  CC's watchdog measures the whole uninterrupted Lua pass,
     -- not each individual operation.  Yield between safety-complete phases so a
     -- larger facility cannot be killed with "Too long without yielding".
+    local watchdogSequence = 0
     local function watchdogYield()
-        if type(sleep) == "function" then sleep(0) end
+        if type(os.queueEvent) ~= "function" or type(os.pullEventRaw) ~= "function" then
+            if type(sleep) == "function" then sleep(0) end
+            return
+        end
+        -- sleep(0) filters for its timer and discards monitor_touch, mouse, and
+        -- network events which arrive first.  A private queued event yields to
+        -- CC's scheduler immediately without consuming operator input.
+        watchdogSequence = watchdogSequence + 1
+        local marker = "helios_watchdog_yield_" .. tostring(watchdogSequence)
+        os.queueEvent(marker)
+        local deferred = {}
+        while true do
+            local event = { os.pullEventRaw() }
+            if event[1] == marker then break end
+            deferred[#deferred + 1] = event
+        end
+        for _, event in ipairs(deferred) do
+            os.queueEvent(table.unpack(event))
+        end
     end
     local operationalLog
     if fs.exists("/helios/core/event_log.lua") then

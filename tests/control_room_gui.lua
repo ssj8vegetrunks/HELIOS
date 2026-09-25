@@ -32,4 +32,18 @@ assert(string.find(output, "POWER PRODUCTION", 1, true), "home must show aggrega
 assert(string.find(output, "HELIOS ACTIVITY", 1, true), "home must explain governor activity")
 assert(string.find(output, "1000 / 5000 mB/t", 1, true),
     "steam instrument must show actual output against learned maximum")
+local services = {
+    eventPoint = function(event, a, b, c)
+        if event == "monitor_touch" or event == "mouse_click" then return b, c end
+    end,
+    hit = function(button, x, y)
+        return button and x and y and y == button.y and x >= button.x1 and x <= button.x2
+    end,
+}
+renderer.handle(state, buttons, "monitor_touch", "monitor_0",
+    buttons.reactors.x1, buttons.reactors.y, services)
+assert(state.page == "reactors", "external monitor touch must select reactor page")
+renderer.handle(state, buttons, "mouse_click", 1,
+    buttons.turbines.x1, buttons.turbines.y, services)
+assert(state.page == "turbines", "local terminal click must select turbine page")
 print("control room GUI tests passed")

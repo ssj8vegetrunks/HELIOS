@@ -335,11 +335,10 @@ end
 
 function adapter.readAll(devices)
     local reactors = {}
-    for index, device in ipairs(devices or {}) do
+    for _, device in ipairs(devices or {}) do
         if device.category == "reactor" then
             reactors[#reactors + 1] = adapter.read(device)
         end
-        if index % 4 == 0 and type(sleep) == "function" then sleep(0) end
     end
     return reactors
 end
