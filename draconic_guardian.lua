@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.26
+-- HELIOS Draconic Guardian v1.2.0-alpha.27
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -8,11 +8,11 @@ local MAX_TEMPERATURE, MINIMUM_FUEL = 8000, 5
 -- maximum output. Establish one by proving progressively larger exports.
 -- The calibration may approach the real limit, but never crosses the 15%
 -- hard shutdown interlock: 17% is the operating-edge cutoff.
-local COMMISSION_START_FLOW, COMMISSION_SAMPLES = 50000, 20
-local COMMISSION_FIELD_FLOOR, COMMISSION_TEMP_LIMIT = 40, 7500
-local COMMISSION_STEP_RATIO, COMMISSION_MIN_STEP = 1.25, 50000
+local COMMISSION_START_FLOW, COMMISSION_SAMPLES = 50000, 60
+local COMMISSION_FIELD_FLOOR, COMMISSION_TEMP_LIMIT = 70, 6500
+local COMMISSION_STEP_RATIO, COMMISSION_MIN_STEP = 1.10, 50000
 local COMMISSION_SHORTFALL_SAMPLES = 20
-local COMMISSION_FIELD_TARGET, COMMISSION_FIELD_TUNE_SAMPLES = 45, 10
+local COMMISSION_FIELD_TARGET, COMMISSION_FIELD_TUNE_SAMPLES = 80, 10
 -- A cool reactor ramps up to a new export request over several seconds.  This
 -- is a settling period, not evidence that the output path has reached its
 -- ceiling, so do not score it as a failed sample.
@@ -30,6 +30,7 @@ local LIFECYCLE_FIELD_FLOOR, LIFECYCLE_PROBE_FIELD = 30, 35
 local LIFECYCLE_TEMP_LIMIT, LIFECYCLE_TEMP_LEEWAY = 7500, 7750
 local LIFECYCLE_LEEWAY_FIELD, LIFECYCLE_FIELD_DRIFT = 40, .5
 local LIFECYCLE_STEP_RATIO, LIFECYCLE_MIN_STEP = 1.02, 50000
+local ADAPTIVE_CALIBRATION_ENABLED = false
 local FIELD_TUNE_SAMPLES, FIELD_TUNE_RATIO = 150, .02
 local FIELD_RECOVERY_RATIO, MINIMUM_FIELD_INPUT = .05, 50000
 -- During a controlled shutdown the containment drain falls with the core.
@@ -38,7 +39,7 @@ local FIELD_RECOVERY_RATIO, MINIMUM_FIELD_INPUT = .05, 50000
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.26"
+local GUARDIAN_VERSION = "1.2.0-alpha.27"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -471,6 +472,10 @@ local function lifecycleTarget(c,r)
   for prior=0,band,LIFECYCLE_BAND do
     proven=math.max(proven,tonumber(c.currentCycleCeilings[tostring(prior)]) or 0)
   end
+  if not ADAPTIVE_CALIBRATION_ENABLED then
+    c.lifecycleApplied=proven;c.lifecycleSamples=0;c.lifecycleLastSampleAt=nil;c.lifecycleStartField=nil
+    return proven,"adaptive calibration disabled; holding commissioned ceiling"
+  end
   if c.lifecycleBandKey~=key then
     local previousBand=tonumber(c.lifecycleBandKey)
     c.lifecycleBandKey=key
@@ -559,7 +564,7 @@ local function emergencyFieldTarget(c,r,baseline)
   -- A live low-field core needs recovery headroom, not a shutdown. Closing
   -- export removes its avoidable load while 150% of measured drain gives the
   -- field enough positive flow to rebuild instead of hovering at the edge.
-  return math.ceil(math.max(proven,current*1.25,drain*1.50,MINIMUM_FIELD_INPUT))
+  return math.ceil(math.max(proven,current*1.50,drain*2.00,MINIMUM_FIELD_INPUT))
 end
 
 -- AUTO and ASSISTED retain containment. UNRESTRICTED is visibly armed and lets
@@ -698,13 +703,17 @@ local function supervise(b,d,c)
     c.commissionFieldInput=fieldInput
     gate(b.input,fieldInput)
     gate(b.output,trial)
+    local falling=(tonumber(meltdownTrend.fallingField) or 0)>=3
+    local risingHot=(tonumber(meltdownTrend.risingTemperature) or 0)>=3 and temp>=6000
     -- End the trial well above the 15% emergency field boundary. Keep the reactor
     -- live in IDLE while export closes and containment rebuilds.
-    if field<COMMISSION_FIELD_FLOOR or temp>COMMISSION_TEMP_LIMIT or fuel<=MINIMUM_FUEL then
+    if field<COMMISSION_FIELD_FLOOR or temp>COMMISSION_TEMP_LIMIT or falling or risingHot or fuel<=MINIMUM_FUEL then
       local recoveryField=recoveryInput()
-      gate(b.output,0);gate(b.input,recoveryField);c.lifecycleFieldApplied=recoveryField;c.commissioning=false;c.initialRequested=false;c.commissionSamples=0;c.commissionShortfallSamples=0;c.commissionSettleSamples=0;c.request="IDLE";c.recovery=true
-      c.commissioned=tonumber(c.commissionLastSafe) and c.commissionLastSafe>0 or false;c.rated=c.commissionLastSafe
-      c.message="Calibration safety boundary reached; export closed, containment recovery "..fmt(recoveryField).." RF/t. Last verified ceiling "..fmt(c.rated or 0).." RF/t"
+      gate(b.output,0);gate(b.input,recoveryField);reactor(b.reactor,"stopReactor")
+      c.lifecycleFieldApplied=recoveryField;c.commissioning=false;c.initialRequested=false;c.startActivated=false
+      c.commissionSamples=0;c.commissionShortfallSamples=0;c.commissionSettleSamples=0;c.request="OFF";c.recovery=false
+      c.commissioned=false;c.rated=nil;c.safetyRecovery="Calibration safety boundary"
+      c.message="CALIBRATION ABORTED: controlled shutdown, export closed, containment "..fmt(recoveryField).." RF/t"
       return
     end
     -- The adopted injector value is a safe starting point, not a hard ceiling.
