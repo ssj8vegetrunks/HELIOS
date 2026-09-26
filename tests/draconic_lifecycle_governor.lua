@@ -6,32 +6,6 @@ assert(governor.chargeableStatus("cold") and governor.chargeableStatus("offline"
     "both Draconic stopped-state names must enter the charging sequence")
 assert(not governor.chargeableStatus("cooling"),
     "a cooling reactor must finish stopping before it is charged")
-assert(not governor.activationReady("warming_up", 50, 50, 2000),
-    "automatic startup must not activate a half-charged reactor")
-assert(governor.activationReady("warming_up", 95, 95, 2000),
-    "the compatibility path may activate only when both stores are full")
-assert(governor.activationReady("charged", 0, 0, 0),
-    "the reactor's explicit CHARGED state remains authoritative")
-assert(governor.commissionFieldFloor == 50,
-    "commissioning must retain a hard boundary without aborting recoverable field dips")
-assert(governor.commissioningFieldTarget(1900000, 1900000, 1400000, 67) == 2800000,
-    "calibration recovery must immediately cover twice the measured drain")
-assert(governor.commissioningDisposition(67, 1330, 99, true, false) == "pause",
-    "a recoverable falling field must pause export instead of stopping the reactor")
-assert(governor.commissioningDisposition(45, 1330, 99, true, true) == "abort",
-    "the hard containment boundary must still abort calibration")
-assert(governor.commissioningDisposition(92, 3000, 99, false, true) == "run",
-    "a paused calibration must resume after containment rebuilds")
-local bootstrap = { commissioned = true, rated = 9000000, request = "MAX" }
-assert(governor.adoptInjectorBaseline({ inputSet = 0, inputFlow = 0,
-    reactor = { status = "cold", fieldDrainRate = 0 } }, bootstrap) == 1900000,
-    "a new cold installation must receive the conservative injector baseline")
-assert(not bootstrap.commissioned and bootstrap.rated == nil and bootstrap.request == "OFF",
-    "automatic injector initialization must invalidate old output authority")
-local liveBootstrap = {}
-assert(governor.adoptInjectorBaseline({ inputSet = 0, inputFlow = 0,
-    reactor = { status = "running", fieldDrainRate = 1400000 } }, liveBootstrap) == 2800000,
-    "a live recovery baseline must cover twice the measured field drain")
 assert(not governor.lifecycleUnsafe(89, 7700),
     "strong containment may use the proven 7,500-7,750 C lifecycle leeway")
 assert(governor.lifecycleUnsafe(39, 7700),
@@ -70,21 +44,34 @@ local target = governor.lifecycleTarget(controls, reactor(1, 80, 1000000))
 assert(target == 1000000, "fresh core must return to commissioned export")
 assert(next(controls.currentCycleCeilings) == nil, "fresh core must clear current-cycle proofs")
 
--- Unattended adaptive ceiling experiments remain disabled until live gate
--- response can be verified independently of reactor telemetry.
+-- A healthy point becomes proven only after the full observation window.
 controls = { rated = 1000000, injectorBaseline = 1600000, lifecycleCeilings = {},
     currentCycleCeilings = {}, lifecycleBandKey = "10", lifecycleNextProbeAt = 0 }
-for second = 1, 1020 do
+for second = 1, 119 do
     target = governor.lifecycleTarget(controls, reactor(10, 70, 1050000, nil, second))
 end
-assert(target == 1000000 and next(controls.currentCycleCeilings) == nil,
-    "unattended operation must hold the commissioned ceiling without probing")
+assert(target == 1050000 and controls.lifecycleSamples == 119,
+    "adaptive proof must collect no faster than one sample per second")
+target = governor.lifecycleTarget(controls, reactor(10, 70, 1050000, nil, 120))
+assert(target == 1050000, "120 stable seconds must prove the adaptive trial")
+assert(controls.currentCycleCeilings["10"] == 1050000,
+    "stable trial must be recorded for this fuel band")
+target = governor.lifecycleTarget(controls, reactor(10, 70, 1050000, nil, 121))
+assert(target == 1050000, "a new adaptive trial must not begin immediately")
+target = governor.lifecycleTarget(controls, reactor(10, 70, 1100000, nil, 1020))
+assert(target > 1050000, "the next adaptive trial may begin after fifteen minutes")
 
 -- The lifecycle governor may use the 7,500-7,750 C efficiency band only when
 -- containment is at least 40%; 7,750 C remains an unconditional ceiling.
 controls = { rated = 1000000, lifecycleCeilings = { ["10"]={export=1050000} }, currentCycleCeilings = {}, lifecycleApplied = 1050000 }
 target = governor.lifecycleTarget(controls, reactor(10, 39, 1050000, 7600))
 assert(target == 1000000, "hot probing below 40% containment must roll back")
+controls = { rated = 1000000, lifecycleCeilings = { ["10"]={export=1050000} }, currentCycleCeilings = {}, lifecycleApplied = 1050000 }
+target = governor.lifecycleTarget(controls, reactor(10, 40, 1050000, 7600))
+assert(target == 1050000, "40% containment may use the conditional temperature leeway")
+controls = { rated = 1000000, lifecycleCeilings = { ["10"]={export=1050000} }, currentCycleCeilings = {}, lifecycleApplied = 1050000 }
+target = governor.lifecycleTarget(controls, reactor(10, 60, 1050000, 7751))
+assert(target == 1000000, "adaptive probing must always roll back above 7,750 C")
 
 -- Excess containment alone must never justify reducing injector power. A trim
 -- is permitted only once generation covers containment with margin while the
@@ -104,13 +91,8 @@ controls.lifecycleFieldApplied = 1600000
 local recovery = governor.emergencyFieldTarget(controls, {
     fieldDrainRate = 1900000,
 }, 1600000)
-assert(recovery == 3800000,
+assert(recovery == 2850000,
     "emergency containment recovery must exceed measured field drain")
-local cooldown = governor.shutdownFieldTarget({ lifecycleFieldApplied = 1900000 }, {
-    fieldDrainRate = 1400000,
-}, 1900000, 35, true, { fallingField = 2 })
-assert(cooldown == 2850000,
-    "a cooling reactor with falling containment must exceed current drain instead of holding its old baseline")
 
 -- Late-cycle heat is expected and must not be mislabeled as an imminent
 -- meltdown while containment remains healthy. A cascade requires both a hot,

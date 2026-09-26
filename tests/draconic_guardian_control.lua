@@ -54,7 +54,6 @@ peripheral = {
         if method == "getFlowOverride" then return overrideFlows[name] end
         if method == "setOverrideEnabled" then overrides[name] = argument; writes[#writes + 1] = { name, method, argument }; return true end
         if method == "setFlowOverride" then overrideFlows[name] = argument; writes[#writes + 1] = { name, argument }; return true end
-        if method == "setSignalHighFlow" then writes[#writes + 1] = { name, method, argument }; return true end
         if method == "setSignalLowFlow" then writes[#writes + 1] = { name, argument }; return end
         calls[#calls + 1] = { name, method }
     end,

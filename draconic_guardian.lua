@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.32
+-- HELIOS Draconic Guardian v1.2.0-alpha.24
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -6,14 +6,13 @@ local FIELD_TARGET, FIELD_EMERGENCY = 50, 15
 local MAX_TEMPERATURE, MINIMUM_FUEL = 8000, 5
 -- Draconic's peripheral telemetry reports live generation but not a safe
 -- maximum output. Establish one by proving progressively larger exports.
--- Calibration now keeps a large containment margin and fails closed. It must
--- never approach the reactor's 15% hard shutdown boundary.
-local COMMISSION_START_FLOW, COMMISSION_SAMPLES = 50000, 60
-local COMMISSION_FIELD_FLOOR, COMMISSION_TEMP_LIMIT = 50, 6500
-local COMMISSION_STEP_RATIO, COMMISSION_MIN_STEP = 1.10, 50000
+-- The calibration may approach the real limit, but never crosses the 15%
+-- hard shutdown interlock: 17% is the operating-edge cutoff.
+local COMMISSION_START_FLOW, COMMISSION_SAMPLES = 50000, 20
+local COMMISSION_FIELD_FLOOR, COMMISSION_TEMP_LIMIT = 17, 7500
+local COMMISSION_STEP_RATIO, COMMISSION_MIN_STEP = 1.25, 50000
 local COMMISSION_SHORTFALL_SAMPLES = 20
-local COMMISSION_FIELD_TARGET, COMMISSION_FIELD_TUNE_SAMPLES = 80, 10
-local COMMISSION_FIELD_RESUME = 90
+local COMMISSION_FIELD_TARGET, COMMISSION_FIELD_TUNE_SAMPLES = 45, 10
 -- A cool reactor ramps up to a new export request over several seconds.  This
 -- is a settling period, not evidence that the output path has reached its
 -- ceiling, so do not score it as a failed sample.
@@ -31,17 +30,15 @@ local LIFECYCLE_FIELD_FLOOR, LIFECYCLE_PROBE_FIELD = 30, 35
 local LIFECYCLE_TEMP_LIMIT, LIFECYCLE_TEMP_LEEWAY = 7500, 7750
 local LIFECYCLE_LEEWAY_FIELD, LIFECYCLE_FIELD_DRIFT = 40, .5
 local LIFECYCLE_STEP_RATIO, LIFECYCLE_MIN_STEP = 1.02, 50000
-local ADAPTIVE_CALIBRATION_ENABLED = false
 local FIELD_TUNE_SAMPLES, FIELD_TUNE_RATIO = 150, .02
 local FIELD_RECOVERY_RATIO, MINIMUM_FIELD_INPUT = .05, 50000
-local BOOTSTRAP_INJECTOR_INPUT = 1900000
 -- During a controlled shutdown the containment drain falls with the core.
 -- Follow that drain instead of pinning the injector at its learned ceiling.
 -- A weakening field always wins over efficiency and restores full input.
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.32"
+local GUARDIAN_VERSION = "1.2.0-alpha.24"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -136,11 +133,6 @@ local function call(n,m,...)
   local ok,v=pcall(peripheral.call,n,m,...); if not ok then return nil,tostring(v) end; return v
 end
 local gateApplied,gateCommands,gateTargets={},{},{}
-local function gateSetpoint(n)
-  local value=call(n,"getFlowOverride")
-  if value==nil then value=call(n,"getSignalLowFlow") end
-  return tonumber(value)
-end
 local function read(b)
   local r,e=call(b.reactor,"getReactorInfo"); if type(r)~="table" then return nil,e or "getReactorInfo failed" end
   local inputSet=call(b.input,"getFlowOverride");if inputSet==nil then inputSet=call(b.input,"getSignalLowFlow") end
@@ -157,16 +149,8 @@ local function gate(n,v,force)
   local previous=gateCommands[n]
   local now=os.clock()
   if not force and previous and previous.flow==flow and now-previous.sent<.75 then return true end
-  -- Different Draconic/CC integrations expose either an override setter or
-  -- the native low/high redstone flow setters. Drive every available API and
-  -- accept the command only when at least one flow setter succeeds.
-  call(n,"setOverrideEnabled",true)
-  local _,overrideError=call(n,"setFlowOverride",flow)
-  local _,lowError=call(n,"setSignalLowFlow",flow)
-  local _,highError=call(n,"setSignalHighFlow",flow)
-  if overrideError and lowError and highError then
-    return false,"no supported Flux Gate flow setter: "..tostring(overrideError)
-  end
+  local enabled,enableError=call(n,"setOverrideEnabled",true);if enabled==nil and enableError then return false,enableError end
+  local _,flowError=call(n,"setFlowOverride",flow);if flowError then return false,flowError end
   gateCommands[n]={flow=flow,sent=now}
   return true
 end
@@ -177,20 +161,6 @@ local function adoptInjectorBaseline(d,c)
     -- the reactor is cool, but the configured limit remains the proven field
     -- support capacity selected by the operator.
     c.injectorBaseline=positive(d.inputSet) or positive(d.inputFlow)
-    if not positive(c.injectorBaseline) then
-      local status=string.lower(tostring(d.reactor and d.reactor.status or "unknown"))
-      local live=status=="online" or status=="running" or status=="stopping" or status=="cooling"
-      local drain=positive(d.reactor and d.reactor.fieldDrainRate) or 0
-      c.injectorBaseline=math.ceil(math.max(BOOTSTRAP_INJECTOR_INPUT,live and drain*2 or 0))
-      -- A missing gate setpoint means this installation has never established
-      -- a trustworthy containment baseline. Seed one, close export through
-      -- acquireGates(), and require commissioning before generation is allowed.
-      c.bootstrapInjector=true;c.request="OFF";c.commissioning=false;c.commissioned=false;c.rated=nil
-      c.lifecycleCeilings={};c.currentCycleCeilings={};c.lifecycleApplied=nil;c.lifecycleFieldApplied=nil
-      c.remoteLevel=nil;c.remoteTarget=nil;c.remoteApplied=0;c.remotePrimed=false
-      c.lastCommandStatus="revoked";c.lastCommandDetail="Injector baseline initialized; commissioning required"
-      c.message="Injector gate initialized to "..tostring(c.injectorBaseline).." RF/t; calibration required"
-    end
   end
   return positive(c.injectorBaseline)
 end
@@ -202,18 +172,19 @@ local function acquireGates(b,d,c)
     return false
   end
   if c.inputControlVerified==true and c.outputControlVerified==true then c.gatesOwned=true;c.gateError=nil;return true end
+  if d.inputOverride==true and d.outputOverride==true then c.gatesOwned=true;c.inputControlVerified=true;c.outputControlVerified=true;c.gateError=nil;return true end
   -- Containment first, then export. Never close field support while taking control.
   local inputOk,inputError=gate(b.input,injectorCap,true)
   local outputOk,outputError=gate(b.output,0,true)
   local inputReported=call(b.input,"getOverrideEnabled")==true
   local outputReported=call(b.output,"getOverrideEnabled")==true
-  local inputSet=gateSetpoint(b.input)
-  local outputSet=gateSetpoint(b.output)
+  local inputSet=call(b.input,"getFlowOverride");if inputSet==nil then inputSet=call(b.input,"getSignalLowFlow") end
+  local outputSet=call(b.output,"getFlowOverride");if outputSet==nil then outputSet=call(b.output,"getSignalLowFlow") end
   -- Some DE builds show "Overridden" in the GUI but return false/nil from
   -- getOverrideEnabled(). A successful command whose override setpoint reads
   -- back exactly is equivalent proof that this computer owns the gate.
-  local inputOwned=inputOk and tonumber(inputSet) and math.abs(tonumber(inputSet)-injectorCap)<1
-  local outputOwned=outputOk and tonumber(outputSet) and math.abs(tonumber(outputSet))<1
+  local inputOwned=inputReported or (inputOk and tonumber(inputSet) and math.abs(tonumber(inputSet)-injectorCap)<1)
+  local outputOwned=outputReported or (outputOk and tonumber(outputSet) and math.abs(tonumber(outputSet))<1)
   c.inputControlVerified=inputOwned==true;c.outputControlVerified=outputOwned==true
   c.gatesOwned=inputOk and outputOk and inputOwned and outputOwned
   if not c.gatesOwned then
@@ -234,26 +205,6 @@ end
 local function chargeableStatus(status)
   status=string.lower(tostring(status or ""))
   return status=="offline" or status=="cold"
-end
-local function activationReady(status,field,saturation,temperature)
-  status=string.lower(tostring(status or ""))
-  if status=="charged" then return true end
-  return (status=="warming_up" or status=="warning_up") and
-    tonumber(field) and tonumber(field)>=95 and
-    tonumber(saturation) and tonumber(saturation)>=95 and
-    tonumber(temperature) and tonumber(temperature)>=1990
-end
-local function commissioningFieldTarget(current,baseline,drain,field)
-  current,baseline,drain=positive(current) or 0,positive(baseline) or 0,positive(drain) or 0
-  local margin=(tonumber(field) or 0)<COMMISSION_FIELD_TARGET and 2 or 1.5
-  return math.ceil(math.max(current,baseline,drain*margin))
-end
-local function commissioningDisposition(field,temp,fuel,falling,risingHot,paused)
-  field,temp,fuel=tonumber(field) or 0,tonumber(temp) or 0,tonumber(fuel) or 0
-  if field<COMMISSION_FIELD_FLOOR or temp>COMMISSION_TEMP_LIMIT or risingHot or fuel<=MINIMUM_FUEL then return "abort" end
-  if field<COMMISSION_FIELD_TARGET or (falling and field<COMMISSION_FIELD_RESUME) then return "pause" end
-  if paused and field<COMMISSION_FIELD_RESUME then return "pause" end
-  return "run"
 end
 
 -- A requested export is only meaningful once the core is actually online.
@@ -294,10 +245,10 @@ local function ensureStarted(b,c,status,reason,fieldTarget,telemetry)
   local saturation=percent(telemetry and telemetry.energySaturation,
     telemetry and telemetry.maxEnergySaturation)
   local temperature=tonumber(telemetry and telemetry.temperature)
-  -- Some DE builds linger in WARMING_UP instead of reporting CHARGED. The old
-  -- 50% shortcut activated a half-charged core and immediately destabilized
-  -- containment. Only accept the compatibility path when both stores are full.
-  if activationReady(status,field,saturation,temperature) then
+  local warmReady=(status=="warming_up" or status=="warning_up") and
+    field and field>=49.5 and saturation and saturation>=49.5 and
+    temperature and temperature>=1990
+  if status=="charged" or warmReady then
     if not c.startActivated then
       reactor(b.reactor,"activateReactor")
       c.startActivated=true
@@ -307,7 +258,7 @@ local function ensureStarted(b,c,status,reason,fieldTarget,telemetry)
   end
   if status=="warming_up" or status=="warning_up" then
     c.startActivated=false
-    c.message=string.format("%s: charging fully before activation (core %.0f/2000 C, field %.1f%%, saturation %.1f%%)",
+    c.message=string.format("%s: charging (core %.0f/2000 C, field %.1f%%, saturation %.1f%%)",
       reason,temperature or 0,field or 0,saturation or 0)
     return true
   end
@@ -415,7 +366,7 @@ local function load()
     if fs.exists(path) then local ok,value=pcall(dofile,path);if ok and type(value)=="table" then s=value;break end end
   end
   if not s then return d end
-  d.mode=(s.mode=="ASSISTED" or s.mode=="UNRESTRICTED") and s.mode or "AUTO";d.request=(FRACTION[s.request] or s.request=="MANUAL" or s.request=="OVERDRIVE" or s.request=="IDLE") and s.request or "OFF";d.rated=tonumber(s.rated);d.lifecycleCeilings=type(s.lifecycleCeilings)=="table" and s.lifecycleCeilings or {};d.currentCycleCeilings=type(s.currentCycleCeilings)=="table" and s.currentCycleCeilings or {};d.injectorBaseline=positive(s.injectorBaseline);d.manualField=positive(s.manualField);d.manualExport=positive(s.manualExport) or 0;d.overdriveField=positive(s.overdriveField);d.overdriveExport=positive(s.overdriveExport);d.commissioned=s.commissioned==true;d.commissioning=s.commissioning==true;d.commissionFlow=positive(s.commissionFlow);d.commissionSamples=math.max(0,math.floor(tonumber(s.commissionSamples) or 0));d.commissionShortfallSamples=math.max(0,math.floor(tonumber(s.commissionShortfallSamples) or 0));d.commissionSettleSamples=math.max(0,math.floor(tonumber(s.commissionSettleSamples) or 0));d.commissionFieldInput=positive(s.commissionFieldInput);d.commissionFieldTuneSamples=math.max(0,math.floor(tonumber(s.commissionFieldTuneSamples) or 0));d.commissionLastSafe=positive(s.commissionLastSafe);d.recovery=s.recovery==true;d.lifecycleApplied=positive(s.lifecycleApplied);d.lifecycleFieldApplied=positive(s.lifecycleFieldApplied);d.lifecycleSamples=math.max(0,math.floor(tonumber(s.lifecycleSamples) or 0));d.lifecycleBandKey=s.lifecycleBandKey and tostring(s.lifecycleBandKey) or nil;d.lifecycleStartField=tonumber(s.lifecycleStartField);d.fieldTuneSamples=math.max(0,math.floor(tonumber(s.fieldTuneSamples) or 0));d.lastFuelConversion=tonumber(s.lastFuelConversion);d.observedFuelConversion=tonumber(s.observedFuelConversion);d.observedMaxFuelConversion=tonumber(s.observedMaxFuelConversion);d.overdriveApplied=tonumber(s.overdriveApplied);d.message=tostring(s.message or d.message);return d
+  d.mode=(s.mode=="ASSISTED" or s.mode=="UNRESTRICTED") and s.mode or "AUTO";d.request=(FRACTION[s.request] or s.request=="MANUAL" or s.request=="OVERDRIVE" or s.request=="IDLE") and s.request or "OFF";d.rated=tonumber(s.rated);d.lifecycleCeilings=type(s.lifecycleCeilings)=="table" and s.lifecycleCeilings or {};d.currentCycleCeilings=type(s.currentCycleCeilings)=="table" and s.currentCycleCeilings or {};d.injectorBaseline=positive(s.injectorBaseline);d.manualField=positive(s.manualField);d.manualExport=positive(s.manualExport) or 0;d.overdriveField=positive(s.overdriveField);d.overdriveExport=positive(s.overdriveExport);d.commissioned=s.commissioned==true;d.commissioning=s.commissioning==true;d.commissionFlow=positive(s.commissionFlow);d.commissionSamples=math.max(0,math.floor(tonumber(s.commissionSamples) or 0));d.commissionShortfallSamples=math.max(0,math.floor(tonumber(s.commissionShortfallSamples) or 0));d.commissionSettleSamples=math.max(0,math.floor(tonumber(s.commissionSettleSamples) or 0));d.commissionFieldInput=positive(s.commissionFieldInput);d.commissionFieldTuneSamples=math.max(0,math.floor(tonumber(s.commissionFieldTuneSamples) or 0));d.commissionLastSafe=positive(s.commissionLastSafe);d.recovery=s.recovery==true;d.lifecycleApplied=positive(s.lifecycleApplied);d.lifecycleFieldApplied=positive(s.lifecycleFieldApplied);d.lifecycleSamples=math.max(0,math.floor(tonumber(s.lifecycleSamples) or 0));d.lifecycleBandKey=s.lifecycleBandKey and tostring(s.lifecycleBandKey) or nil;d.lifecycleStartField=tonumber(s.lifecycleStartField);d.fieldTuneSamples=math.max(0,math.floor(tonumber(s.fieldTuneSamples) or 0));d.lastFuelConversion=tonumber(s.lastFuelConversion);d.overdriveApplied=tonumber(s.overdriveApplied);d.message=tostring(s.message or d.message);return d
 end
 local function save(c)
   local parent=fs.getDir(SETTINGS);if parent~="" and not fs.exists(parent) then fs.makeDir(parent) end
@@ -464,15 +415,6 @@ local function restoreMailbox(c)
   end
 end
 
-local function invalidateOutputProfile(c,reason)
-  c.request="OFF";c.remoteLevel=nil;c.remoteTarget=nil;c.remoteApplied=0;c.remotePrimed=false
-  c.lastCommandStatus="revoked";c.lastCommandDetail=reason or "Local restart requires fresh commissioning"
-  c.commissioned=false;c.rated=nil;c.lifecycleCeilings={};c.currentCycleCeilings={}
-  c.lifecycleApplied=nil;c.lifecycleFieldApplied=nil;c.lifecycleSamples=0;c.lifecycleBandKey=nil
-  c.lifecycleLastSampleAt=nil;c.lifecycleNextProbeAt=nil;c.lifecycleStartField=nil
-  c.fieldTuneSamples=0;c.fieldTuneStart=nil;c.lastFuelConversion=nil
-end
-
 local function lifecycleBand(r)
   local conversion=pct(r.fuelConversion,r.maxFuelConversion) or 0
   local band=math.floor(math.max(0,math.min(99.999,conversion))/LIFECYCLE_BAND)*LIFECYCLE_BAND
@@ -519,10 +461,6 @@ local function lifecycleTarget(c,r)
   local proven=tonumber(c.rated) or 0
   for prior=0,band,LIFECYCLE_BAND do
     proven=math.max(proven,tonumber(c.currentCycleCeilings[tostring(prior)]) or 0)
-  end
-  if not ADAPTIVE_CALIBRATION_ENABLED then
-    c.lifecycleApplied=proven;c.lifecycleSamples=0;c.lifecycleLastSampleAt=nil;c.lifecycleStartField=nil
-    return proven,"adaptive calibration disabled; holding commissioned ceiling"
   end
   if c.lifecycleBandKey~=key then
     local previousBand=tonumber(c.lifecycleBandKey)
@@ -612,21 +550,7 @@ local function emergencyFieldTarget(c,r,baseline)
   -- A live low-field core needs recovery headroom, not a shutdown. Closing
   -- export removes its avoidable load while 150% of measured drain gives the
   -- field enough positive flow to rebuild instead of hovering at the edge.
-  return math.ceil(math.max(proven,current*1.50,drain*2.00,MINIMUM_FIELD_INPUT))
-end
-
-local function shutdownFieldTarget(c,r,baseline,field,containmentRequired,trend)
-  if not containmentRequired then return 0 end
-  trend=trend or meltdownTrend
-  if (tonumber(field) or 0)<SHUTDOWN_FIELD_EMERGENCY or
-      (tonumber(trend.fallingField) or 0)>=2 then
-    return emergencyFieldTarget(c,r,baseline)
-  end
-  local drain=positive(r.fieldDrainRate)
-  if not drain then return positive(baseline) or MINIMUM_FIELD_INPUT end
-  local margin=field>=SHUTDOWN_FIELD_TARGET and 1.05 or field>=75 and 1.15 or 1.25
-  return math.min(positive(baseline) or MINIMUM_FIELD_INPUT,
-    math.max(MINIMUM_FIELD_INPUT,math.ceil(drain*margin)))
+  return math.ceil(math.max(proven,current*1.25,drain*1.50,MINIMUM_FIELD_INPUT))
 end
 
 -- AUTO and ASSISTED retain containment. UNRESTRICTED is visibly armed and lets
@@ -637,23 +561,14 @@ local function supervise(b,d,c)
   local live=status=="online" or status=="running"
   local containmentRequired=live or status=="stopping" or status=="cooling"
   local fuel=pct((tonumber(r.maxFuelConversion) or 0)-(tonumber(r.fuelConversion) or 0),r.maxFuelConversion) or 0;local temp=tonumber(r.temperature) or math.huge;local free=c.mode=="UNRESTRICTED"
-  local conversion=pct(r.fuelConversion,r.maxFuelConversion) or 0
-  local maxConversion=tonumber(r.maxFuelConversion)
-  local refuelled=tonumber(c.observedFuelConversion) and conversion+2<tonumber(c.observedFuelConversion)
-  local geometryChanged=tonumber(c.observedMaxFuelConversion) and maxConversion and
-    math.abs(maxConversion-tonumber(c.observedMaxFuelConversion))>math.max(2,tonumber(c.observedMaxFuelConversion)*.01)
-  if (refuelled or geometryChanged) and c.mode~="UNRESTRICTED" then
-    invalidateOutputProfile(c,geometryChanged and "Reactor fuel capacity changed" or "Fresh fuel load detected")
-    c.commissioning=false;c.initialRequested=false;c.startActivated=false
-    c.message=(geometryChanged and "CORE CHANGE DETECTED" or "FRESH FUEL DETECTED")..": old output profile invalidated; initialize to recommission"
-  end
-  c.observedFuelConversion=conversion;c.observedMaxFuelConversion=maxConversion
   local injectorCap=positive(c.injectorBaseline) or 0
   local function shutdownInput()
-    return shutdownFieldTarget(c,r,injectorCap,field,containmentRequired,meltdownTrend)
-  end
-  local function recoveryInput()
-    return emergencyFieldTarget(c,r,math.max(injectorCap,positive(c.commissionFieldInput) or 0))
+    if not containmentRequired then return 0 end
+    if field<SHUTDOWN_FIELD_EMERGENCY or (tonumber(meltdownTrend.fallingField) or 0)>=2 then return injectorCap end
+    local drain=positive(r.fieldDrainRate)
+    if not drain then return injectorCap end
+    local margin=field>=SHUTDOWN_FIELD_TARGET and 1.05 or field>=75 and 1.15 or 1.25
+    return math.min(injectorCap,math.max(MINIMUM_FIELD_INPUT,math.ceil(drain*margin)))
   end
   local function stop(reason,charge,thermalRecovery)
     gate(b.output,0);reactor(b.reactor,"stopReactor")
@@ -684,12 +599,12 @@ local function supervise(b,d,c)
     -- export, restore the proven containment input, and resume the accepted
     -- demand after the core falls back into the normal lifecycle envelope.
     if thermalHoldRequired(c,temp) then
-      local thermalInput=math.max(recoveryInput(),positive(c.lifecycleFieldApplied) or 0)
-      gate(b.output,0);gate(b.input,thermalInput)
+      local recoveryInput=math.max(injectorCap,positive(c.lifecycleFieldApplied) or 0)
+      gate(b.output,0);gate(b.input,recoveryInput)
       c.lifecycleApplied=tonumber(c.rated) or c.lifecycleApplied
       c.lifecycleSamples=0;c.lifecycleLastSampleAt=nil;c.lifecycleStartField=nil
       c.remoteApplied=0;c.remotePrimed=false
-      c.message="THERMAL GATE HOLD: reactor remains online; export closed, containment "..fmt(thermalInput).." RF/t"
+      c.message="THERMAL GATE HOLD: reactor remains online; export closed, containment "..fmt(recoveryInput).." RF/t"
       return
     end
     if live and (c.fieldRecovery or field<=FIELD_EMERGENCY) then
@@ -716,17 +631,6 @@ local function supervise(b,d,c)
     local imminent,warning=imminentMeltdown(r)
     if imminent then c.message="UNRESTRICTED WARNING: "..warning end
   end
-  -- A stopped command does not remove the field load immediately. While the
-  -- core is STOPPING/COOLING, keep export closed and follow measured drain
-  -- instead of reverting to the old running baseline. Low or falling field
-  -- automatically escalates through shutdownInput() to emergency headroom.
-  if status=="stopping" or status=="cooling" then
-    local coolingInput=shutdownInput()
-    gate(b.output,0);gate(b.input,coolingInput);reactor(b.reactor,"stopReactor")
-    c.message="Controlled cooldown: export closed, containment "..fmt(coolingInput)..
-      " RF/t for measured drain "..fmt(r.fieldDrainRate).." RF/t"
-    return
-  end
   if c.safetyRecovery then
     gate(b.output,0);gate(b.input,shutdownInput());reactor(b.reactor,"stopReactor")
     if temp<=5000 and not live then
@@ -749,13 +653,11 @@ local function supervise(b,d,c)
   if c.recovery then
     -- A calibration that reaches its edge pauses with export closed until the
     -- field has rebuilt. This prevents an old manual request from resuming.
-    local recoveryField=recoveryInput()
-    c.lifecycleFieldApplied=recoveryField
-    gate(b.output,0);gate(b.input,recoveryField)
+    gate(b.output,0);gate(b.input,injectorCap)
     if field>=45 and temp<=COMMISSION_TEMP_LIMIT then
       c.recovery=false
       c.message=tr("guardian.recovery_complete",nil,"Calibration recovery complete; export remains OFF")
-    else c.message="Calibration recovery: output closed; containment "..fmt(recoveryField).." RF/t (150% measured drain minimum)" end
+    else c.message=tr("guardian.recovery_active",nil,"Calibration recovery: output closed while containment rebuilds") end
     return
   end
   if c.commissioning then
@@ -765,33 +667,43 @@ local function supervise(b,d,c)
       return
     end
     local trial=math.max(COMMISSION_START_FLOW,tonumber(c.commissionFlow) or COMMISSION_START_FLOW)
-    local drain=positive(r.fieldDrainRate) or 0
-    local fieldInput=commissioningFieldTarget(c.commissionFieldInput,injectorCap,drain,field)
+    local fieldInput=math.max(injectorCap,positive(c.commissionFieldInput) or injectorCap)
     c.commissionFieldInput=fieldInput
     gate(b.input,fieldInput)
-    local falling=(tonumber(meltdownTrend.fallingField) or 0)>=3
-    local risingHot=(tonumber(meltdownTrend.risingTemperature) or 0)>=3 and temp>=6000
-    local disposition=commissioningDisposition(field,temp,fuel,falling,risingHot,c.commissionPaused)
-    -- Only a genuine safety boundary ends commissioning. A recoverable field
-    -- deficit closes export, follows measured drain, and resumes the same trial
-    -- after containment has rebuilt instead of stopping the reactor.
-    if disposition=="abort" then
-      local recoveryField=recoveryInput()
-      gate(b.output,0);gate(b.input,recoveryField);reactor(b.reactor,"stopReactor")
-      c.lifecycleFieldApplied=recoveryField;c.commissioning=false;c.initialRequested=false;c.startActivated=false
-      c.commissionSamples=0;c.commissionShortfallSamples=0;c.commissionSettleSamples=0;c.request="OFF";c.recovery=false
-      c.commissioned=false;c.rated=nil;c.safetyRecovery="Calibration safety boundary"
-      c.message="CALIBRATION ABORTED: controlled shutdown, export closed, containment "..fmt(recoveryField).." RF/t"
-      return
-    end
-    if disposition=="pause" then
-      gate(b.output,0)
-      c.commissionPaused=true;c.commissionSamples=0;c.commissionShortfallSamples=0;c.commissionSettleSamples=0;c.commissionFieldTuneSamples=0
-      c.message=string.format("Calibration paused: rebuilding containment %.1f%% -> %d%%; injector %s RF/t covers %s RF/t drain",field,COMMISSION_FIELD_RESUME,fmt(fieldInput),fmt(drain))
-      return
-    end
-    c.commissionPaused=false;c.commissionFieldTuneSamples=0
     gate(b.output,trial)
+    -- End the trial above the 15% emergency field boundary. Keep the reactor
+    -- live in IDLE while export closes and containment rebuilds.
+    if field<COMMISSION_FIELD_FLOOR or temp>COMMISSION_TEMP_LIMIT or fuel<=MINIMUM_FUEL then
+      gate(b.output,0);gate(b.input,injectorCap);c.commissioning=false;c.initialRequested=false;c.commissionSamples=0;c.commissionShortfallSamples=0;c.commissionSettleSamples=0;c.request="IDLE";c.recovery=true
+      c.commissioned=tonumber(c.commissionLastSafe) and c.commissionLastSafe>0 or false;c.rated=c.commissionLastSafe
+      c.message=tr("guardian.commission_edge",{ceiling=fmt(c.rated or 0)},"Calibration reached the 17% field edge; output closed. Last verified ceiling {ceiling} RF/t")
+      return
+    end
+    -- The adopted injector value is a safe starting point, not a hard ceiling.
+    -- If an export trial settles below the proof band, raise containment input
+    -- gradually before deciding whether that output can be sustained.
+    if field<COMMISSION_FIELD_TARGET then
+      c.commissionSamples=0;c.commissionShortfallSamples=0;c.commissionSettleSamples=0
+      c.commissionFieldTuneSamples=(tonumber(c.commissionFieldTuneSamples) or 0)+1
+      local drain=positive(r.fieldDrainRate) or 0
+      -- This is a derived runaway guard, not a configured operating ceiling:
+      -- one trial never needs more than its export or twice the observed drain.
+      local fieldLimit=math.max(injectorCap,trial,drain*2)
+      if c.commissionFieldTuneSamples>=COMMISSION_FIELD_TUNE_SAMPLES then
+        if fieldInput>=fieldLimit then
+          gate(b.output,0);c.commissioning=false;c.initialRequested=false;c.request="IDLE";c.recovery=true
+          c.commissioned=(tonumber(c.commissionLastSafe) or 0)>0;c.rated=c.commissionLastSafe
+          c.message="Calibration complete: containment stabilized below 45% at the trial field-input limit; verified ceiling "..fmt(c.rated or 0).." RF/t"
+          return
+        end
+        fieldInput=math.min(fieldLimit,math.max(fieldInput+COMMISSION_MIN_STEP,math.floor(fieldInput*(1+FIELD_RECOVERY_RATIO))))
+        c.commissionFieldInput=fieldInput;c.commissionFieldTuneSamples=0
+        gate(b.input,fieldInput)
+      end
+      c.message=string.format("Raising containment for %s RF/t trial: field %.1f%%, injector %s RF/t (%d/%d)",fmt(trial),field,fmt(fieldInput),c.commissionFieldTuneSamples,COMMISSION_FIELD_TUNE_SAMPLES)
+      return
+    end
+    c.commissionFieldTuneSamples=0
     -- A Flux Gate's reported flow is not a trustworthy measure of reactor
     -- generation on every DE/ATM configuration.  The reactor component is
     -- authoritative: only count a trial as proven when its generation rate
@@ -1027,7 +939,7 @@ local function draw(t,b,d,page,c,bs)
     text(t,1,y-2,"OUTPUT SELECTOR  [OFF] [MIN] [MED] [MAX] [OVERDRIVE]",colors.gray)
     text(t,1,y-1,"LOCKED: calibrate a verified output ceiling against live containment.",colors.orange)
     bs[#bs+1]=button(t,1,y,tr("guardian.auto_commission",nil,"AUTO COMMISSION"),colors.orange,nil,"AUTO COMMISSION")
-    text(t,1,y+1,"Starts at 50k RF/t; requires at least 70% field and aborts on a falling trend.",colors.lightGray)
+    text(t,1,y+1,tr("guardian.commission_hint",nil,"Starts at 50k RF/t; rises while the field stays at or above 17%."),colors.lightGray)
     bs[#bs+1]=button(t,1,y+3,tr("guardian.initialize",nil,"INITIALIZE & ACTIVATE"),colors.lime,nil,"INITIALIZE & ACTIVATE")
     bs[#bs+1]=button(t,27,y+3,tr("guardian.safe_shutdown",nil,"SAFE SHUTDOWN"),colors.red,nil,"SAFE SHUTDOWN")
   elseif c.mode=="AUTO" then bs[#bs+1]=button(t,1,y,tr("guardian.enable_assisted",nil,"ENABLE ASSISTED MANUAL"),colors.orange,nil,"ENABLE ASSISTED MANUAL");bs[#bs+1]=button(t,27,y,tr("guardian.recalibrate",nil,"RECALIBRATE CEILING"),colors.orange,nil,"RECALIBRATE CEILING");bs[#bs+1]=button(t,1,y+2,tr("guardian.initialize",nil,"INITIALIZE & ACTIVATE"),colors.lime,nil,"INITIALIZE & ACTIVATE");bs[#bs+1]=button(t,27,y+2,tr("guardian.safe_shutdown",nil,"SAFE SHUTDOWN"),colors.red,nil,"SAFE SHUTDOWN")
@@ -1072,12 +984,7 @@ end
 if rawget(_G,"HELIOS_GUARDIAN_TEST") then
   return {lifecycleTarget=lifecycleTarget,lifecycleFieldTarget=lifecycleFieldTarget,lifecycleCeiling=lifecycleCeiling,
     lifecycleUnsafe=lifecycleUnsafe,thermalHoldRequired=thermalHoldRequired,emergencyFieldTarget=emergencyFieldTarget,
-    shutdownFieldTarget=shutdownFieldTarget,
-    commissionFieldFloor=COMMISSION_FIELD_FLOOR,bootstrapInjectorInput=BOOTSTRAP_INJECTOR_INPUT,
-    adoptInjectorBaseline=adoptInjectorBaseline,
-    commissioningFieldTarget=commissioningFieldTarget,commissioningDisposition=commissioningDisposition,
     chargeableStatus=chargeableStatus,mailboxHasRemoteDemand=mailboxHasRemoteDemand,
-    activationReady=activationReady,
     updateMeltdownTrend=updateMeltdownTrend,imminentMeltdown=imminentMeltdown}
 end
 local binding,page,controls,buttons=inspect(),"overview",load(),{}
@@ -1105,8 +1012,7 @@ local function cycleValue(values,current)
   return values[1]
 end
 local function beginCalibration()
-  invalidateOutputProfile(controls,"Operator requested fresh commissioning")
-  controls.commissioning=true;controls.commissionFlow=COMMISSION_START_FLOW;controls.commissionSamples=0;controls.commissionShortfallSamples=0;controls.commissionSettleSamples=0;controls.commissionFieldInput=positive(controls.injectorBaseline);controls.commissionFieldTuneSamples=0;controls.commissionLastSafe=nil;controls.recovery=false
+  controls.commissioning=true;controls.commissionFlow=COMMISSION_START_FLOW;controls.commissionSamples=0;controls.commissionShortfallSamples=0;controls.commissionSettleSamples=0;controls.commissionFieldInput=positive(controls.injectorBaseline);controls.commissionFieldTuneSamples=0;controls.commissionLastSafe=nil;controls.recovery=false;controls.commissioned=false;controls.rated=nil;controls.lifecycleCeilings={};controls.currentCycleCeilings={};controls.lifecycleApplied=nil;controls.lifecycleFieldApplied=nil;controls.lifecycleSamples=0;controls.lifecycleBandKey=nil;controls.lastFuelConversion=nil;controls.request="OFF"
   controls.initialRequested=true;controls.startActivated=false;controls.message="Automatic calibration requested by operator"
 end
 local function act(choice,d)
@@ -1114,11 +1020,7 @@ local function act(choice,d)
     controls.liveGatesSelected=false
   end
   if (choice=="AUTO COMMISSION" or choice=="RECALIBRATE CEILING") and controls.gatesOwned then beginCalibration()
-  elseif choice=="INITIALIZE & ACTIVATE" and controls.gatesOwned then
-    -- A stopped/refuelled/rebuilt core is not the same machine that proved the
-    -- previous MAX profile. Start with export closed and recommission from the
-    -- conservative trial instead of allowing durable mailbox intent to resume.
-    beginCalibration();controls.message="Safe initialization requested: old output profile revoked; commissioning from 50k RF/t"
+  elseif choice=="INITIALIZE & ACTIVATE" and controls.gatesOwned then controls.initialRequested=true;controls.startActivated=false;controls.message="Initial start requested by operator"
   elseif choice=="SAFE SHUTDOWN" then controls.request="OFF";controls.initialRequested=false;controls.startActivated=false;controls.message="Operator safe shutdown requested"
   elseif choice=="LANGUAGE" and type(guardianConfig)=="table" then
     local available={};local ok,module=pcall(dofile,"/helios/core/i18n.lua")
