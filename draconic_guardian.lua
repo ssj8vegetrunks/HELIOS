@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.30
+-- HELIOS Draconic Guardian v1.2.0-alpha.31
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -40,7 +40,7 @@ local BOOTSTRAP_INJECTOR_INPUT = 1900000
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.30"
+local GUARDIAN_VERSION = "1.2.0-alpha.31"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -234,6 +234,14 @@ local function chargeableStatus(status)
   status=string.lower(tostring(status or ""))
   return status=="offline" or status=="cold"
 end
+local function activationReady(status,field,saturation,temperature)
+  status=string.lower(tostring(status or ""))
+  if status=="charged" then return true end
+  return (status=="warming_up" or status=="warning_up") and
+    tonumber(field) and tonumber(field)>=95 and
+    tonumber(saturation) and tonumber(saturation)>=95 and
+    tonumber(temperature) and tonumber(temperature)>=1990
+end
 
 -- A requested export is only meaningful once the core is actually online.
 -- Keep the entire charge -> activate sequence in one place so the manual
@@ -273,10 +281,10 @@ local function ensureStarted(b,c,status,reason,fieldTarget,telemetry)
   local saturation=percent(telemetry and telemetry.energySaturation,
     telemetry and telemetry.maxEnergySaturation)
   local temperature=tonumber(telemetry and telemetry.temperature)
-  local warmReady=(status=="warming_up" or status=="warning_up") and
-    field and field>=49.5 and saturation and saturation>=49.5 and
-    temperature and temperature>=1990
-  if status=="charged" or warmReady then
+  -- Some DE builds linger in WARMING_UP instead of reporting CHARGED. The old
+  -- 50% shortcut activated a half-charged core and immediately destabilized
+  -- containment. Only accept the compatibility path when both stores are full.
+  if activationReady(status,field,saturation,temperature) then
     if not c.startActivated then
       reactor(b.reactor,"activateReactor")
       c.startActivated=true
@@ -286,7 +294,7 @@ local function ensureStarted(b,c,status,reason,fieldTarget,telemetry)
   end
   if status=="warming_up" or status=="warning_up" then
     c.startActivated=false
-    c.message=string.format("%s: charging (core %.0f/2000 C, field %.1f%%, saturation %.1f%%)",
+    c.message=string.format("%s: charging fully before activation (core %.0f/2000 C, field %.1f%%, saturation %.1f%%)",
       reason,temperature or 0,field or 0,saturation or 0)
     return true
   end
@@ -1071,6 +1079,7 @@ if rawget(_G,"HELIOS_GUARDIAN_TEST") then
     commissionFieldFloor=COMMISSION_FIELD_FLOOR,bootstrapInjectorInput=BOOTSTRAP_INJECTOR_INPUT,
     adoptInjectorBaseline=adoptInjectorBaseline,
     chargeableStatus=chargeableStatus,mailboxHasRemoteDemand=mailboxHasRemoteDemand,
+    activationReady=activationReady,
     updateMeltdownTrend=updateMeltdownTrend,imminentMeltdown=imminentMeltdown}
 end
 local binding,page,controls,buttons=inspect(),"overview",load(),{}

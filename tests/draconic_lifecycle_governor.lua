@@ -6,6 +6,12 @@ assert(governor.chargeableStatus("cold") and governor.chargeableStatus("offline"
     "both Draconic stopped-state names must enter the charging sequence")
 assert(not governor.chargeableStatus("cooling"),
     "a cooling reactor must finish stopping before it is charged")
+assert(not governor.activationReady("warming_up", 50, 50, 2000),
+    "automatic startup must not activate a half-charged reactor")
+assert(governor.activationReady("warming_up", 95, 95, 2000),
+    "the compatibility path may activate only when both stores are full")
+assert(governor.activationReady("charged", 0, 0, 0),
+    "the reactor's explicit CHARGED state remains authoritative")
 assert(governor.commissionFieldFloor >= 70,
     "commissioning must abort with substantial containment margin")
 local bootstrap = { commissioned = true, rated = 9000000, request = "MAX" }
