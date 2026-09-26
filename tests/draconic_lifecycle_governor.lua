@@ -23,6 +23,18 @@ assert(governor.mailboxHasRemoteDemand({
 assert(not governor.mailboxHasRemoteDemand({
     lastCommandStatus = "accepted", request = "IDLE",
 }), "an accepted idle request must remain idle")
+local maintenance = { request="REMOTE", commissioned=true, rated=9000000,
+    remoteLevel="MAX", remoteTarget=9000000, initialRequested=true }
+governor.beginRefuelMaintenance(maintenance, true)
+assert(maintenance.refuelMaintenance and maintenance.refuelPhase=="shutdown" and maintenance.request=="OFF",
+    "automatic refuel maintenance must latch and cancel generation demand")
+assert(maintenance.remoteLevel==nil and not maintenance.initialRequested,
+    "maintenance lock must clear stale Mainframe and restart intent")
+governor.resetAfterRefuel(maintenance)
+assert(not maintenance.refuelMaintenance and not maintenance.commissioned and maintenance.rated==nil,
+    "confirmed refueling must clear the learned reactor profile")
+assert(maintenance.injectorBaseline==1900000 and maintenance.mode=="AUTO" and maintenance.request=="OFF",
+    "a fresh fuel cycle must return to the conservative uncommissioned baseline")
 local function reactor(conversion, field, generation, temperature, sampleTime)
     return {
         status = "running",

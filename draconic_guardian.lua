@@ -1,9 +1,10 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.24
+-- HELIOS Draconic Guardian v1.2.0-alpha.33
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
 local FIELD_TARGET, FIELD_EMERGENCY = 50, 15
-local MAX_TEMPERATURE, MINIMUM_FUEL = 8000, 5
+local MAX_TEMPERATURE, MINIMUM_FUEL = 8000, 1
+local REFUEL_OFFER_FUEL, REFUEL_VERIFY_FUEL = 5, 5
 -- Draconic's peripheral telemetry reports live generation but not a safe
 -- maximum output. Establish one by proving progressively larger exports.
 -- The calibration may approach the real limit, but never crosses the 15%
@@ -38,7 +39,7 @@ local FIELD_RECOVERY_RATIO, MINIMUM_FIELD_INPUT = .05, 50000
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.24"
+local GUARDIAN_VERSION = "1.2.0-alpha.33"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -357,7 +358,7 @@ local function vertical(t,x,y,h,label,now,maximum,c)
   t.setBackgroundColor(colors.black);text(t,x,y+h+1,string.format("%3.0f%%",f*100),c)
 end
 local function load()
-  local d={mode="AUTO",request="OFF",rated=nil,commissioned=false,commissioning=false,commissionFlow=nil,commissionSamples=0,commissionShortfallSamples=0,commissionSettleSamples=0,commissionFieldInput=nil,commissionFieldTuneSamples=0,commissionLastSafe=nil,recovery=false,arm=0,initialRequested=false,startActivated=false,liveGatesSelected=false,message="Automatic safe supervision"}
+  local d={mode="AUTO",request="OFF",rated=nil,commissioned=false,commissioning=false,commissionFlow=nil,commissionSamples=0,commissionShortfallSamples=0,commissionSettleSamples=0,commissionFieldInput=nil,commissionFieldTuneSamples=0,commissionLastSafe=nil,recovery=false,arm=0,initialRequested=false,startActivated=false,liveGatesSelected=false,refuelMaintenance=false,refuelPhase=nil,message="Automatic safe supervision"}
   local s
   -- A world save or chunk unload can interrupt a direct file replacement. Use
   -- the first intact checkpoint, including the pending/backup copies left by
@@ -366,7 +367,7 @@ local function load()
     if fs.exists(path) then local ok,value=pcall(dofile,path);if ok and type(value)=="table" then s=value;break end end
   end
   if not s then return d end
-  d.mode=(s.mode=="ASSISTED" or s.mode=="UNRESTRICTED") and s.mode or "AUTO";d.request=(FRACTION[s.request] or s.request=="MANUAL" or s.request=="OVERDRIVE" or s.request=="IDLE") and s.request or "OFF";d.rated=tonumber(s.rated);d.lifecycleCeilings=type(s.lifecycleCeilings)=="table" and s.lifecycleCeilings or {};d.currentCycleCeilings=type(s.currentCycleCeilings)=="table" and s.currentCycleCeilings or {};d.injectorBaseline=positive(s.injectorBaseline);d.manualField=positive(s.manualField);d.manualExport=positive(s.manualExport) or 0;d.overdriveField=positive(s.overdriveField);d.overdriveExport=positive(s.overdriveExport);d.commissioned=s.commissioned==true;d.commissioning=s.commissioning==true;d.commissionFlow=positive(s.commissionFlow);d.commissionSamples=math.max(0,math.floor(tonumber(s.commissionSamples) or 0));d.commissionShortfallSamples=math.max(0,math.floor(tonumber(s.commissionShortfallSamples) or 0));d.commissionSettleSamples=math.max(0,math.floor(tonumber(s.commissionSettleSamples) or 0));d.commissionFieldInput=positive(s.commissionFieldInput);d.commissionFieldTuneSamples=math.max(0,math.floor(tonumber(s.commissionFieldTuneSamples) or 0));d.commissionLastSafe=positive(s.commissionLastSafe);d.recovery=s.recovery==true;d.lifecycleApplied=positive(s.lifecycleApplied);d.lifecycleFieldApplied=positive(s.lifecycleFieldApplied);d.lifecycleSamples=math.max(0,math.floor(tonumber(s.lifecycleSamples) or 0));d.lifecycleBandKey=s.lifecycleBandKey and tostring(s.lifecycleBandKey) or nil;d.lifecycleStartField=tonumber(s.lifecycleStartField);d.fieldTuneSamples=math.max(0,math.floor(tonumber(s.fieldTuneSamples) or 0));d.lastFuelConversion=tonumber(s.lastFuelConversion);d.overdriveApplied=tonumber(s.overdriveApplied);d.message=tostring(s.message or d.message);return d
+  d.mode=(s.mode=="ASSISTED" or s.mode=="UNRESTRICTED") and s.mode or "AUTO";d.request=(FRACTION[s.request] or s.request=="MANUAL" or s.request=="OVERDRIVE" or s.request=="IDLE") and s.request or "OFF";d.rated=tonumber(s.rated);d.lifecycleCeilings=type(s.lifecycleCeilings)=="table" and s.lifecycleCeilings or {};d.currentCycleCeilings=type(s.currentCycleCeilings)=="table" and s.currentCycleCeilings or {};d.injectorBaseline=positive(s.injectorBaseline);d.manualField=positive(s.manualField);d.manualExport=positive(s.manualExport) or 0;d.overdriveField=positive(s.overdriveField);d.overdriveExport=positive(s.overdriveExport);d.commissioned=s.commissioned==true;d.commissioning=s.commissioning==true;d.commissionFlow=positive(s.commissionFlow);d.commissionSamples=math.max(0,math.floor(tonumber(s.commissionSamples) or 0));d.commissionShortfallSamples=math.max(0,math.floor(tonumber(s.commissionShortfallSamples) or 0));d.commissionSettleSamples=math.max(0,math.floor(tonumber(s.commissionSettleSamples) or 0));d.commissionFieldInput=positive(s.commissionFieldInput);d.commissionFieldTuneSamples=math.max(0,math.floor(tonumber(s.commissionFieldTuneSamples) or 0));d.commissionLastSafe=positive(s.commissionLastSafe);d.recovery=s.recovery==true;d.lifecycleApplied=positive(s.lifecycleApplied);d.lifecycleFieldApplied=positive(s.lifecycleFieldApplied);d.lifecycleSamples=math.max(0,math.floor(tonumber(s.lifecycleSamples) or 0));d.lifecycleBandKey=s.lifecycleBandKey and tostring(s.lifecycleBandKey) or nil;d.lifecycleStartField=tonumber(s.lifecycleStartField);d.fieldTuneSamples=math.max(0,math.floor(tonumber(s.fieldTuneSamples) or 0));d.lastFuelConversion=tonumber(s.lastFuelConversion);d.overdriveApplied=tonumber(s.overdriveApplied);d.refuelMaintenance=s.refuelMaintenance==true;d.refuelPhase=d.refuelMaintenance and tostring(s.refuelPhase or "shutdown") or nil;d.message=tostring(s.message or d.message);return d
 end
 local function save(c)
   local parent=fs.getDir(SETTINGS);if parent~="" and not fs.exists(parent) then fs.makeDir(parent) end
@@ -553,6 +554,27 @@ local function emergencyFieldTarget(c,r,baseline)
   return math.ceil(math.max(proven,current*1.25,drain*1.50,MINIMUM_FIELD_INPUT))
 end
 
+local function beginRefuelMaintenance(c,automatic)
+  c.refuelMaintenance=true;c.refuelPhase="shutdown";c.request="OFF"
+  c.initialRequested=false;c.startActivated=false;c.commissioning=false;c.recovery=false
+  c.remoteTarget=nil;c.remoteLevel=nil;c.remoteApplied=nil;c.remotePrimed=nil
+  c.message=automatic and "REFUEL MAINTENANCE: 1% reserve reached; automatic controlled shutdown" or
+    "REFUEL MAINTENANCE: operator requested controlled shutdown"
+end
+local function resetAfterRefuel(c)
+  c.refuelMaintenance=false;c.refuelPhase=nil;c.mode="AUTO";c.request="OFF"
+  c.rated=nil;c.commissioned=false;c.commissioning=false;c.commissionFlow=nil
+  c.commissionSamples=0;c.commissionShortfallSamples=0;c.commissionSettleSamples=0
+  c.commissionFieldInput=nil;c.commissionFieldTuneSamples=0;c.commissionLastSafe=nil
+  c.recovery=false;c.safetyRecovery=nil;c.fieldRecovery=false;c.initialRequested=false;c.startActivated=false
+  c.injectorBaseline=1900000;c.lifecycleCeilings={};c.currentCycleCeilings={}
+  c.lifecycleApplied=nil;c.lifecycleFieldApplied=nil;c.lifecycleSamples=0;c.lifecycleBandKey=nil
+  c.lifecycleStartField=nil;c.fieldTuneSamples=0;c.lastFuelConversion=nil;c.overdriveApplied=nil
+  c.manualField=nil;c.manualExport=0;c.overdriveField=nil;c.overdriveExport=nil
+  c.remoteTarget=nil;c.remoteLevel=nil;c.remoteApplied=nil;c.remotePrimed=nil
+  c.message="REFUEL VERIFIED: learned reactor profile cleared; fresh calibration required"
+end
+
 -- AUTO and ASSISTED retain containment. UNRESTRICTED is visibly armed and lets
 -- the operator's command stand, while warnings remain live.
 local function supervise(b,d,c)
@@ -583,6 +605,21 @@ local function supervise(b,d,c)
     reactor(b.reactor,"stopReactor")
     return
   end
+  if not c.refuelMaintenance and fuel<=MINIMUM_FUEL then beginRefuelMaintenance(c,true);save(c) end
+  if c.refuelMaintenance then
+    gate(b.output,0);c.request="OFF";c.initialRequested=false;c.startActivated=false
+    if containmentRequired then
+      c.refuelPhase="shutdown";local input=shutdownInput();gate(b.input,input);reactor(b.reactor,"stopReactor")
+      c.message="REFUEL MAINTENANCE: controlled shutdown in progress; injector "..fmt(input).." RF/t"
+    elseif chargeableStatus(status) then
+      c.refuelPhase="awaiting_refuel";gate(b.input,0)
+      c.message="SAFE TO REFUEL: replace fuel, then press REFUELING COMPLETE"
+    else
+      c.refuelPhase="shutdown";gate(b.input,shutdownInput());reactor(b.reactor,"stopReactor")
+      c.message="REFUEL MAINTENANCE: waiting for reactor to report fully cold"
+    end
+    return
+  end
   -- A pending start owns every pre-online transition. In particular, STOPPING
   -- may be the tail of an earlier shutdown and WARMING_UP has no containment
   -- yet. Let the shared charge/activate state machine finish before applying
@@ -592,7 +629,6 @@ local function supervise(b,d,c)
     return
   end
   if not free then
-    if fuel<=MINIMUM_FUEL then c.request="OFF";return stop("fuel reserve below "..MINIMUM_FUEL.."%") end
     local imminent,warning=imminentMeltdown(r)
     if imminent then return stop(warning,false,true) end
     -- Heat alone is not a reason to cycle a contained Draconic reactor. Close
@@ -930,11 +966,18 @@ local function draw(t,b,d,page,c,bs)
   center(15,"Field actual "..fmt(d.inputFlow).."  command "..fmt(gateTargets[b.input]),inputControlled and colors.lime or colors.red)
   center(16,"Export actual "..fmt(d.outputFlow).."  command "..fmt(gateTargets[b.output]),outputControlled and colors.lime or colors.red)
   center(17,tr("guardian.gate_roles",{output=tostring(b.output)},"modem=field; {output}=export"),colors.lightGray);centerWrap(18,tr("common.guardian",nil,"GUARDIAN")..": "..c.message,c.mode=="UNRESTRICTED" and colors.red or colors.lightGray,3)
+  local fuelRemaining=pct((tonumber(r.maxFuelConversion) or 0)-(tonumber(r.fuelConversion) or 0),r.maxFuelConversion) or 0
   local y=h-7;if not c.gatesOwned then
     text(t,1,y-2,"GATE CONTROL NOT ACQUIRED - REACTOR START DISABLED",colors.red)
     text(t,1,y-1,"Field control: "..tostring(c.inputControlVerified).."  Export control: "..tostring(c.outputControlVerified),colors.orange)
     if c.gateError then text(t,1,y,"API error: "..tostring(c.gateError),colors.red) end
     bs[#bs+1]=button(t,1,y+3,"SAFE SHUTDOWN",colors.red)
+  elseif c.refuelMaintenance then
+    text(t,1,y-2,"REFUEL MAINTENANCE LOCK",colors.red)
+    if c.refuelPhase=="awaiting_refuel" then
+      text(t,1,y-1,"SAFE TO REFUEL - automatic and Mainframe starts are locked",colors.orange)
+      bs[#bs+1]=button(t,1,y+1,"REFUELING COMPLETE",colors.lime,nil,"REFUELING COMPLETE")
+    else text(t,1,y-1,"Controlled shutdown in progress. Do not service the reactor.",colors.orange) end
   elseif not c.commissioned then
     text(t,1,y-2,"OUTPUT SELECTOR  [OFF] [MIN] [MED] [MAX] [OVERDRIVE]",colors.gray)
     text(t,1,y-1,"LOCKED: calibrate a verified output ceiling against live containment.",colors.orange)
@@ -942,7 +985,7 @@ local function draw(t,b,d,page,c,bs)
     text(t,1,y+1,tr("guardian.commission_hint",nil,"Starts at 50k RF/t; rises while the field stays at or above 17%."),colors.lightGray)
     bs[#bs+1]=button(t,1,y+3,tr("guardian.initialize",nil,"INITIALIZE & ACTIVATE"),colors.lime,nil,"INITIALIZE & ACTIVATE")
     bs[#bs+1]=button(t,27,y+3,tr("guardian.safe_shutdown",nil,"SAFE SHUTDOWN"),colors.red,nil,"SAFE SHUTDOWN")
-  elseif c.mode=="AUTO" then bs[#bs+1]=button(t,1,y,tr("guardian.enable_assisted",nil,"ENABLE ASSISTED MANUAL"),colors.orange,nil,"ENABLE ASSISTED MANUAL");bs[#bs+1]=button(t,27,y,tr("guardian.recalibrate",nil,"RECALIBRATE CEILING"),colors.orange,nil,"RECALIBRATE CEILING");bs[#bs+1]=button(t,1,y+2,tr("guardian.initialize",nil,"INITIALIZE & ACTIVATE"),colors.lime,nil,"INITIALIZE & ACTIVATE");bs[#bs+1]=button(t,27,y+2,tr("guardian.safe_shutdown",nil,"SAFE SHUTDOWN"),colors.red,nil,"SAFE SHUTDOWN")
+  elseif c.mode=="AUTO" then bs[#bs+1]=button(t,1,y,tr("guardian.enable_assisted",nil,"ENABLE ASSISTED MANUAL"),colors.orange,nil,"ENABLE ASSISTED MANUAL");bs[#bs+1]=button(t,27,y,tr("guardian.recalibrate",nil,"RECALIBRATE CEILING"),colors.orange,nil,"RECALIBRATE CEILING");bs[#bs+1]=button(t,1,y+2,tr("guardian.initialize",nil,"INITIALIZE & ACTIVATE"),colors.lime,nil,"INITIALIZE & ACTIVATE");bs[#bs+1]=button(t,27,y+2,tr("guardian.safe_shutdown",nil,"SAFE SHUTDOWN"),colors.red,nil,"SAFE SHUTDOWN");if fuelRemaining<=REFUEL_OFFER_FUEL then bs[#bs+1]=button(t,1,y+4,"BEGIN REFUEL MAINTENANCE",colors.orange,nil,"BEGIN REFUEL MAINTENANCE") end
   elseif c.mode=="ASSISTED" then
     local px=1;for _,v in ipairs({"OFF","MIN","MED","MAX"}) do local q=button(t,px,y,v,colors.cyan);bs[#bs+1]=q;px=q.x2+2 end;bs[#bs+1]=button(t,px,y,"ARM UNRESTRICTED",colors.red)
     bs[#bs+1]=button(t,1,y+2,"INITIALIZE & ACTIVATE",colors.lime);bs[#bs+1]=button(t,27,y+2,"SAFE SHUTDOWN",colors.red)
@@ -984,6 +1027,7 @@ end
 if rawget(_G,"HELIOS_GUARDIAN_TEST") then
   return {lifecycleTarget=lifecycleTarget,lifecycleFieldTarget=lifecycleFieldTarget,lifecycleCeiling=lifecycleCeiling,
     lifecycleUnsafe=lifecycleUnsafe,thermalHoldRequired=thermalHoldRequired,emergencyFieldTarget=emergencyFieldTarget,
+    beginRefuelMaintenance=beginRefuelMaintenance,resetAfterRefuel=resetAfterRefuel,
     chargeableStatus=chargeableStatus,mailboxHasRemoteDemand=mailboxHasRemoteDemand,
     updateMeltdownTrend=updateMeltdownTrend,imminentMeltdown=imminentMeltdown}
 end
@@ -1019,7 +1063,14 @@ local function act(choice,d)
   if type(choice)=="string" and (string.find(choice,"FIELD",1,true)==1 or string.find(choice,"EXPORT",1,true)==1) then
     controls.liveGatesSelected=false
   end
-  if (choice=="AUTO COMMISSION" or choice=="RECALIBRATE CEILING") and controls.gatesOwned then beginCalibration()
+  if choice=="BEGIN REFUEL MAINTENANCE" and controls.gatesOwned then beginRefuelMaintenance(controls,false);save(controls)
+  elseif choice=="REFUELING COMPLETE" and controls.refuelMaintenance and controls.refuelPhase=="awaiting_refuel" then
+    local r=d and d.reactor or {};local status=string.lower(tostring(r.status or "unknown"))
+    local fuel=pct((tonumber(r.maxFuelConversion) or 0)-(tonumber(r.fuelConversion) or 0),r.maxFuelConversion) or 0
+    if (status=="cold" or status=="offline") and fuel>REFUEL_VERIFY_FUEL then resetAfterRefuel(controls);save(controls)
+    else controls.message=string.format("REFUEL NOT VERIFIED: reactor must be cold with more than %d%% fuel (now %.1f%%)",REFUEL_VERIFY_FUEL,fuel) end
+  elseif controls.refuelMaintenance then controls.message="REFUEL MAINTENANCE LOCK: complete physical refueling before other commands"
+  elseif (choice=="AUTO COMMISSION" or choice=="RECALIBRATE CEILING") and controls.gatesOwned then beginCalibration()
   elseif choice=="INITIALIZE & ACTIVATE" and controls.gatesOwned then controls.initialRequested=true;controls.startActivated=false;controls.message="Initial start requested by operator"
   elseif choice=="SAFE SHUTDOWN" then controls.request="OFF";controls.initialRequested=false;controls.startActivated=false;controls.message="Operator safe shutdown requested"
   elseif choice=="LANGUAGE" and type(guardianConfig)=="table" then
@@ -1212,13 +1263,15 @@ local function facilityWorker()
       fieldGate=tonumber(data and data.inputSet),exportGate=tonumber(data and data.outputSet),
       fieldInput=tonumber(data and data.inputFlow),exportFlow=tonumber(data and data.outputFlow),
       mode=controls.mode,request=controls.request,commissioned=controls.commissioned==true,
+      maintenanceMode=controls.refuelMaintenance==true,maintenanceType=controls.refuelMaintenance and "refuel" or nil,
+      maintenancePhase=controls.refuelPhase,
       ratedOutput=tonumber(controls.rated),remoteTarget=tonumber(controls.remoteTarget),remoteLevel=controls.remoteLevel,
       lastAppliedCommandRevision=tonumber(controls.lastAppliedCommandRevision),
       lastCommandStatus=controls.lastCommandStatus,localAuthority=true,remoteCommands=true,
       guardianMessage=tostring(controls.message or ""),telemetryStale=controls.telemetryStale==true,
-      alarmLevel=imminent and 3 or nil,
-      alarmCode=imminent and "draconic_meltdown_imminent" or nil,
-      alarmMessage=alarmMessage,
+      alarmLevel=imminent and 3 or (controls.refuelMaintenance and 1 or nil),
+      alarmCode=imminent and "draconic_meltdown_imminent" or (controls.refuelMaintenance and "draconic_refuel_maintenance" or nil),
+      alarmMessage=imminent and alarmMessage or (controls.refuelMaintenance and tostring(controls.message) or nil),
     }
   end
   local function hello(target)
@@ -1281,6 +1334,8 @@ local function facilityWorker()
           elseif tonumber(controls.lastAppliedCommandRevision) and
                  revision<tonumber(controls.lastAppliedCommandRevision) then
             detail="Stale command revision"
+          elseif controls.refuelMaintenance then
+            detail="Guardian is locked for refuel maintenance ("..tostring(controls.refuelPhase or "shutdown")..")"
           elseif controls.mode~="AUTO" then
             detail="Guardian is not in automatic mode"
           elseif controls.commissioned~=true or not positive(controls.rated) then
