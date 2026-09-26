@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.28
+-- HELIOS Draconic Guardian v1.2.0-alpha.29
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -6,8 +6,8 @@ local FIELD_TARGET, FIELD_EMERGENCY = 50, 15
 local MAX_TEMPERATURE, MINIMUM_FUEL = 8000, 5
 -- Draconic's peripheral telemetry reports live generation but not a safe
 -- maximum output. Establish one by proving progressively larger exports.
--- The calibration may approach the real limit, but never crosses the 15%
--- hard shutdown interlock: 17% is the operating-edge cutoff.
+-- Calibration now keeps a large containment margin and fails closed. It must
+-- never approach the reactor's 15% hard shutdown boundary.
 local COMMISSION_START_FLOW, COMMISSION_SAMPLES = 50000, 60
 local COMMISSION_FIELD_FLOOR, COMMISSION_TEMP_LIMIT = 70, 6500
 local COMMISSION_STEP_RATIO, COMMISSION_MIN_STEP = 1.10, 50000
@@ -40,7 +40,7 @@ local BOOTSTRAP_INJECTOR_INPUT = 1900000
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.28"
+local GUARDIAN_VERSION = "1.2.0-alpha.29"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -135,6 +135,11 @@ local function call(n,m,...)
   local ok,v=pcall(peripheral.call,n,m,...); if not ok then return nil,tostring(v) end; return v
 end
 local gateApplied,gateCommands,gateTargets={},{},{}
+local function gateSetpoint(n)
+  local value=call(n,"getFlowOverride")
+  if value==nil then value=call(n,"getSignalLowFlow") end
+  return tonumber(value)
+end
 local function read(b)
   local r,e=call(b.reactor,"getReactorInfo"); if type(r)~="table" then return nil,e or "getReactorInfo failed" end
   local inputSet=call(b.input,"getFlowOverride");if inputSet==nil then inputSet=call(b.input,"getSignalLowFlow") end
@@ -151,8 +156,16 @@ local function gate(n,v,force)
   local previous=gateCommands[n]
   local now=os.clock()
   if not force and previous and previous.flow==flow and now-previous.sent<.75 then return true end
-  local enabled,enableError=call(n,"setOverrideEnabled",true);if enabled==nil and enableError then return false,enableError end
-  local _,flowError=call(n,"setFlowOverride",flow);if flowError then return false,flowError end
+  -- Different Draconic/CC integrations expose either an override setter or
+  -- the native low/high redstone flow setters. Drive every available API and
+  -- accept the command only when at least one flow setter succeeds.
+  call(n,"setOverrideEnabled",true)
+  local _,overrideError=call(n,"setFlowOverride",flow)
+  local _,lowError=call(n,"setSignalLowFlow",flow)
+  local _,highError=call(n,"setSignalHighFlow",flow)
+  if overrideError and lowError and highError then
+    return false,"no supported Flux Gate flow setter: "..tostring(overrideError)
+  end
   gateCommands[n]={flow=flow,sent=now}
   return true
 end
@@ -188,19 +201,18 @@ local function acquireGates(b,d,c)
     return false
   end
   if c.inputControlVerified==true and c.outputControlVerified==true then c.gatesOwned=true;c.gateError=nil;return true end
-  if d.inputOverride==true and d.outputOverride==true then c.gatesOwned=true;c.inputControlVerified=true;c.outputControlVerified=true;c.gateError=nil;return true end
   -- Containment first, then export. Never close field support while taking control.
   local inputOk,inputError=gate(b.input,injectorCap,true)
   local outputOk,outputError=gate(b.output,0,true)
   local inputReported=call(b.input,"getOverrideEnabled")==true
   local outputReported=call(b.output,"getOverrideEnabled")==true
-  local inputSet=call(b.input,"getFlowOverride");if inputSet==nil then inputSet=call(b.input,"getSignalLowFlow") end
-  local outputSet=call(b.output,"getFlowOverride");if outputSet==nil then outputSet=call(b.output,"getSignalLowFlow") end
+  local inputSet=gateSetpoint(b.input)
+  local outputSet=gateSetpoint(b.output)
   -- Some DE builds show "Overridden" in the GUI but return false/nil from
   -- getOverrideEnabled(). A successful command whose override setpoint reads
   -- back exactly is equivalent proof that this computer owns the gate.
-  local inputOwned=inputReported or (inputOk and tonumber(inputSet) and math.abs(tonumber(inputSet)-injectorCap)<1)
-  local outputOwned=outputReported or (outputOk and tonumber(outputSet) and math.abs(tonumber(outputSet))<1)
+  local inputOwned=inputOk and tonumber(inputSet) and math.abs(tonumber(inputSet)-injectorCap)<1
+  local outputOwned=outputOk and tonumber(outputSet) and math.abs(tonumber(outputSet))<1
   c.inputControlVerified=inputOwned==true;c.outputControlVerified=outputOwned==true
   c.gatesOwned=inputOk and outputOk and inputOwned and outputOwned
   if not c.gatesOwned then
@@ -992,7 +1004,7 @@ local function draw(t,b,d,page,c,bs)
     text(t,1,y-2,"OUTPUT SELECTOR  [OFF] [MIN] [MED] [MAX] [OVERDRIVE]",colors.gray)
     text(t,1,y-1,"LOCKED: calibrate a verified output ceiling against live containment.",colors.orange)
     bs[#bs+1]=button(t,1,y,tr("guardian.auto_commission",nil,"AUTO COMMISSION"),colors.orange,nil,"AUTO COMMISSION")
-    text(t,1,y+1,tr("guardian.commission_hint",nil,"Starts at 50k RF/t; rises while the field stays at or above 17%."),colors.lightGray)
+    text(t,1,y+1,"Starts at 50k RF/t; requires at least 70% field and aborts on a falling trend.",colors.lightGray)
     bs[#bs+1]=button(t,1,y+3,tr("guardian.initialize",nil,"INITIALIZE & ACTIVATE"),colors.lime,nil,"INITIALIZE & ACTIVATE")
     bs[#bs+1]=button(t,27,y+3,tr("guardian.safe_shutdown",nil,"SAFE SHUTDOWN"),colors.red,nil,"SAFE SHUTDOWN")
   elseif c.mode=="AUTO" then bs[#bs+1]=button(t,1,y,tr("guardian.enable_assisted",nil,"ENABLE ASSISTED MANUAL"),colors.orange,nil,"ENABLE ASSISTED MANUAL");bs[#bs+1]=button(t,27,y,tr("guardian.recalibrate",nil,"RECALIBRATE CEILING"),colors.orange,nil,"RECALIBRATE CEILING");bs[#bs+1]=button(t,1,y+2,tr("guardian.initialize",nil,"INITIALIZE & ACTIVATE"),colors.lime,nil,"INITIALIZE & ACTIVATE");bs[#bs+1]=button(t,27,y+2,tr("guardian.safe_shutdown",nil,"SAFE SHUTDOWN"),colors.red,nil,"SAFE SHUTDOWN")
