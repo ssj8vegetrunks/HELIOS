@@ -12,8 +12,16 @@ assert(governor.activationReady("warming_up", 95, 95, 2000),
     "the compatibility path may activate only when both stores are full")
 assert(governor.activationReady("charged", 0, 0, 0),
     "the reactor's explicit CHARGED state remains authoritative")
-assert(governor.commissionFieldFloor >= 70,
-    "commissioning must abort with substantial containment margin")
+assert(governor.commissionFieldFloor == 50,
+    "commissioning must retain a hard boundary without aborting recoverable field dips")
+assert(governor.commissioningFieldTarget(1900000, 1900000, 1400000, 67) == 2800000,
+    "calibration recovery must immediately cover twice the measured drain")
+assert(governor.commissioningDisposition(67, 1330, 99, true, false) == "pause",
+    "a recoverable falling field must pause export instead of stopping the reactor")
+assert(governor.commissioningDisposition(45, 1330, 99, true, true) == "abort",
+    "the hard containment boundary must still abort calibration")
+assert(governor.commissioningDisposition(92, 3000, 99, false, true) == "run",
+    "a paused calibration must resume after containment rebuilds")
 local bootstrap = { commissioned = true, rated = 9000000, request = "MAX" }
 assert(governor.adoptInjectorBaseline({ inputSet = 0, inputFlow = 0,
     reactor = { status = "cold", fieldDrainRate = 0 } }, bootstrap) == 1900000,

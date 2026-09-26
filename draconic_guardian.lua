@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.31
+-- HELIOS Draconic Guardian v1.2.0-alpha.32
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -9,10 +9,11 @@ local MAX_TEMPERATURE, MINIMUM_FUEL = 8000, 5
 -- Calibration now keeps a large containment margin and fails closed. It must
 -- never approach the reactor's 15% hard shutdown boundary.
 local COMMISSION_START_FLOW, COMMISSION_SAMPLES = 50000, 60
-local COMMISSION_FIELD_FLOOR, COMMISSION_TEMP_LIMIT = 70, 6500
+local COMMISSION_FIELD_FLOOR, COMMISSION_TEMP_LIMIT = 50, 6500
 local COMMISSION_STEP_RATIO, COMMISSION_MIN_STEP = 1.10, 50000
 local COMMISSION_SHORTFALL_SAMPLES = 20
 local COMMISSION_FIELD_TARGET, COMMISSION_FIELD_TUNE_SAMPLES = 80, 10
+local COMMISSION_FIELD_RESUME = 90
 -- A cool reactor ramps up to a new export request over several seconds.  This
 -- is a settling period, not evidence that the output path has reached its
 -- ceiling, so do not score it as a failed sample.
@@ -40,7 +41,7 @@ local BOOTSTRAP_INJECTOR_INPUT = 1900000
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.31"
+local GUARDIAN_VERSION = "1.2.0-alpha.32"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -241,6 +242,18 @@ local function activationReady(status,field,saturation,temperature)
     tonumber(field) and tonumber(field)>=95 and
     tonumber(saturation) and tonumber(saturation)>=95 and
     tonumber(temperature) and tonumber(temperature)>=1990
+end
+local function commissioningFieldTarget(current,baseline,drain,field)
+  current,baseline,drain=positive(current) or 0,positive(baseline) or 0,positive(drain) or 0
+  local margin=(tonumber(field) or 0)<COMMISSION_FIELD_TARGET and 2 or 1.5
+  return math.ceil(math.max(current,baseline,drain*margin))
+end
+local function commissioningDisposition(field,temp,fuel,falling,risingHot,paused)
+  field,temp,fuel=tonumber(field) or 0,tonumber(temp) or 0,tonumber(fuel) or 0
+  if field<COMMISSION_FIELD_FLOOR or temp>COMMISSION_TEMP_LIMIT or risingHot or fuel<=MINIMUM_FUEL then return "abort" end
+  if field<COMMISSION_FIELD_TARGET or (falling and field<COMMISSION_FIELD_RESUME) then return "pause" end
+  if paused and field<COMMISSION_FIELD_RESUME then return "pause" end
+  return "run"
 end
 
 -- A requested export is only meaningful once the core is actually online.
@@ -752,15 +765,17 @@ local function supervise(b,d,c)
       return
     end
     local trial=math.max(COMMISSION_START_FLOW,tonumber(c.commissionFlow) or COMMISSION_START_FLOW)
-    local fieldInput=math.max(injectorCap,positive(c.commissionFieldInput) or injectorCap)
+    local drain=positive(r.fieldDrainRate) or 0
+    local fieldInput=commissioningFieldTarget(c.commissionFieldInput,injectorCap,drain,field)
     c.commissionFieldInput=fieldInput
     gate(b.input,fieldInput)
-    gate(b.output,trial)
     local falling=(tonumber(meltdownTrend.fallingField) or 0)>=3
     local risingHot=(tonumber(meltdownTrend.risingTemperature) or 0)>=3 and temp>=6000
-    -- End the trial well above the 15% emergency field boundary. Keep the reactor
-    -- live in IDLE while export closes and containment rebuilds.
-    if field<COMMISSION_FIELD_FLOOR or temp>COMMISSION_TEMP_LIMIT or falling or risingHot or fuel<=MINIMUM_FUEL then
+    local disposition=commissioningDisposition(field,temp,fuel,falling,risingHot,c.commissionPaused)
+    -- Only a genuine safety boundary ends commissioning. A recoverable field
+    -- deficit closes export, follows measured drain, and resumes the same trial
+    -- after containment has rebuilt instead of stopping the reactor.
+    if disposition=="abort" then
       local recoveryField=recoveryInput()
       gate(b.output,0);gate(b.input,recoveryField);reactor(b.reactor,"stopReactor")
       c.lifecycleFieldApplied=recoveryField;c.commissioning=false;c.initialRequested=false;c.startActivated=false
@@ -769,32 +784,14 @@ local function supervise(b,d,c)
       c.message="CALIBRATION ABORTED: controlled shutdown, export closed, containment "..fmt(recoveryField).." RF/t"
       return
     end
-    -- The adopted injector value is a safe starting point, not a hard ceiling.
-    -- If an export trial settles below the proof band, raise containment input
-    -- gradually before deciding whether that output can be sustained.
-    if field<COMMISSION_FIELD_TARGET then
-      c.commissionSamples=0;c.commissionShortfallSamples=0;c.commissionSettleSamples=0
-      c.commissionFieldTuneSamples=(tonumber(c.commissionFieldTuneSamples) or 0)+1
-      local drain=positive(r.fieldDrainRate) or 0
-      -- This is a derived runaway guard, not a configured operating ceiling:
-      -- one trial never needs more than its export or twice the observed drain.
-      local fieldLimit=math.max(injectorCap,trial,drain*2)
-      if c.commissionFieldTuneSamples>=COMMISSION_FIELD_TUNE_SAMPLES then
-        if fieldInput>=fieldLimit then
-          local recoveryField=recoveryInput()
-          gate(b.output,0);gate(b.input,recoveryField);c.lifecycleFieldApplied=recoveryField;c.commissioning=false;c.initialRequested=false;c.request="IDLE";c.recovery=true
-          c.commissioned=(tonumber(c.commissionLastSafe) or 0)>0;c.rated=c.commissionLastSafe
-          c.message="Calibration complete: containment stabilized below 45% at the trial field-input limit; verified ceiling "..fmt(c.rated or 0).." RF/t"
-          return
-        end
-        fieldInput=math.min(fieldLimit,math.max(fieldInput+COMMISSION_MIN_STEP,math.floor(fieldInput*(1+FIELD_RECOVERY_RATIO))))
-        c.commissionFieldInput=fieldInput;c.commissionFieldTuneSamples=0
-        gate(b.input,fieldInput)
-      end
-      c.message=string.format("Raising containment for %s RF/t trial: field %.1f%%, injector %s RF/t (%d/%d)",fmt(trial),field,fmt(fieldInput),c.commissionFieldTuneSamples,COMMISSION_FIELD_TUNE_SAMPLES)
+    if disposition=="pause" then
+      gate(b.output,0)
+      c.commissionPaused=true;c.commissionSamples=0;c.commissionShortfallSamples=0;c.commissionSettleSamples=0;c.commissionFieldTuneSamples=0
+      c.message=string.format("Calibration paused: rebuilding containment %.1f%% -> %d%%; injector %s RF/t covers %s RF/t drain",field,COMMISSION_FIELD_RESUME,fmt(fieldInput),fmt(drain))
       return
     end
-    c.commissionFieldTuneSamples=0
+    c.commissionPaused=false;c.commissionFieldTuneSamples=0
+    gate(b.output,trial)
     -- A Flux Gate's reported flow is not a trustworthy measure of reactor
     -- generation on every DE/ATM configuration.  The reactor component is
     -- authoritative: only count a trial as proven when its generation rate
@@ -1078,6 +1075,7 @@ if rawget(_G,"HELIOS_GUARDIAN_TEST") then
     shutdownFieldTarget=shutdownFieldTarget,
     commissionFieldFloor=COMMISSION_FIELD_FLOOR,bootstrapInjectorInput=BOOTSTRAP_INJECTOR_INPUT,
     adoptInjectorBaseline=adoptInjectorBaseline,
+    commissioningFieldTarget=commissioningFieldTarget,commissioningDisposition=commissioningDisposition,
     chargeableStatus=chargeableStatus,mailboxHasRemoteDemand=mailboxHasRemoteDemand,
     activationReady=activationReady,
     updateMeltdownTrend=updateMeltdownTrend,imminentMeltdown=imminentMeltdown}
