@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.27
+-- HELIOS Draconic Guardian v1.2.0-alpha.28
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -33,13 +33,14 @@ local LIFECYCLE_STEP_RATIO, LIFECYCLE_MIN_STEP = 1.02, 50000
 local ADAPTIVE_CALIBRATION_ENABLED = false
 local FIELD_TUNE_SAMPLES, FIELD_TUNE_RATIO = 150, .02
 local FIELD_RECOVERY_RATIO, MINIMUM_FIELD_INPUT = .05, 50000
+local BOOTSTRAP_INJECTOR_INPUT = 1900000
 -- During a controlled shutdown the containment drain falls with the core.
 -- Follow that drain instead of pinning the injector at its learned ceiling.
 -- A weakening field always wins over efficiency and restores full input.
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.27"
+local GUARDIAN_VERSION = "1.2.0-alpha.28"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -162,6 +163,20 @@ local function adoptInjectorBaseline(d,c)
     -- the reactor is cool, but the configured limit remains the proven field
     -- support capacity selected by the operator.
     c.injectorBaseline=positive(d.inputSet) or positive(d.inputFlow)
+    if not positive(c.injectorBaseline) then
+      local status=string.lower(tostring(d.reactor and d.reactor.status or "unknown"))
+      local live=status=="online" or status=="running" or status=="stopping" or status=="cooling"
+      local drain=positive(d.reactor and d.reactor.fieldDrainRate) or 0
+      c.injectorBaseline=math.ceil(math.max(BOOTSTRAP_INJECTOR_INPUT,live and drain*2 or 0))
+      -- A missing gate setpoint means this installation has never established
+      -- a trustworthy containment baseline. Seed one, close export through
+      -- acquireGates(), and require commissioning before generation is allowed.
+      c.bootstrapInjector=true;c.request="OFF";c.commissioning=false;c.commissioned=false;c.rated=nil
+      c.lifecycleCeilings={};c.currentCycleCeilings={};c.lifecycleApplied=nil;c.lifecycleFieldApplied=nil
+      c.remoteLevel=nil;c.remoteTarget=nil;c.remoteApplied=0;c.remotePrimed=false
+      c.lastCommandStatus="revoked";c.lastCommandDetail="Injector baseline initialized; commissioning required"
+      c.message="Injector gate initialized to "..tostring(c.injectorBaseline).." RF/t; calibration required"
+    end
   end
   return positive(c.injectorBaseline)
 end
@@ -1022,7 +1037,8 @@ end
 if rawget(_G,"HELIOS_GUARDIAN_TEST") then
   return {lifecycleTarget=lifecycleTarget,lifecycleFieldTarget=lifecycleFieldTarget,lifecycleCeiling=lifecycleCeiling,
     lifecycleUnsafe=lifecycleUnsafe,thermalHoldRequired=thermalHoldRequired,emergencyFieldTarget=emergencyFieldTarget,
-    commissionFieldFloor=COMMISSION_FIELD_FLOOR,
+    commissionFieldFloor=COMMISSION_FIELD_FLOOR,bootstrapInjectorInput=BOOTSTRAP_INJECTOR_INPUT,
+    adoptInjectorBaseline=adoptInjectorBaseline,
     chargeableStatus=chargeableStatus,mailboxHasRemoteDemand=mailboxHasRemoteDemand,
     updateMeltdownTrend=updateMeltdownTrend,imminentMeltdown=imminentMeltdown}
 end

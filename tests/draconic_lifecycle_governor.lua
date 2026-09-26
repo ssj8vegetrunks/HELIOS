@@ -8,6 +8,16 @@ assert(not governor.chargeableStatus("cooling"),
     "a cooling reactor must finish stopping before it is charged")
 assert(governor.commissionFieldFloor >= 70,
     "commissioning must abort with substantial containment margin")
+local bootstrap = { commissioned = true, rated = 9000000, request = "MAX" }
+assert(governor.adoptInjectorBaseline({ inputSet = 0, inputFlow = 0,
+    reactor = { status = "cold", fieldDrainRate = 0 } }, bootstrap) == 1900000,
+    "a new cold installation must receive the conservative injector baseline")
+assert(not bootstrap.commissioned and bootstrap.rated == nil and bootstrap.request == "OFF",
+    "automatic injector initialization must invalidate old output authority")
+local liveBootstrap = {}
+assert(governor.adoptInjectorBaseline({ inputSet = 0, inputFlow = 0,
+    reactor = { status = "running", fieldDrainRate = 1400000 } }, liveBootstrap) == 2800000,
+    "a live recovery baseline must cover twice the measured field drain")
 assert(not governor.lifecycleUnsafe(89, 7700),
     "strong containment may use the proven 7,500-7,750 C lifecycle leeway")
 assert(governor.lifecycleUnsafe(39, 7700),
