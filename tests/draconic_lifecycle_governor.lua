@@ -92,6 +92,11 @@ local recovery = governor.emergencyFieldTarget(controls, {
 }, 1600000)
 assert(recovery == 3800000,
     "emergency containment recovery must exceed measured field drain")
+local cooldown = governor.shutdownFieldTarget({ lifecycleFieldApplied = 1900000 }, {
+    fieldDrainRate = 1400000,
+}, 1900000, 35, true, { fallingField = 2 })
+assert(cooldown == 2850000,
+    "a cooling reactor with falling containment must exceed current drain instead of holding its old baseline")
 
 -- Late-cycle heat is expected and must not be mislabeled as an imminent
 -- meltdown while containment remains healthy. A cascade requires both a hot,

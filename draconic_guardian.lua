@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.29
+-- HELIOS Draconic Guardian v1.2.0-alpha.30
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -40,7 +40,7 @@ local BOOTSTRAP_INJECTOR_INPUT = 1900000
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.29"
+local GUARDIAN_VERSION = "1.2.0-alpha.30"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -594,6 +594,20 @@ local function emergencyFieldTarget(c,r,baseline)
   return math.ceil(math.max(proven,current*1.50,drain*2.00,MINIMUM_FIELD_INPUT))
 end
 
+local function shutdownFieldTarget(c,r,baseline,field,containmentRequired,trend)
+  if not containmentRequired then return 0 end
+  trend=trend or meltdownTrend
+  if (tonumber(field) or 0)<SHUTDOWN_FIELD_EMERGENCY or
+      (tonumber(trend.fallingField) or 0)>=2 then
+    return emergencyFieldTarget(c,r,baseline)
+  end
+  local drain=positive(r.fieldDrainRate)
+  if not drain then return positive(baseline) or MINIMUM_FIELD_INPUT end
+  local margin=field>=SHUTDOWN_FIELD_TARGET and 1.05 or field>=75 and 1.15 or 1.25
+  return math.min(positive(baseline) or MINIMUM_FIELD_INPUT,
+    math.max(MINIMUM_FIELD_INPUT,math.ceil(drain*margin)))
+end
+
 -- AUTO and ASSISTED retain containment. UNRESTRICTED is visibly armed and lets
 -- the operator's command stand, while warnings remain live.
 local function supervise(b,d,c)
@@ -615,14 +629,7 @@ local function supervise(b,d,c)
   c.observedFuelConversion=conversion;c.observedMaxFuelConversion=maxConversion
   local injectorCap=positive(c.injectorBaseline) or 0
   local function shutdownInput()
-    if not containmentRequired then return 0 end
-    if field<SHUTDOWN_FIELD_EMERGENCY or (tonumber(meltdownTrend.fallingField) or 0)>=2 then
-      return emergencyFieldTarget(c,r,injectorCap)
-    end
-    local drain=positive(r.fieldDrainRate)
-    if not drain then return injectorCap end
-    local margin=field>=SHUTDOWN_FIELD_TARGET and 1.05 or field>=75 and 1.15 or 1.25
-    return math.min(injectorCap,math.max(MINIMUM_FIELD_INPUT,math.ceil(drain*margin)))
+    return shutdownFieldTarget(c,r,injectorCap,field,containmentRequired,meltdownTrend)
   end
   local function recoveryInput()
     return emergencyFieldTarget(c,r,math.max(injectorCap,positive(c.commissionFieldInput) or 0))
@@ -687,6 +694,17 @@ local function supervise(b,d,c)
   else
     local imminent,warning=imminentMeltdown(r)
     if imminent then c.message="UNRESTRICTED WARNING: "..warning end
+  end
+  -- A stopped command does not remove the field load immediately. While the
+  -- core is STOPPING/COOLING, keep export closed and follow measured drain
+  -- instead of reverting to the old running baseline. Low or falling field
+  -- automatically escalates through shutdownInput() to emergency headroom.
+  if status=="stopping" or status=="cooling" then
+    local coolingInput=shutdownInput()
+    gate(b.output,0);gate(b.input,coolingInput);reactor(b.reactor,"stopReactor")
+    c.message="Controlled cooldown: export closed, containment "..fmt(coolingInput)..
+      " RF/t for measured drain "..fmt(r.fieldDrainRate).." RF/t"
+    return
   end
   if c.safetyRecovery then
     gate(b.output,0);gate(b.input,shutdownInput());reactor(b.reactor,"stopReactor")
@@ -1049,6 +1067,7 @@ end
 if rawget(_G,"HELIOS_GUARDIAN_TEST") then
   return {lifecycleTarget=lifecycleTarget,lifecycleFieldTarget=lifecycleFieldTarget,lifecycleCeiling=lifecycleCeiling,
     lifecycleUnsafe=lifecycleUnsafe,thermalHoldRequired=thermalHoldRequired,emergencyFieldTarget=emergencyFieldTarget,
+    shutdownFieldTarget=shutdownFieldTarget,
     commissionFieldFloor=COMMISSION_FIELD_FLOOR,bootstrapInjectorInput=BOOTSTRAP_INJECTOR_INPUT,
     adoptInjectorBaseline=adoptInjectorBaseline,
     chargeableStatus=chargeableStatus,mailboxHasRemoteDemand=mailboxHasRemoteDemand,
