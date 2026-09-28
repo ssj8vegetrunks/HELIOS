@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.34
+-- HELIOS Draconic Guardian v1.2.0-alpha.35
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -33,13 +33,14 @@ local LIFECYCLE_LEEWAY_FIELD, LIFECYCLE_FIELD_DRIFT = 40, .5
 local LIFECYCLE_STEP_RATIO, LIFECYCLE_MIN_STEP = 1.02, 50000
 local FIELD_TUNE_SAMPLES, FIELD_TUNE_RATIO = 150, .02
 local FIELD_RECOVERY_RATIO, MINIMUM_FIELD_INPUT = .05, 50000
+local SAFE_INJECTOR_BASELINE = 1900000
 -- During a controlled shutdown the containment drain falls with the core.
 -- Follow that drain instead of pinning the injector at its learned ceiling.
 -- A weakening field always wins over efficiency and restores full input.
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.34"
+local GUARDIAN_VERSION = "1.2.0-alpha.35"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -170,6 +171,15 @@ local function adoptInjectorBaseline(d,c)
     -- the reactor is cool, but the configured limit remains the proven field
     -- support capacity selected by the operator.
     c.injectorBaseline=positive(d.inputSet) or positive(d.inputFlow)
+    if not positive(c.injectorBaseline) then
+      local status=string.lower(tostring(d and d.reactor and d.reactor.status or "unknown"))
+      if status=="cold" or status=="offline" then
+        -- A replacement/factory-new gate legitimately has a zero setpoint.
+        -- Seed it only while the reactor is fully stopped; inventing a field
+        -- limit for a live core would hide a dangerous wiring fault.
+        c.injectorBaseline=SAFE_INJECTOR_BASELINE
+      end
+    end
   end
   return positive(c.injectorBaseline)
 end
@@ -180,8 +190,18 @@ local function acquireGates(b,d,c)
     c.message="CONTROL LOCKED: set the injector gate manually, then restart Guardian"
     return false
   end
+  if not positive(d.inputSet) then
+    -- Best-effort physical fallback as well as direct computer control. Both
+    -- redstone states sustain containment if the computer later reboots.
+    call(b.input,"setSignalLowFlow",injectorCap)
+    call(b.input,"setSignalHighFlow",injectorCap)
+  end
   if c.inputControlVerified==true and c.outputControlVerified==true then c.gatesOwned=true;c.gateError=nil;return true end
-  if d.inputOverride==true and d.outputOverride==true then c.gatesOwned=true;c.inputControlVerified=true;c.outputControlVerified=true;c.gateError=nil;return true end
+  if d.inputOverride==true and d.outputOverride==true and
+     tonumber(d.inputSet) and math.abs(tonumber(d.inputSet)-injectorCap)<1 and
+     tonumber(d.outputSet) and math.abs(tonumber(d.outputSet))<1 then
+    c.gatesOwned=true;c.inputControlVerified=true;c.outputControlVerified=true;c.gateError=nil;return true
+  end
   -- Containment first, then export. Never close field support while taking control.
   local inputOk,inputError=gate(b.input,injectorCap,true)
   local outputOk,outputError=gate(b.output,0,true)
@@ -575,7 +595,7 @@ local function resetAfterRefuel(c)
   c.commissionSamples=0;c.commissionShortfallSamples=0;c.commissionSettleSamples=0
   c.commissionFieldInput=nil;c.commissionFieldTuneSamples=0;c.commissionLastSafe=nil
   c.recovery=false;c.safetyRecovery=nil;c.fieldRecovery=false;c.initialRequested=false;c.startActivated=false
-  c.injectorBaseline=1900000;c.lifecycleCeilings={};c.currentCycleCeilings={}
+  c.injectorBaseline=SAFE_INJECTOR_BASELINE;c.lifecycleCeilings={};c.currentCycleCeilings={}
   c.lifecycleApplied=nil;c.lifecycleFieldApplied=nil;c.lifecycleSamples=0;c.lifecycleBandKey=nil
   c.lifecycleStartField=nil;c.fieldTuneSamples=0;c.lastFuelConversion=nil;c.overdriveApplied=nil
   c.manualField=nil;c.manualExport=0;c.overdriveField=nil;c.overdriveExport=nil
@@ -1038,7 +1058,7 @@ if rawget(_G,"HELIOS_GUARDIAN_TEST") then
     beginRefuelMaintenance=beginRefuelMaintenance,resetAfterRefuel=resetAfterRefuel,
     chargeableStatus=chargeableStatus,mailboxHasRemoteDemand=mailboxHasRemoteDemand,
     updateMeltdownTrend=updateMeltdownTrend,imminentMeltdown=imminentMeltdown,
-    gate=gate,read=read}
+    gate=gate,read=read,adoptInjectorBaseline=adoptInjectorBaseline}
 end
 local binding,page,controls,buttons=inspect(),"overview",load(),{}
 restoreMailbox(controls)

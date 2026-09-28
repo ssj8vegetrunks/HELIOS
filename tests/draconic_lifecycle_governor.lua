@@ -8,6 +8,12 @@ assert(missingGateOk == false and missingGateReason == "flow gate unavailable",
 local missingRead, missingReadReason = governor.read({ reactor = "reactor" })
 assert(missingRead == nil and missingReadReason == "required reactor or flow gate is unavailable",
     "incomplete hardware bindings must be treated as recoverable telemetry loss")
+local replacementGate = {}
+assert(governor.adoptInjectorBaseline({ reactor={status="cold"}, inputSet=0, inputFlow=0 }, replacementGate)==1900000,
+    "a cold reactor must let Guardian seed a factory-new injector gate")
+local unsafeReplacement = {}
+assert(governor.adoptInjectorBaseline({ reactor={status="running"}, inputSet=0, inputFlow=0 }, unsafeReplacement)==nil,
+    "Guardian must not invent an injector baseline for a live reactor")
 assert(governor.chargeableStatus("cold") and governor.chargeableStatus("offline"),
     "both Draconic stopped-state names must enter the charging sequence")
 assert(not governor.chargeableStatus("cooling"),
