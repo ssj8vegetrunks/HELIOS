@@ -33,6 +33,19 @@ assisted = { injectorBaseline=1900000 }
 governor.enterAssisted(assisted, { reactor={status="cold"}, inputSet=1900000, outputSet=0 })
 assert(assisted.request=="OFF",
     "entering assisted manual must not start an inactive reactor")
+local manualCurve = { mode="UNRESTRICTED", commissioned=false, rated=nil }
+local enabled, reason = governor.setManualCurveAutomation(manualCurve, {}, true)
+assert(not enabled and reason:find("calibration",1,true),
+    "manual efficiency automation must require a proven calibration")
+manualCurve = { mode="UNRESTRICTED", commissioned=true, rated=1900000,
+    manualField=1900000, manualExport=5050000 }
+enabled = governor.setManualCurveAutomation(manualCurve, { inputSet=2000000, outputSet=3900000 }, true)
+assert(enabled and manualCurve.manualCurveAutomation and manualCurve.lifecycleApplied==1900000,
+    "the explicit manual switch must seed the learned efficiency governor")
+governor.setManualCurveAutomation(manualCurve, { inputSet=2100000, outputSet=4200000 }, false)
+assert(not manualCurve.manualCurveAutomation and manualCurve.request=="MANUAL" and
+    manualCurve.manualField==2100000 and manualCurve.manualExport==4200000,
+    "disabling the curve must freeze the current live gates without a jump")
 assert(not governor.lifecycleUnsafe(89, 7700),
     "strong containment may use the proven 7,500-7,750 C lifecycle leeway")
 assert(governor.lifecycleUnsafe(39, 7700),

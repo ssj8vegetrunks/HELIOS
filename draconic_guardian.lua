@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.42
+-- HELIOS Draconic Guardian v1.2.0-alpha.43
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -47,7 +47,7 @@ local SAFETY_LOW_FIELD, SAFETY_HIGH_TEMP = 35, 7750
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.42"
+local GUARDIAN_VERSION = "1.2.0-alpha.43"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -662,7 +662,7 @@ local function resetAfterRefuel(c)
   c.injectorBaseline=SAFE_INJECTOR_BASELINE;c.lifecycleCeilings={};c.currentCycleCeilings={}
   c.lifecycleApplied=nil;c.lifecycleFieldApplied=nil;c.lifecycleSamples=0;c.lifecycleBandKey=nil
   c.lifecycleStartField=nil;c.fieldTuneSamples=0;c.lastFuelConversion=nil;c.overdriveApplied=nil
-  c.manualField=nil;c.manualExport=0;c.overdriveField=nil;c.overdriveExport=nil
+  c.manualField=nil;c.manualExport=0;c.overdriveField=nil;c.overdriveExport=nil;c.manualCurveAutomation=false
   c.remoteTarget=nil;c.remoteLevel=nil;c.remoteApplied=nil;c.remotePrimed=nil
   c.message="REFUEL VERIFIED: learned reactor profile cleared; fresh calibration required"
 end
@@ -962,12 +962,22 @@ local function supervise(b,d,c)
     c.message="Mainframe "..level.." ramp "..fmt(applied).." / "..fmt(target).." RF/t, field "..fmt(fieldTarget)..(note and " - "..note or "")
     return
   end
-  -- Manual Gates and the saved Overdrive preset use the operator's exact
-  -- field/export pair. Overdrive ramps only its export value so a cold core
-  -- can gain efficiency instead of being hit with the whole load at once.
+  -- Manual Gates normally use the operator's exact field/export pair. The
+  -- explicit curve switch turns that pair into a ceiling: Guardian may move
+  -- below it along the learned lifecycle curve without regaining shutdown
+  -- authority. Overdrive still ramps rather than applying its full load at
+  -- once.
   if c.request=="MANUAL" or c.request=="OVERDRIVE" then
     local fieldTarget=positive(c.request=="OVERDRIVE" and c.overdriveField or c.manualField) or injectorCap
     local exportTarget=positive(c.request=="OVERDRIVE" and c.overdriveExport or c.manualExport) or 0
+    local curveNote,operatorMaximum
+    if free and c.manualCurveAutomation then
+      operatorMaximum=exportTarget
+      local curveTarget
+      curveTarget,curveNote=lifecycleTarget(c,r)
+      exportTarget=math.min(operatorMaximum,curveTarget)
+      fieldTarget=lifecycleFieldTarget(c,r,fieldTarget)
+    end
     if not live then ensureStarted(b,c,status,"Manual power demand",fieldTarget,r);return end
     if live then
       gate(b.input,fieldTarget)
@@ -980,6 +990,9 @@ local function supervise(b,d,c)
         c.overdriveApplied=previous;applied=previous
         c.message="Overdrive preset ramp: "..fmt(applied).." / "..fmt(exportTarget).." RF/t"
       else c.message="Manual gates applied: field "..fmt(fieldTarget)..", export "..fmt(exportTarget).." RF/t" end
+      if c.manualCurveAutomation then
+        c.message="Manual efficiency curve ON: "..fmt(applied).." / "..fmt(operatorMaximum).." RF/t max, field "..fmt(fieldTarget)..(curveNote and " - "..curveNote or "")
+      end
       gate(b.output,applied)
       return
     end
@@ -1000,7 +1013,7 @@ end
 local function enterAssisted(c,d)
   local status=string.lower(tostring(d and d.reactor and d.reactor.status or "unknown"))
   local live=status=="online" or status=="running"
-  c.mode="ASSISTED";c.arm=0;c.startActivated=false
+  c.mode="ASSISTED";c.arm=0;c.startActivated=false;c.manualCurveAutomation=false
   if live then
     -- Assisted is the vestibule to Unrestricted control. Preserve the exact
     -- live gate pair so turning the authorization keys cannot stop a healthy
@@ -1012,6 +1025,27 @@ local function enterAssisted(c,d)
   else
     c.request="OFF";c.message="Assisted manual enabled: inactive reactor remains OFF"
   end
+end
+local function setManualCurveAutomation(c,d,enabled)
+  if enabled then
+    if c.mode~="UNRESTRICTED" then return false,"Unrestricted control is required" end
+    if not c.commissioned or not positive(c.rated) then return false,"Complete automatic calibration before enabling the efficiency curve" end
+    c.manualCurveAutomation=true
+    c.lifecycleApplied=positive(c.rated)
+    c.lifecycleFieldApplied=positive(d and d.inputSet) or positive(d and d.inputFlow) or positive(c.manualField) or positive(c.injectorBaseline)
+    c.lifecycleSamples=0;c.lifecycleBandKey=nil;c.lifecycleStartField=nil;c.fieldTuneSamples=0;c.lastFuelConversion=nil
+    c.message="Efficiency curve automation ON: manual export remains the maximum"
+    return true,c.message
+  end
+  c.manualCurveAutomation=false
+  c.manualField=positive(d and d.inputSet) or positive(d and d.inputFlow) or c.manualField or c.injectorBaseline
+  c.manualExport=positive(d and d.outputSet) or positive(d and d.outputFlow) or 0
+  c.request="MANUAL";c.overdriveApplied=0
+  c.lifecycleApplied=nil;c.lifecycleFieldApplied=nil;c.lifecycleSamples=0;c.lifecycleBandKey=nil
+  c.lifecycleStartField=nil;c.fieldTuneSamples=0;c.lastFuelConversion=nil
+  c.liveGatesSelected=true
+  c.message="Efficiency curve automation OFF: live gates frozen for manual control"
+  return true,c.message
 end
 local function draw(t,b,d,page,c,bs)
   local w,h=t.getSize();t.setBackgroundColor(colors.black);t.setTextColor(colors.white);t.clear();text(t,1,1,tr("guardian.title",{version=GUARDIAN_VERSION},"HELIOS // DRACONIC GUARDIAN  "..GUARDIAN_VERSION),colors.yellow)
@@ -1083,6 +1117,7 @@ local function draw(t,b,d,page,c,bs)
       local exportSteps={{"EXPORT -1k",1},{"EXPORT -10k",9},{"EXPORT -100k",18},{"EXPORT -1M",28},{"EXPORT +1k",1},{"EXPORT +10k",9},{"EXPORT +100k",18},{"EXPORT +1M",28}}
       for index,item in ipairs(exportSteps) do bs[#bs+1]=button(t,item[2],index<=4 and 16 or 18,string.sub(item[1],8),colors.cyan,1);bs[#bs].label=item[1] end
       bs[#bs+1]=button(t,1,20,"USE LIVE GATES",liveGatesSelected and colors.lime or colors.lightGray,1);bs[#bs+1]=button(t,24,20,"APPLY MANUAL",manualApplied and colors.lime or colors.orange,1)
+      bs[#bs+1]=button(t,1,21,"EFFICIENCY CURVE AUTOMATION: "..(c.manualCurveAutomation and "ON" or "OFF"),c.manualCurveAutomation and colors.lime or colors.orange,1);bs[#bs].label="TOGGLE EFFICIENCY CURVE"
       bs[#bs+1]=button(t,1,23,"SAVE AS OVERDRIVE PRESET",presetSaved and colors.lime or colors.red,1);bs[#bs+1]=button(t,40,23,"BACK",colors.lightGray,1)
       text(t,1,26,"Overdrive keeps this field setting and ramps only export to the saved target.",colors.lightGray)
     else
@@ -1092,6 +1127,7 @@ local function draw(t,b,d,page,c,bs)
       bs[#bs+1]=button(t,1,14,"EXPORT -1k",colors.cyan,1);bs[#bs+1]=button(t,16,14,"EXPORT -10k",colors.cyan,1);bs[#bs+1]=button(t,33,14,"EXPORT -100k",colors.cyan,1);bs[#bs+1]=button(t,51,14,"EXPORT -1M",colors.cyan,1)
       bs[#bs+1]=button(t,1,16,"EXPORT +1k",colors.cyan,1);bs[#bs+1]=button(t,16,16,"EXPORT +10k",colors.cyan,1);bs[#bs+1]=button(t,33,16,"EXPORT +100k",colors.cyan,1);bs[#bs+1]=button(t,51,16,"EXPORT +1M",colors.cyan,1)
       bs[#bs+1]=button(t,1,19,"USE LIVE GATES",liveGatesSelected and colors.lime or colors.lightGray,1);bs[#bs+1]=button(t,22,19,"APPLY MANUAL",manualApplied and colors.lime or colors.orange,1)
+      bs[#bs+1]=button(t,1,20,"EFFICIENCY CURVE AUTOMATION: "..(c.manualCurveAutomation and "ON" or "OFF"),c.manualCurveAutomation and colors.lime or colors.orange,1);bs[#bs].label="TOGGLE EFFICIENCY CURVE"
       bs[#bs+1]=button(t,1,22,"SAVE AS OVERDRIVE PRESET",presetSaved and colors.lime or colors.red,1);bs[#bs+1]=button(t,35,22,"BACK",colors.lightGray,1)
       text(t,1,25,"Overdrive keeps this field setting and ramps only export to the saved target.",colors.lightGray)
     end
@@ -1202,7 +1238,7 @@ if rawget(_G,"HELIOS_GUARDIAN_TEST") then
   return {lifecycleTarget=lifecycleTarget,lifecycleFieldTarget=lifecycleFieldTarget,lifecycleCeiling=lifecycleCeiling,
     lifecycleUnsafe=lifecycleUnsafe,thermalHoldRequired=thermalHoldRequired,emergencyFieldTarget=emergencyFieldTarget,
     beginRefuelMaintenance=beginRefuelMaintenance,resetAfterRefuel=resetAfterRefuel,
-    enterAssisted=enterAssisted,
+    enterAssisted=enterAssisted,setManualCurveAutomation=setManualCurveAutomation,
     chargeableStatus=chargeableStatus,requiresContainment=requiresContainment,mailboxHasRemoteDemand=mailboxHasRemoteDemand,
     updateMeltdownTrend=updateMeltdownTrend,imminentMeltdown=imminentMeltdown,
     updateAutomaticSafetyVotes=updateAutomaticSafetyVotes,
@@ -1273,7 +1309,7 @@ local function act(choice,d)
   elseif choice=="ARM UNRESTRICTED" then controls.arm=1;controls.message="Unrestricted arming started"
   elseif choice=="CANCEL" then controls.arm=0;controls.message="Unrestricted arming cancelled"
   elseif controls.arm and controls.arm>0 and choice then controls.arm=controls.arm+1;if controls.arm>4 then
-    controls.arm=0;controls.mode="UNRESTRICTED";controls.safetyRecovery=nil;controls.safetyLockout=false;controls.lastSafetyTrip=nil
+    controls.arm=0;controls.mode="UNRESTRICTED";controls.safetyRecovery=nil;controls.safetyLockout=false;controls.lastSafetyTrip=nil;controls.manualCurveAutomation=false
     local status=string.lower(tostring(d and d.reactor and d.reactor.status or "unknown"))
     local live=status=="online" or status=="running"
     -- Arming manual control must be a bumpless transfer. Adopt both live gate
@@ -1284,7 +1320,8 @@ local function act(choice,d)
     controls.liveGatesSelected=true;controls.request=live and "MANUAL" or "OFF"
     controls.message=live and "UNRESTRICTED CONTROL ARMED: live gates adopted without shutdown" or "UNRESTRICTED CONTROL ARMED: reactor remains OFF"
   end
-  elseif choice=="RESTORE AUTOMATIC" then controls.mode="AUTO";controls.request="OFF";controls.arm=0;controls.message="Automatic safety restored"
+  elseif choice=="RESTORE AUTOMATIC" then controls.mode="AUTO";controls.request="OFF";controls.arm=0;controls.manualCurveAutomation=false;controls.message="Automatic safety restored"
+  elseif choice=="TOGGLE EFFICIENCY CURVE" then setManualCurveAutomation(controls,d,not controls.manualCurveAutomation)
   elseif choice=="USE LIVE GATES" then controls.manualField=positive(d.inputSet) or positive(d.inputFlow) or controls.injectorBaseline;controls.manualExport=positive(d.outputSet) or positive(d.outputFlow) or 0;controls.liveGatesSelected=true;controls.message="Copied live gate limits into manual controls"
   elseif choice=="FIELD -1k" then controls.manualField=math.max(0,(tonumber(controls.manualField) or positive(d.inputSet) or controls.injectorBaseline or 0)-MANUAL_GATE_FINE_STEP)
   elseif choice=="FIELD +1k" then controls.manualField=(tonumber(controls.manualField) or positive(d.inputSet) or controls.injectorBaseline or 0)+MANUAL_GATE_FINE_STEP
@@ -1453,6 +1490,7 @@ local function facilityWorker()
       fieldGate=tonumber(data and data.inputSet),exportGate=tonumber(data and data.outputSet),
       fieldInput=tonumber(data and data.inputFlow),exportFlow=tonumber(data and data.outputFlow),
       mode=controls.mode,request=controls.request,commissioned=controls.commissioned==true,
+      manualCurveAutomation=controls.manualCurveAutomation==true,
       maintenanceMode=controls.refuelMaintenance==true,maintenanceType=controls.refuelMaintenance and "refuel" or nil,
       maintenancePhase=controls.refuelPhase,
       safetyVoteCount=tonumber(controls.safetyVoteCount) or 0,
@@ -1610,6 +1648,7 @@ local function profilerWorker()
       fieldInput=tonumber(data and data.inputFlow),fieldGate=tonumber(data and data.inputSet),
       exportFlow=tonumber(data and data.outputFlow),exportGate=tonumber(data and data.outputSet),
       mode=controls.mode,request=controls.request,commissioned=controls.commissioned==true,
+      manualCurveAutomation=controls.manualCurveAutomation==true,
       ratedOutput=tonumber(controls.rated),guardianMessage=tostring(controls.message or ""),
       telemetryStale=controls.telemetryStale==true,alarmLevel=imminent and 3 or nil,
       alarmMessage=alarmMessage,
