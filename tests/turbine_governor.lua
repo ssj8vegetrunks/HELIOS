@@ -585,6 +585,19 @@ do
     equal(first.governor.recommendedFlow, 0, "queued turbine steam is closed")
     equal(first.governor.recommendedInductor, false, "queued turbine load is released")
 
+    governor.evaluateAll(memory, { first, second }, control, {
+        now = 1.5,
+        calibrationBlocked = true,
+        calibrationDrainNeeded = true,
+        calibrationDrainBufferPercent = 100,
+        calibrationBlockReason = "Waiting for sequential reactor commissioning",
+    })
+    equal(first.governor.state, "BUFFER DRAIN", "one turbine drains a full reactor buffer")
+    equal(first.governor.recommendedActive, true, "buffer drain turbine remains active")
+    equal(first.governor.recommendedFlow, 500, "buffer drain uses a bounded steam intake")
+    equal(first.governor.recommendedInductor, true, "buffer drain turbine remains loaded")
+    equal(second.governor.state, "QUEUED / ISOLATED", "all other turbines remain isolated")
+
     governor.evaluateAll(memory, { first, second }, control, { now = 2 })
     assert(first.governor.state ~= "QUEUED / ISOLATED", "first turbine begins sequential calibration")
     equal(second.governor.state, "QUEUED / ISOLATED", "second turbine waits isolated for first turbine")

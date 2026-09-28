@@ -154,6 +154,30 @@ function governor.evaluate(memory, turbine, control, context)
         result = hold("NO TRUSTED DATA", "Mainframe computer ID is conflicting", false)
     elseif turbine.error then
         result = hold("NO TRUSTED DATA", tostring(turbine.error), false)
+    elseif context.calibrationBlocked == true and context.calibrationDrain == true then
+        local currentFlow = tonumber(turbine.flowRateMax) or 0
+        local capacity = math.max(1, tonumber(turbine.flowRateLimit) or 2000)
+        local drainFlow = math.min(capacity,
+            math.max(1, tonumber(control.reactorCalibrationDrainFlow) or 500))
+        local action = "DRAIN STEAM BUFFER"
+        previous.actionSamples = previous.action == action and
+            ((previous.actionSamples or 0) + 1) or 1
+        previous.action = action
+        result = {
+            mode = "automatic",
+            state = "BUFFER DRAIN",
+            action = action,
+            reason = ("Draining reactor hot-fluid buffer at %.1f%% before baseline calibration"):
+                format(tonumber(context.calibrationDrainBufferPercent) or 0),
+            trusted = true,
+            currentActive = turbine.active,
+            recommendedActive = true,
+            currentFlow = currentFlow,
+            recommendedFlow = drainFlow,
+            currentInductor = turbine.inductorEngaged,
+            recommendedInductor = true,
+            actionSamples = previous.actionSamples,
+        }
     elseif context.calibrationBlocked == true and not profile then
         local action = "ISOLATE TURBINE"
         previous.actionSamples = previous.action == action and
@@ -950,6 +974,13 @@ end
 function governor.evaluateAll(memory, turbines, control, context)
     local present = {}
     local calibrationName
+    local calibrationDrainName
+    if context and context.calibrationBlocked == true and
+       context.calibrationDrainNeeded == true then
+        for _, turbine in ipairs(turbines or {}) do
+            if not turbine.error then calibrationDrainName=tostring(turbine.name);break end
+        end
+    end
     if not (context and context.calibrationBlocked == true) then
         for _, turbine in ipairs(turbines or {}) do
             local name = tostring(turbine.name)
@@ -964,6 +995,7 @@ function governor.evaluateAll(memory, turbines, control, context)
         present[name] = true
         local turbineContext = {}
         for key, value in pairs(context or {}) do turbineContext[key] = value end
+        turbineContext.calibrationDrain = name == calibrationDrainName
         if profileFor(control or {}, name) == nil and
            ((context and context.calibrationBlocked == true) or name ~= calibrationName) then
             turbineContext.calibrationBlocked = true

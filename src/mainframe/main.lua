@@ -668,6 +668,10 @@ function mainframe.run(config)
             calibrationBlocked = reactorGovernorMemory.commissioningActive == true,
             calibrationBlockReason = reactorGovernorMemory.commissioningActive == true and
                 "Waiting for sequential reactor commissioning" or nil,
+            calibrationDrainNeeded = reactorGovernorMemory.commissioningActive == true and
+                steamSource.bufferPercent ~= nil and
+                steamSource.bufferPercent > (tonumber(config.control.reactorHotFluidLow) or 15),
+            calibrationDrainBufferPercent = steamSource.bufferPercent,
             steamSourceManaged = steamSource.managed,
             steamSourceReady = steamSource.ready,
             steamSourceReason = steamSource.reason,
