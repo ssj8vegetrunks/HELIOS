@@ -66,14 +66,14 @@ It downloads only the packages selected for one computer from `packages/manifest
 ### `guardian` — Draconic Guardian
 
 - Kind: `role`
-- Direct payload: 123635 bytes
+- Direct payload: 124395 bytes
 - Required packages: `core`
 
 - `core/boot.lua` ← `src/core/boot.lua` (5080 bytes)
 - `core/facility_protocol.lua` ← `src/core/facility_protocol.lua` (8052 bytes)
 - `core/network.lua` ← `src/core/network.lua` (3383 bytes)
 - `core/network_security.lua` ← `src/core/network_security.lua` (5270 bytes)
-- `draconic/controller.lua` ← `draconic_guardian.lua` (101850 bytes)
+- `draconic/controller.lua` ← `draconic_guardian.lua` (102610 bytes)
 
 ### `profiler` — Draconic Profiler
 

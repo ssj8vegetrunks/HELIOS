@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.33
+-- HELIOS Draconic Guardian v1.2.0-alpha.34
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -39,7 +39,7 @@ local FIELD_RECOVERY_RATIO, MINIMUM_FIELD_INPUT = .05, 50000
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.33"
+local GUARDIAN_VERSION = "1.2.0-alpha.34"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -135,6 +135,9 @@ local function call(n,m,...)
 end
 local gateApplied,gateCommands,gateTargets={},{},{}
 local function read(b)
+  if type(b)~="table" or not b.reactor or not b.input or not b.output then
+    return nil,"required reactor or flow gate is unavailable"
+  end
   local r,e=call(b.reactor,"getReactorInfo"); if type(r)~="table" then return nil,e or "getReactorInfo failed" end
   local inputSet=call(b.input,"getFlowOverride");if inputSet==nil then inputSet=call(b.input,"getSignalLowFlow") end
   local outputSet=call(b.output,"getFlowOverride");if outputSet==nil then outputSet=call(b.output,"getSignalLowFlow") end
@@ -143,6 +146,11 @@ local function read(b)
   return {reactor=r,inputFlow=call(b.input,"getFlow"),outputFlow=call(b.output,"getFlow"),inputSet=inputSet,outputSet=outputSet,inputOverride=call(b.input,"getOverrideEnabled"),outputOverride=call(b.output,"getOverrideEnabled")}
 end
 local function gate(n,v,force)
+  -- Peripheral detach events can arrive while the control worker is between
+  -- telemetry and its next gate write. Treat a missing/replaced gate as a
+  -- recoverable hardware interruption instead of indexing the command cache
+  -- with nil and terminating every Guardian worker.
+  if not n then return false,"flow gate unavailable" end
   local flow=math.max(0,math.floor(tonumber(v) or 0))
   gateTargets[n]=flow
   local applied=tonumber(gateApplied[n])
@@ -1029,7 +1037,8 @@ if rawget(_G,"HELIOS_GUARDIAN_TEST") then
     lifecycleUnsafe=lifecycleUnsafe,thermalHoldRequired=thermalHoldRequired,emergencyFieldTarget=emergencyFieldTarget,
     beginRefuelMaintenance=beginRefuelMaintenance,resetAfterRefuel=resetAfterRefuel,
     chargeableStatus=chargeableStatus,mailboxHasRemoteDemand=mailboxHasRemoteDemand,
-    updateMeltdownTrend=updateMeltdownTrend,imminentMeltdown=imminentMeltdown}
+    updateMeltdownTrend=updateMeltdownTrend,imminentMeltdown=imminentMeltdown,
+    gate=gate,read=read}
 end
 local binding,page,controls,buttons=inspect(),"overview",load(),{}
 restoreMailbox(controls)
@@ -1185,6 +1194,11 @@ local function inputWorker()
       gateApplied={};gateCommands={};gateTargets={};reactorCommands={}
       controls.inputControlVerified=false;controls.outputControlVerified=false;controls.gatesOwned=false
       data=nil
+      if binding.ready then
+        controls.message="Hardware change detected: reacquiring reactor and gate control"
+      else
+        controls.message="HARDWARE WAIT: "..table.concat(binding.reasons or {"required device unavailable"},"; ")
+      end
       requestDraw()
     end
   end

@@ -2,6 +2,12 @@ HELIOS_GUARDIAN_TEST = true
 fs = { exists = function() return false end }
 
 local governor = assert(dofile("draconic_guardian.lua"))
+local missingGateOk, missingGateReason = governor.gate(nil, 1900000)
+assert(missingGateOk == false and missingGateReason == "flow gate unavailable",
+    "detaching a flow gate must pause control instead of crashing Guardian")
+local missingRead, missingReadReason = governor.read({ reactor = "reactor" })
+assert(missingRead == nil and missingReadReason == "required reactor or flow gate is unavailable",
+    "incomplete hardware bindings must be treated as recoverable telemetry loss")
 assert(governor.chargeableStatus("cold") and governor.chargeableStatus("offline"),
     "both Draconic stopped-state names must enter the charging sequence")
 assert(not governor.chargeableStatus("cooling"),
