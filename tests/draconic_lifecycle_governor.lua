@@ -142,4 +142,35 @@ for _, sample in ipairs({
 end
 assert(cascade, "a hot rising core with low falling containment must raise a meltdown alarm")
 
+-- Automatic supervision requires three independently persisted danger votes.
+-- One bad reading must not stop a reactor, while a sustained power-collapse
+-- pattern must be classified with enough telemetry to explain the shutdown.
+local safetyTrend = {}
+local votes, voteCount
+for sample = 1, 12 do
+    votes, voteCount = governor.updateAutomaticSafetyVotes({
+        reactor = {
+            status="running", fieldStrength=70-sample, maxFieldStrength=100,
+            energySaturation=70-sample, maxEnergySaturation=100,
+            temperature=4000, generationRate=1000000, fieldDrainRate=2000000,
+        },
+        inputFlow=1000000, inputSet=1900000,
+        outputFlow=2000000, outputSet=2800000,
+    }, safetyTrend)
+end
+assert(voteCount >= 3, "sustained power loss must produce a three-vote shutdown quorum")
+local labels = table.concat(votes, ",")
+assert(labels:find("field falling",1,true) and labels:find("injector shortfall",1,true) and
+    labels:find("field power deficit",1,true),
+    "shutdown votes must identify the field trend and its power-delivery deficits")
+safetyTrend = {}
+votes, voteCount = governor.updateAutomaticSafetyVotes({
+    reactor = {
+        status="running", fieldStrength=69, maxFieldStrength=100,
+        energySaturation=69, maxEnergySaturation=100,
+        temperature=4000, generationRate=1000000, fieldDrainRate=2000000,
+    }, inputFlow=1000000, inputSet=1900000, outputFlow=2000000, outputSet=2800000,
+}, safetyTrend)
+assert(voteCount==0, "a single anomalous sample must not cast persisted danger votes")
+
 print("draconic lifecycle governor tests passed")

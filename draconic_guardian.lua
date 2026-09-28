@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.35
+-- HELIOS Draconic Guardian v1.2.0-alpha.36
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -34,13 +34,20 @@ local LIFECYCLE_STEP_RATIO, LIFECYCLE_MIN_STEP = 1.02, 50000
 local FIELD_TUNE_SAMPLES, FIELD_TUNE_RATIO = 150, .02
 local FIELD_RECOVERY_RATIO, MINIMUM_FIELD_INPUT = .05, 50000
 local SAFE_INJECTOR_BASELINE = 1900000
+-- Automatic shutdown voting rejects isolated telemetry spikes. Each dynamic
+-- signal must persist before it becomes a vote; three concurrent independent
+-- votes initiate a controlled shutdown. Unrestricted control remains warning
+-- only, as explicitly selected by the operator.
+local SAFETY_VOTES_REQUIRED = 3
+local SAFETY_TREND_SAMPLES, SAFETY_DEFICIT_SAMPLES = 12, 8
+local SAFETY_LOW_FIELD, SAFETY_HIGH_TEMP = 35, 7750
 -- During a controlled shutdown the containment drain falls with the core.
 -- Follow that drain instead of pinning the injector at its learned ceiling.
 -- A weakening field always wins over efficiency and restores full input.
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.35"
+local GUARDIAN_VERSION = "1.2.0-alpha.36"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -311,6 +318,49 @@ local function updateMeltdownTrend(r,trend)
     (tonumber(trend.fallingField) or 0)+1 or 0
   trend.temperature=temperature;trend.field=field
   return trend
+end
+local automaticSafetyTrend={}
+local function updateAutomaticSafetyVotes(d,trend)
+  trend=trend or automaticSafetyTrend
+  local r=type(d)=="table" and d.reactor or {}
+  local status=string.lower(tostring(r.status or "unknown"))
+  local live=status=="online" or status=="running"
+  local field=pct(r.fieldStrength,r.maxFieldStrength)
+  local saturation=pct(r.energySaturation,r.maxEnergySaturation)
+  local temperature=tonumber(r.temperature)
+  local input=tonumber(d and d.inputFlow) or 0
+  local inputCommand=tonumber(d and d.inputSet) or 0
+  local output=tonumber(d and d.outputFlow) or 0
+  local outputCommand=tonumber(d and d.outputSet) or 0
+  local generation=tonumber(r.generationRate) or 0
+  local drain=tonumber(r.fieldDrainRate) or 0
+  local function count(name,condition)
+    trend[name]=condition and (tonumber(trend[name]) or 0)+1 or 0
+    return trend[name]
+  end
+  if not live then
+    for _,name in ipairs({"fieldFalling","saturationFalling","injectorShortfall","containmentDeficit","generationDeficit","exportShortfall"}) do trend[name]=0 end
+    trend.field=field;trend.saturation=saturation
+    return {},0,trend
+  end
+  count("fieldFalling",field and trend.field and field<trend.field-.01)
+  count("saturationFalling",saturation and trend.saturation and saturation<trend.saturation-.01)
+  count("injectorShortfall",inputCommand>0 and input<inputCommand*.90)
+  count("containmentDeficit",drain>0 and input<drain*1.05)
+  count("generationDeficit",output>50000 and generation<output*.90)
+  count("exportShortfall",outputCommand>50000 and output<outputCommand*.90)
+  trend.field=field;trend.saturation=saturation
+  local votes={}
+  local function vote(active,label) if active then votes[#votes+1]=label end end
+  vote(field and field<SAFETY_LOW_FIELD,"low field")
+  vote((trend.fieldFalling or 0)>=SAFETY_TREND_SAMPLES,"field falling")
+  vote((trend.saturationFalling or 0)>=SAFETY_TREND_SAMPLES,"saturation falling")
+  vote((trend.injectorShortfall or 0)>=SAFETY_DEFICIT_SAMPLES,"injector shortfall")
+  vote((trend.containmentDeficit or 0)>=SAFETY_DEFICIT_SAMPLES,"field power deficit")
+  vote((trend.generationDeficit or 0)>=SAFETY_DEFICIT_SAMPLES,"generation below export")
+  vote((trend.exportShortfall or 0)>=SAFETY_DEFICIT_SAMPLES,"export path restricted")
+  vote(temperature and temperature>SAFETY_HIGH_TEMP,"high temperature")
+  return votes,#votes,trend
 end
 local function imminentMeltdown(r,trend)
   trend=trend or meltdownTrend
@@ -659,6 +709,27 @@ local function supervise(b,d,c)
   if not free then
     local imminent,warning=imminentMeltdown(r)
     if imminent then return stop(warning,false,true) end
+    if c.mode=="AUTO" and live then
+      local votes,voteCount=updateAutomaticSafetyVotes(d)
+      c.safetyVotes=votes;c.safetyVoteCount=voteCount
+      if voteCount>=SAFETY_VOTES_REQUIRED then
+        local reason="automatic safety vote "..voteCount.."/"..SAFETY_VOTES_REQUIRED..": "..table.concat(votes,", ")
+        if not c.safetyVoteLatched then
+          c.safetyVoteLatched=true
+          guardianRecord("log.guardian_safety","critical",{
+            reason=reason,votes=table.concat(votes,", "),voteCount=voteCount,
+            status=status,fieldPercent=field,saturationPercent=pct(r.energySaturation,r.maxEnergySaturation),
+            temperature=temp,generation=tonumber(r.generationRate),fieldDrain=tonumber(r.fieldDrainRate),
+            injectorCommand=tonumber(d.inputSet),injectorActual=tonumber(d.inputFlow),
+            exportCommand=tonumber(d.outputSet),exportActual=tonumber(d.outputFlow),
+          },{reason})
+        end
+        return stop(reason,false,true)
+      end
+      c.safetyVoteLatched=false
+    else
+      c.safetyVotes={};c.safetyVoteCount=0;c.safetyVoteLatched=false
+    end
     -- Heat alone is not a reason to cycle a contained Draconic reactor. Close
     -- export, restore the proven containment input, and resume the accepted
     -- demand after the core falls back into the normal lifecycle envelope.
@@ -1058,6 +1129,7 @@ if rawget(_G,"HELIOS_GUARDIAN_TEST") then
     beginRefuelMaintenance=beginRefuelMaintenance,resetAfterRefuel=resetAfterRefuel,
     chargeableStatus=chargeableStatus,mailboxHasRemoteDemand=mailboxHasRemoteDemand,
     updateMeltdownTrend=updateMeltdownTrend,imminentMeltdown=imminentMeltdown,
+    updateAutomaticSafetyVotes=updateAutomaticSafetyVotes,
     gate=gate,read=read,adoptInjectorBaseline=adoptInjectorBaseline}
 end
 local binding,page,controls,buttons=inspect(),"overview",load(),{}
@@ -1299,6 +1371,8 @@ local function facilityWorker()
       mode=controls.mode,request=controls.request,commissioned=controls.commissioned==true,
       maintenanceMode=controls.refuelMaintenance==true,maintenanceType=controls.refuelMaintenance and "refuel" or nil,
       maintenancePhase=controls.refuelPhase,
+      safetyVoteCount=tonumber(controls.safetyVoteCount) or 0,
+      safetyVotes=type(controls.safetyVotes)=="table" and table.concat(controls.safetyVotes,", ") or nil,
       ratedOutput=tonumber(controls.rated),remoteTarget=tonumber(controls.remoteTarget),remoteLevel=controls.remoteLevel,
       lastAppliedCommandRevision=tonumber(controls.lastAppliedCommandRevision),
       lastCommandStatus=controls.lastCommandStatus,localAuthority=true,remoteCommands=true,
