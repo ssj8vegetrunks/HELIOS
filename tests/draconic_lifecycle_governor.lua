@@ -22,6 +22,17 @@ assert(governor.requiresContainment("beyond_hope") and governor.requiresContainm
     "terminal reactor states must retain maximum injector support")
 assert(not governor.requiresContainment("cold"),
     "a fully cold reactor no longer requires containment input")
+local assisted = { injectorBaseline=1900000 }
+governor.enterAssisted(assisted, {
+    reactor={status="running"}, inputSet=1900000, outputSet=3900000,
+})
+assert(assisted.mode=="ASSISTED" and assisted.request=="MANUAL" and
+    assisted.manualField==1900000 and assisted.manualExport==3900000,
+    "entering assisted manual on a live reactor must adopt its gates without shutdown")
+assisted = { injectorBaseline=1900000 }
+governor.enterAssisted(assisted, { reactor={status="cold"}, inputSet=1900000, outputSet=0 })
+assert(assisted.request=="OFF",
+    "entering assisted manual must not start an inactive reactor")
 assert(not governor.lifecycleUnsafe(89, 7700),
     "strong containment may use the proven 7,500-7,750 C lifecycle leeway")
 assert(governor.lifecycleUnsafe(39, 7700),

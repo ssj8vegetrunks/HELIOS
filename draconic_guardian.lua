@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.41
+-- HELIOS Draconic Guardian v1.2.0-alpha.42
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -47,7 +47,7 @@ local SAFETY_LOW_FIELD, SAFETY_HIGH_TEMP = 35, 7750
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.41"
+local GUARDIAN_VERSION = "1.2.0-alpha.42"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -997,6 +997,22 @@ local function supervise(b,d,c)
     c.message=(free and "UNRESTRICTED" or "ASSISTED").." "..c.request.." "..fmt(target).." RF/t, field "..fmt(fieldTarget).." RF/t"..(note and " - "..note or "")
   end
 end
+local function enterAssisted(c,d)
+  local status=string.lower(tostring(d and d.reactor and d.reactor.status or "unknown"))
+  local live=status=="online" or status=="running"
+  c.mode="ASSISTED";c.arm=0;c.startActivated=false
+  if live then
+    -- Assisted is the vestibule to Unrestricted control. Preserve the exact
+    -- live gate pair so turning the authorization keys cannot stop a healthy
+    -- reactor before the operator reaches manual control.
+    c.manualField=positive(d and d.inputSet) or positive(d and d.inputFlow) or c.injectorBaseline
+    c.manualExport=positive(d and d.outputSet) or positive(d and d.outputFlow) or 0
+    c.liveGatesSelected=true;c.request="MANUAL"
+    c.message="Assisted manual enabled: live gates adopted without shutdown"
+  else
+    c.request="OFF";c.message="Assisted manual enabled: inactive reactor remains OFF"
+  end
+end
 local function draw(t,b,d,page,c,bs)
   local w,h=t.getSize();t.setBackgroundColor(colors.black);t.setTextColor(colors.white);t.clear();text(t,1,1,tr("guardian.title",{version=GUARDIAN_VERSION},"HELIOS // DRACONIC GUARDIAN  "..GUARDIAN_VERSION),colors.yellow)
   local banner=c.mode=="UNRESTRICTED" and tr("guardian.unrestricted",nil,"UNRESTRICTED CONTROL - AUTOMATIC INTERVENTION DISABLED") or c.mode=="ASSISTED" and tr("guardian.assisted",nil,"ASSISTED MANUAL - HARD SAFETY INTERLOCKS ACTIVE") or tr("guardian.automatic",nil,"AUTOMATIC SAFE SUPERVISION")
@@ -1186,6 +1202,7 @@ if rawget(_G,"HELIOS_GUARDIAN_TEST") then
   return {lifecycleTarget=lifecycleTarget,lifecycleFieldTarget=lifecycleFieldTarget,lifecycleCeiling=lifecycleCeiling,
     lifecycleUnsafe=lifecycleUnsafe,thermalHoldRequired=thermalHoldRequired,emergencyFieldTarget=emergencyFieldTarget,
     beginRefuelMaintenance=beginRefuelMaintenance,resetAfterRefuel=resetAfterRefuel,
+    enterAssisted=enterAssisted,
     chargeableStatus=chargeableStatus,requiresContainment=requiresContainment,mailboxHasRemoteDemand=mailboxHasRemoteDemand,
     updateMeltdownTrend=updateMeltdownTrend,imminentMeltdown=imminentMeltdown,
     updateAutomaticSafetyVotes=updateAutomaticSafetyVotes,
@@ -1252,11 +1269,11 @@ local function act(choice,d)
   elseif choice=="STATUS SYMBOLS" and type(guardianConfig)=="table" then
     guardianConfig.ui=guardianConfig.ui or {};guardianConfig.ui.statusSymbols=guardianConfig.ui.statusSymbols==false
     controls.message=savePresentation() and tr("accessibility.symbols_changed",nil,"Status symbols changed") or tr("accessibility.symbols_save_failed",nil,"Could not save status symbols")
-  elseif choice=="ENABLE ASSISTED MANUAL" then controls.mode="ASSISTED";controls.request="OFF";controls.message="Assisted manual enabled at OFF"
+  elseif choice=="ENABLE ASSISTED MANUAL" then enterAssisted(controls,d)
   elseif choice=="ARM UNRESTRICTED" then controls.arm=1;controls.message="Unrestricted arming started"
   elseif choice=="CANCEL" then controls.arm=0;controls.message="Unrestricted arming cancelled"
   elseif controls.arm and controls.arm>0 and choice then controls.arm=controls.arm+1;if controls.arm>4 then
-    controls.arm=0;controls.mode="UNRESTRICTED"
+    controls.arm=0;controls.mode="UNRESTRICTED";controls.safetyRecovery=nil;controls.safetyLockout=false;controls.lastSafetyTrip=nil
     local status=string.lower(tostring(d and d.reactor and d.reactor.status or "unknown"))
     local live=status=="online" or status=="running"
     -- Arming manual control must be a bumpless transfer. Adopt both live gate
