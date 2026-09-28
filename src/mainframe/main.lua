@@ -819,6 +819,16 @@ function mainframe.run(config)
             alarmVolume = config.alarms.volume,
             idConflicts = idConflicts,
             control = config.control,
+            offlineFacilities = (function()
+                local count = 0
+                local now = network.now()
+                for _, facility in pairs(facilities) do
+                    if now - (tonumber(facility.lastSeen) or 0) > FACILITY_ONLINE_WINDOW then
+                        count = count + 1
+                    end
+                end
+                return count
+            end)(),
         })
     end
 
@@ -853,6 +863,21 @@ function mainframe.run(config)
         handle.write("return " .. textutils.serialize(registrations))
         handle.close()
         return true
+    end
+
+    local function refreshFacilities()
+        local now = network.now()
+        local removed = 0
+        for nodeId, facility in pairs(facilities) do
+            if now - (tonumber(facility.lastSeen) or 0) > FACILITY_ONLINE_WINDOW then
+                facilities[nodeId] = nil
+                loggedStates.facilities[nodeId] = nil
+                removed = removed + 1
+            end
+        end
+        refreshIdConflicts()
+        saveFacilities()
+        return removed
     end
 
     sendFacility = function(kind, target, payload)
@@ -1995,10 +2020,13 @@ function mainframe.run(config)
             buttons.timeoutNext = ui.inlineButton("TIMEOUT >", colors.cyan)
             print("")
             if maintenance then
-                buttons.maintenance = ui.button("FINISH MAINTENANCE", colors.orange)
+                buttons.maintenance = ui.inlineButton("FINISH MAINTENANCE", colors.orange)
             else
-                buttons.maintenance = ui.button("BEGIN MAINTENANCE", colors.orange)
+                buttons.maintenance = ui.inlineButton("BEGIN MAINTENANCE", colors.orange)
             end
+            write(" ")
+            buttons.refreshFacilities = ui.inlineButton("REFRESH FACILITIES", colors.cyan)
+            print("")
             buttons.naming = ui.inlineButton("NAME DEVICES", colors.cyan)
             write(" ")
             buttons.power = ui.inlineButton("POWER DISPLAY", colors.cyan)
@@ -2043,6 +2071,10 @@ function mainframe.run(config)
                 startMaintenance()
             elseif ((event == "key" and value == keys.f) or ui.hit(buttons.maintenance, touchX, touchY)) and maintenance then
                 stopMaintenance()
+            elseif ui.hit(buttons.refreshFacilities, touchX, touchY) then
+                local removed = refreshFacilities()
+                recordEvent("Facility refresh", "info", "operator",
+                    { count = removed, message = tostring(removed) .. " offline facilities removed" })
             elseif (event == "key" and value == keys.h) or ui.hit(buttons.names, touchX, touchY) then
                 config.ui.showPeripheralNames = not config.ui.showPeripheralNames
                 saveConfig()
@@ -3177,6 +3209,9 @@ function mainframe.run(config)
                     event, value, message, protocol, { eventPoint = ui.eventPoint, hit = gui.hit })
                 if not handled then customRenderer = nil
                 elseif action == "advanced" then display.useMirrored(); return "advanced" end
+                if action == "refresh_facilities" then
+                    customState.facilityRefreshRemoved = refreshFacilities()
+                end
                 if action == "scram" and currentAlarm and currentAlarm.facilityNodeId then
                     scramFacility(currentAlarm.facilityNodeId)
                 end

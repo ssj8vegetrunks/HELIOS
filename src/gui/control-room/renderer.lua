@@ -90,6 +90,11 @@ function renderer.render(snapshot, state, services)
     x = buttons.turbines.x2 + 2
     buttons.power = gui.button(x, 4, tr("nav.power", "POWER"), colors.yellow, state.page == "power" and colors.gray or colors.black)
     buttons.advanced = gui.button(1, height, tr("nav.advanced", "ADVANCED"), colors.white, colors.gray)
+    local offlineFacilities = math.max(0, tonumber(snapshot.offlineFacilities) or 0)
+    local refreshLabel = offlineFacilities > 0 and
+        ("REFRESH FACILITIES (" .. tostring(offlineFacilities) .. ")") or "REFRESH FACILITIES"
+    buttons.refreshFacilities = gui.button(buttons.advanced.x2 + 2, height,
+        refreshLabel, colors.white, colors.cyan)
     if services.allowEmergency and alarm and alarm.facilityNodeId then
         buttons.scram = gui.button(math.max(12, width - 8), height,
             tr("alarm.scram", "SCRAM"), colors.white, colors.red)
@@ -246,6 +251,7 @@ end
 function renderer.handle(state, buttons, event, a, b, c, services)
     local x, y = services.eventPoint(event, a, b, c)
     if services.hit(buttons.scram, x, y) then return "scram" end
+    if services.hit(buttons.refreshFacilities, x, y) then return "refresh_facilities" end
     if event == "key" and a == keys.a or services.hit(buttons.advanced, x, y) then return "advanced" end
     if event == "key" and a == keys.v then state.page = "reactors"
     elseif event == "key" and a == keys.g then state.page = "turbines"

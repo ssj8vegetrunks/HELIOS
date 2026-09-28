@@ -16,7 +16,7 @@ local formatter = {
 local renderer = dofile("src/gui/control-room/renderer.lua")
 local state = {}
 local buttons = renderer.render({
-    version="1.6.0-alpha.4", aliases={}, power={unit="FE"},
+    version="1.6.0-alpha.60", aliases={}, power={unit="FE"}, offlineFacilities=2,
     control={reactorProfiles={R0={learnedMaximumSteam=5000}}},
     reactors={{name="R0",mode="steam",steamProduction=1000,energyProduction=0,active=true,
         governor={state="STABLE",reason="Steam target held"}}},
@@ -25,6 +25,7 @@ local buttons = renderer.render({
     storages={{stored=5000,capacity=10000,input=600,output=400,percent=50}},
 }, state, {gui=gui,powerFormat=formatter})
 assert(buttons.advanced and state.page == "home", "control room must render navigation")
+assert(buttons.refreshFacilities, "control room must expose facility refresh")
 local output = table.concat(drawn, "\n")
 assert(string.find(output, "POWER STORAGE", 1, true), "home must show combined storage")
 assert(string.find(output, "STEAM PRODUCTION", 1, true), "home must show aggregate steam")
@@ -46,4 +47,7 @@ assert(state.page == "reactors", "external monitor touch must select reactor pag
 renderer.handle(state, buttons, "mouse_click", 1,
     buttons.turbines.x1, buttons.turbines.y, services)
 assert(state.page == "turbines", "local terminal click must select turbine page")
+local refreshAction = renderer.handle(state, buttons, "monitor_touch", "monitor_0",
+    buttons.refreshFacilities.x1, buttons.refreshFacilities.y, services)
+assert(refreshAction == "refresh_facilities", "facility refresh must work from the external monitor")
 print("control room GUI tests passed")
