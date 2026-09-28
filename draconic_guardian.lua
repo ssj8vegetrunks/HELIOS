@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.38
+-- HELIOS Draconic Guardian v1.2.0-alpha.39
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -47,7 +47,7 @@ local SAFETY_LOW_FIELD, SAFETY_HIGH_TEMP = 35, 7750
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.38"
+local GUARDIAN_VERSION = "1.2.0-alpha.39"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -327,7 +327,7 @@ local function requiresContainment(status)
     normalized=="explosionimminent"
 end
 local automaticSafetyTrend={}
-local function updateAutomaticSafetyVotes(d,trend)
+local function updateAutomaticSafetyVotes(d,trend,commissioning)
   trend=trend or automaticSafetyTrend
   local r=type(d)=="table" and d.reactor or {}
   local status=string.lower(tostring(r.status or "unknown"))
@@ -354,9 +354,13 @@ local function updateAutomaticSafetyVotes(d,trend)
   count("saturationFalling",saturation and trend.saturation and saturation<trend.saturation-.01)
   count("injectorShortfall",inputCommand>0 and input<inputCommand*.90)
   count("containmentDeficit",drain>0 and input<drain*1.05)
-  count("generationDeficit",output>50000 and generation<output*.90)
+  -- A live calibration intentionally steps export ahead of the reactor and
+  -- already owns a long settling window. Do not count that expected lag as a
+  -- second safety fault. A failed zero/close command remains safety-critical.
+  count("generationDeficit",not commissioning and output>50000 and generation<output*.90)
   local exportTolerance=math.max(50000,outputCommand*.10)
-  count("exportMismatch",math.abs(output-outputCommand)>exportTolerance)
+  count("exportMismatch",(not commissioning or outputCommand<=50000) and
+    math.abs(output-outputCommand)>exportTolerance)
   trend.field=field;trend.saturation=saturation
   local votes={}
   local function vote(active,label) if active then votes[#votes+1]=label end end
@@ -729,7 +733,7 @@ local function supervise(b,d,c)
     local imminent,warning=imminentMeltdown(r)
     if imminent then return stop(warning,false,true) end
     if c.mode=="AUTO" and live then
-      local votes,voteCount=updateAutomaticSafetyVotes(d)
+      local votes,voteCount=updateAutomaticSafetyVotes(d,nil,c.commissioning==true)
       c.safetyVotes=votes;c.safetyVoteCount=voteCount
       if voteCount>=SAFETY_VOTES_REQUIRED then
         local reason="automatic safety vote "..voteCount.."/"..SAFETY_VOTES_REQUIRED..": "..table.concat(votes,", ")
@@ -743,6 +747,11 @@ local function supervise(b,d,c)
             exportCommand=tonumber(d.outputSet),exportActual=tonumber(d.outputFlow),
           },{reason})
         end
+        -- A safety trip is a latched stop, never a pause in commissioning.
+        -- Requiring a new operator request prevents an unattended restart
+        -- immediately after the recovery loop declares the core cool.
+        c.commissioning=false;c.initialRequested=false;c.startActivated=false;c.request="OFF"
+        c.lastSafetyTrip=reason
         return stop(reason,false,true)
       end
       c.safetyVoteLatched=false
@@ -790,7 +799,8 @@ local function supervise(b,d,c)
     if temp<=5000 and not live then
       c.safetyRecovery=nil;c.initialRequested=false;c.startActivated=false
       c.remoteApplied=0;c.remotePrimed=false
-      c.message="Thermal recovery complete; remote demand may restart safely"
+      c.request="OFF"
+      c.message="SAFETY SHUTDOWN LATCHED: "..tostring(c.lastSafetyTrip or "reactor recovered").."; operator restart required"
     else
       c.message="Thermal recovery: holding shutdown until core is below 5000 C"
     end
@@ -1177,6 +1187,7 @@ local function cycleValue(values,current)
 end
 local function beginCalibration()
   controls.commissioning=true;controls.commissionFlow=COMMISSION_START_FLOW;controls.commissionSamples=0;controls.commissionShortfallSamples=0;controls.commissionSettleSamples=0;controls.commissionFieldInput=positive(controls.injectorBaseline);controls.commissionFieldTuneSamples=0;controls.commissionLastSafe=nil;controls.recovery=false;controls.commissioned=false;controls.rated=nil;controls.lifecycleCeilings={};controls.currentCycleCeilings={};controls.lifecycleApplied=nil;controls.lifecycleFieldApplied=nil;controls.lifecycleSamples=0;controls.lifecycleBandKey=nil;controls.lastFuelConversion=nil;controls.request="OFF"
+  controls.safetyRecovery=nil;controls.lastSafetyTrip=nil
   controls.initialRequested=true;controls.startActivated=false;controls.message="Automatic calibration requested by operator"
 end
 local function act(choice,d)
@@ -1191,7 +1202,7 @@ local function act(choice,d)
     else controls.message=string.format("REFUEL NOT VERIFIED: reactor must be cold with more than %d%% fuel (now %.1f%%)",REFUEL_VERIFY_FUEL,fuel) end
   elseif controls.refuelMaintenance then controls.message="REFUEL MAINTENANCE LOCK: complete physical refueling before other commands"
   elseif (choice=="AUTO COMMISSION" or choice=="RECALIBRATE CEILING") and controls.gatesOwned then beginCalibration()
-  elseif choice=="INITIALIZE & ACTIVATE" and controls.gatesOwned then controls.initialRequested=true;controls.startActivated=false;controls.message="Initial start requested by operator"
+  elseif choice=="INITIALIZE & ACTIVATE" and controls.gatesOwned then controls.safetyRecovery=nil;controls.lastSafetyTrip=nil;controls.initialRequested=true;controls.startActivated=false;controls.message="Initial start requested by operator"
   elseif choice=="SAFE SHUTDOWN" then controls.request="OFF";controls.initialRequested=false;controls.startActivated=false;controls.message="Operator safe shutdown requested"
   elseif choice=="LANGUAGE" and type(guardianConfig)=="table" then
     local available={};local ok,module=pcall(dofile,"/helios/core/i18n.lua")

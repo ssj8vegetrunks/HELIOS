@@ -188,5 +188,17 @@ for sample = 1, 8 do
 end
 assert(table.concat(votes, ","):find("export gate failed closed",1,true),
     "continued export after a zero command must become an explicit safety vote")
+safetyTrend = {}
+for sample = 1, 12 do
+    votes, voteCount = governor.updateAutomaticSafetyVotes({
+        reactor = {
+            status="running", fieldStrength=70, maxFieldStrength=100,
+            energySaturation=70-sample, maxEnergySaturation=100,
+            temperature=4000, generationRate=1000000, fieldDrainRate=500000,
+        }, inputFlow=1900000, inputSet=1900000, outputFlow=1000000, outputSet=2000000,
+    }, safetyTrend, true)
+end
+assert(voteCount==1 and votes[1]=="saturation falling",
+    "normal commissioning ramp lag must not manufacture generation and export mismatch votes")
 
 print("draconic lifecycle governor tests passed")
