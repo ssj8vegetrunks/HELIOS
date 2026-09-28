@@ -660,6 +660,11 @@ function mainframe.run(config)
 
         local steamSource = reactorGovernor.steamSourceStatus(reactors,
             steamDemand, config.control)
+        -- Recalibrating reactors are intentionally excluded from the aggregate
+        -- steam-source summary, so their hot-fluid buffer is not represented
+        -- by steamSource.bufferPercent. Read the explicit baseline-wait state
+        -- to ensure one turbine remains available as a temporary drain.
+        local calibrationDrainBuffer=reactorGovernor.calibrationDrainBuffer(reactors)
         turbineGovernor.evaluateAll(governorMemory, turbines, config.control, {
             maintenance = maintenance or manualAuthority or authorityPaused,
             mainframeId = os.getComputerID(),
@@ -668,10 +673,8 @@ function mainframe.run(config)
             calibrationBlocked = reactorGovernorMemory.commissioningActive == true,
             calibrationBlockReason = reactorGovernorMemory.commissioningActive == true and
                 "Waiting for sequential reactor commissioning" or nil,
-            calibrationDrainNeeded = reactorGovernorMemory.commissioningActive == true and
-                steamSource.bufferPercent ~= nil and
-                steamSource.bufferPercent > (tonumber(config.control.reactorHotFluidLow) or 15),
-            calibrationDrainBufferPercent = steamSource.bufferPercent,
+            calibrationDrainNeeded = calibrationDrainBuffer ~= nil,
+            calibrationDrainBufferPercent = calibrationDrainBuffer,
             steamSourceManaged = steamSource.managed,
             steamSourceReady = steamSource.ready,
             steamSourceReason = steamSource.reason,

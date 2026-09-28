@@ -372,6 +372,19 @@ function governor.steamSourceStatus(reactors, demand, control)
     }
 end
 
+function governor.calibrationDrainBuffer(reactors)
+    local highest
+    for _, reactor in ipairs(reactors or {}) do
+        local plan=reactor.governor or {}
+        if plan.recalibrating==true and plan.state=="COOLING" and
+           string.find(tostring(plan.reason or ""),"Hot-fluid buffer",1,true)==1 then
+            local buffer=tonumber(reactor.hotFluidPercent)
+            if buffer then highest=highest and math.max(highest,buffer) or buffer end
+        end
+    end
+    return highest
+end
+
 clearCooldown = function(previous)
     previous.cooldownStartedAt = nil
     previous.cooldownReferenceAt = nil
