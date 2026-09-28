@@ -33,19 +33,28 @@ assisted = { injectorBaseline=1900000 }
 governor.enterAssisted(assisted, { reactor={status="cold"}, inputSet=1900000, outputSet=0 })
 assert(assisted.request=="OFF",
     "entering assisted manual must not start an inactive reactor")
-local manualCurve = { mode="UNRESTRICTED", commissioned=false, rated=nil }
-local enabled, reason = governor.setManualCurveAutomation(manualCurve, {}, true)
-assert(not enabled and reason:find("calibration",1,true),
-    "manual efficiency automation must require a proven calibration")
-manualCurve = { mode="UNRESTRICTED", commissioned=true, rated=1900000,
-    manualField=1900000, manualExport=5050000 }
-enabled = governor.setManualCurveAutomation(manualCurve, { inputSet=2000000, outputSet=3900000 }, true)
-assert(enabled and manualCurve.manualCurveAutomation and manualCurve.lifecycleApplied==1900000,
-    "the explicit manual switch must seed the learned efficiency governor")
-governor.setManualCurveAutomation(manualCurve, { inputSet=2100000, outputSet=4200000 }, false)
-assert(not manualCurve.manualCurveAutomation and manualCurve.request=="MANUAL" and
-    manualCurve.manualField==2100000 and manualCurve.manualExport==4200000,
-    "disabling the curve must freeze the current live gates without a jump")
+local manualEfficiency = { mode="UNRESTRICTED", manualField=1900000, manualExport=3900000 }
+local enabled = governor.setManualEfficiency(manualEfficiency, { inputSet=2000000, outputSet=3900000 }, true)
+assert(enabled and manualEfficiency.manualEfficiencyEnabled and manualEfficiency.request=="MANUAL",
+    "the manual efficiency Guardian must start from the live manual gate pair")
+local fieldTarget,outputTarget,status = governor.manualEfficiencyTargets(manualEfficiency, {
+    reactor={status="running",fieldStrength=80,maxFieldStrength=100,temperature=4000,
+        energySaturation=70,maxEnergySaturation=100,generationRate=3900000,sampleTime=0},
+    inputSet=2000000,inputFlow=2000000,outputSet=3900000,outputFlow=3900000,
+})
+assert(fieldTarget==2000000 and outputTarget==3900000 and status:find("next increase",1,true),
+    "healthy rules must begin a dwell interval without immediately changing gates")
+fieldTarget,outputTarget,status = governor.manualEfficiencyTargets(manualEfficiency, {
+    reactor={status="running",fieldStrength=80,maxFieldStrength=100,temperature=4000,
+        energySaturation=70,maxEnergySaturation=100,generationRate=3900000,sampleTime=30},
+    inputSet=2000000,inputFlow=2000000,outputSet=3900000,outputFlow=3900000,
+})
+assert(outputTarget==3939000 and status:find("INCREASED",1,true),
+    "a full healthy interval must increase output by the configured percentage without a ceiling")
+governor.setManualEfficiency(manualEfficiency, { inputSet=2100000, outputSet=4200000 }, false)
+assert(not manualEfficiency.manualEfficiencyEnabled and manualEfficiency.request=="MANUAL" and
+    manualEfficiency.manualField==2100000 and manualEfficiency.manualExport==4200000,
+    "disabling the governor must freeze the current live gates without a jump")
 assert(not governor.lifecycleUnsafe(89, 7700),
     "strong containment may use the proven 7,500-7,750 C lifecycle leeway")
 assert(governor.lifecycleUnsafe(39, 7700),

@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.43
+-- HELIOS Draconic Guardian v1.2.0-alpha.44
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -47,7 +47,7 @@ local SAFETY_LOW_FIELD, SAFETY_HIGH_TEMP = 35, 7750
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.43"
+local GUARDIAN_VERSION = "1.2.0-alpha.44"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -448,6 +448,24 @@ local function vertical(t,x,y,h,label,now,maximum,c)
   for row=1,h do t.setCursorPos(x,y+row);t.setBackgroundColor(row>h-math.max(1,math.floor(h*f)) and c or colors.gray);t.write("    ") end
   t.setBackgroundColor(colors.black);text(t,x,y+h+1,string.format("%3.0f%%",f*100),c)
 end
+local function normalizeManualEfficiency(c)
+  c.efficiencyProfile=tostring(c.efficiencyProfile or "BALANCED")
+  c.efficiencyFieldEnabled=c.efficiencyFieldEnabled~=false
+  c.efficiencyFieldTarget=math.max(1,math.min(99,tonumber(c.efficiencyFieldTarget) or 70))
+  c.efficiencyTrendEnabled=c.efficiencyTrendEnabled~=false
+  c.efficiencyTempEnabled=c.efficiencyTempEnabled~=false
+  c.efficiencyTempLimit=math.max(1000,tonumber(c.efficiencyTempLimit) or 7500)
+  c.efficiencySaturationEnabled=c.efficiencySaturationEnabled~=false
+  c.efficiencySaturationFloor=math.max(0,math.min(99,tonumber(c.efficiencySaturationFloor) or 40))
+  c.efficiencyDeliveryEnabled=c.efficiencyDeliveryEnabled~=false
+  c.efficiencyInterval=math.max(5,tonumber(c.efficiencyInterval) or 30)
+  c.efficiencyIncreasePercent=math.max(.1,tonumber(c.efficiencyIncreasePercent) or 1)
+  c.efficiencyFailureResponse=tostring(c.efficiencyFailureResponse or "STEP BACK")
+  c.efficiencyRollbackPercent=math.max(.1,tonumber(c.efficiencyRollbackPercent) or 10)
+  c.efficiencyInjectorEnabled=c.efficiencyInjectorEnabled~=false
+  c.efficiencyInjectorStep=math.max(1000,tonumber(c.efficiencyInjectorStep) or 50000)
+  return c
+end
 local function load()
   local d={mode="AUTO",request="OFF",rated=nil,commissioned=false,commissioning=false,commissionFlow=nil,commissionSamples=0,commissionShortfallSamples=0,commissionSettleSamples=0,commissionFieldInput=nil,commissionFieldTuneSamples=0,commissionLastSafe=nil,recovery=false,arm=0,initialRequested=false,startActivated=false,liveGatesSelected=false,refuelMaintenance=false,refuelPhase=nil,message="Automatic safe supervision"}
   local s
@@ -457,8 +475,10 @@ local function load()
   for _,path in ipairs({SETTINGS,SETTINGS_PENDING,SETTINGS_BACKUP}) do
     if fs.exists(path) then local ok,value=pcall(dofile,path);if ok and type(value)=="table" then s=value;break end end
   end
-  if not s then return d end
-  d.mode=(s.mode=="ASSISTED" or s.mode=="UNRESTRICTED") and s.mode or "AUTO";d.request=(FRACTION[s.request] or s.request=="MANUAL" or s.request=="OVERDRIVE" or s.request=="IDLE") and s.request or "OFF";d.rated=tonumber(s.rated);d.lifecycleCeilings=type(s.lifecycleCeilings)=="table" and s.lifecycleCeilings or {};d.currentCycleCeilings=type(s.currentCycleCeilings)=="table" and s.currentCycleCeilings or {};d.injectorBaseline=positive(s.injectorBaseline);d.manualField=positive(s.manualField);d.manualExport=positive(s.manualExport) or 0;d.overdriveField=positive(s.overdriveField);d.overdriveExport=positive(s.overdriveExport);d.commissioned=s.commissioned==true;d.commissioning=s.commissioning==true;d.commissionFlow=positive(s.commissionFlow);d.commissionSamples=math.max(0,math.floor(tonumber(s.commissionSamples) or 0));d.commissionShortfallSamples=math.max(0,math.floor(tonumber(s.commissionShortfallSamples) or 0));d.commissionSettleSamples=math.max(0,math.floor(tonumber(s.commissionSettleSamples) or 0));d.commissionFieldInput=positive(s.commissionFieldInput);d.commissionFieldTuneSamples=math.max(0,math.floor(tonumber(s.commissionFieldTuneSamples) or 0));d.commissionLastSafe=positive(s.commissionLastSafe);d.recovery=s.recovery==true;d.lifecycleApplied=positive(s.lifecycleApplied);d.lifecycleFieldApplied=positive(s.lifecycleFieldApplied);d.lifecycleSamples=math.max(0,math.floor(tonumber(s.lifecycleSamples) or 0));d.lifecycleBandKey=s.lifecycleBandKey and tostring(s.lifecycleBandKey) or nil;d.lifecycleStartField=tonumber(s.lifecycleStartField);d.fieldTuneSamples=math.max(0,math.floor(tonumber(s.fieldTuneSamples) or 0));d.lastFuelConversion=tonumber(s.lastFuelConversion);d.overdriveApplied=tonumber(s.overdriveApplied);d.refuelMaintenance=s.refuelMaintenance==true;d.refuelPhase=d.refuelMaintenance and tostring(s.refuelPhase or "shutdown") or nil;d.safetyLockout=s.safetyLockout==true;d.lastSafetyTrip=s.lastSafetyTrip and tostring(s.lastSafetyTrip) or nil;d.message=tostring(s.message or d.message);return d
+  if not s then return normalizeManualEfficiency(d) end
+  d.mode=(s.mode=="ASSISTED" or s.mode=="UNRESTRICTED") and s.mode or "AUTO";d.request=(FRACTION[s.request] or s.request=="MANUAL" or s.request=="OVERDRIVE" or s.request=="IDLE") and s.request or "OFF";d.rated=tonumber(s.rated);d.lifecycleCeilings=type(s.lifecycleCeilings)=="table" and s.lifecycleCeilings or {};d.currentCycleCeilings=type(s.currentCycleCeilings)=="table" and s.currentCycleCeilings or {};d.injectorBaseline=positive(s.injectorBaseline);d.manualField=positive(s.manualField);d.manualExport=positive(s.manualExport) or 0;d.overdriveField=positive(s.overdriveField);d.overdriveExport=positive(s.overdriveExport);d.commissioned=s.commissioned==true;d.commissioning=s.commissioning==true;d.commissionFlow=positive(s.commissionFlow);d.commissionSamples=math.max(0,math.floor(tonumber(s.commissionSamples) or 0));d.commissionShortfallSamples=math.max(0,math.floor(tonumber(s.commissionShortfallSamples) or 0));d.commissionSettleSamples=math.max(0,math.floor(tonumber(s.commissionSettleSamples) or 0));d.commissionFieldInput=positive(s.commissionFieldInput);d.commissionFieldTuneSamples=math.max(0,math.floor(tonumber(s.commissionFieldTuneSamples) or 0));d.commissionLastSafe=positive(s.commissionLastSafe);d.recovery=s.recovery==true;d.lifecycleApplied=positive(s.lifecycleApplied);d.lifecycleFieldApplied=positive(s.lifecycleFieldApplied);d.lifecycleSamples=math.max(0,math.floor(tonumber(s.lifecycleSamples) or 0));d.lifecycleBandKey=s.lifecycleBandKey and tostring(s.lifecycleBandKey) or nil;d.lifecycleStartField=tonumber(s.lifecycleStartField);d.fieldTuneSamples=math.max(0,math.floor(tonumber(s.fieldTuneSamples) or 0));d.lastFuelConversion=tonumber(s.lastFuelConversion);d.overdriveApplied=tonumber(s.overdriveApplied);d.refuelMaintenance=s.refuelMaintenance==true;d.refuelPhase=d.refuelMaintenance and tostring(s.refuelPhase or "shutdown") or nil;d.safetyLockout=s.safetyLockout==true;d.lastSafetyTrip=s.lastSafetyTrip and tostring(s.lastSafetyTrip) or nil;d.message=tostring(s.message or d.message)
+  d.efficiencyProfile=s.efficiencyProfile;d.efficiencyFieldEnabled=s.efficiencyFieldEnabled;d.efficiencyFieldTarget=s.efficiencyFieldTarget;d.efficiencyTrendEnabled=s.efficiencyTrendEnabled;d.efficiencyTempEnabled=s.efficiencyTempEnabled;d.efficiencyTempLimit=s.efficiencyTempLimit;d.efficiencySaturationEnabled=s.efficiencySaturationEnabled;d.efficiencySaturationFloor=s.efficiencySaturationFloor;d.efficiencyDeliveryEnabled=s.efficiencyDeliveryEnabled;d.efficiencyInterval=s.efficiencyInterval;d.efficiencyIncreasePercent=s.efficiencyIncreasePercent;d.efficiencyFailureResponse=s.efficiencyFailureResponse;d.efficiencyRollbackPercent=s.efficiencyRollbackPercent;d.efficiencyInjectorEnabled=s.efficiencyInjectorEnabled;d.efficiencyInjectorStep=s.efficiencyInjectorStep
+  return normalizeManualEfficiency(d)
 end
 local function save(c)
   local parent=fs.getDir(SETTINGS);if parent~="" and not fs.exists(parent) then fs.makeDir(parent) end
@@ -662,9 +682,110 @@ local function resetAfterRefuel(c)
   c.injectorBaseline=SAFE_INJECTOR_BASELINE;c.lifecycleCeilings={};c.currentCycleCeilings={}
   c.lifecycleApplied=nil;c.lifecycleFieldApplied=nil;c.lifecycleSamples=0;c.lifecycleBandKey=nil
   c.lifecycleStartField=nil;c.fieldTuneSamples=0;c.lastFuelConversion=nil;c.overdriveApplied=nil
-  c.manualField=nil;c.manualExport=0;c.overdriveField=nil;c.overdriveExport=nil;c.manualCurveAutomation=false
+  c.manualField=nil;c.manualExport=0;c.overdriveField=nil;c.overdriveExport=nil;c.manualEfficiencyEnabled=false
   c.remoteTarget=nil;c.remoteLevel=nil;c.remoteApplied=nil;c.remotePrimed=nil
   c.message="REFUEL VERIFIED: learned reactor profile cleared; fresh calibration required"
+end
+
+local function resetManualEfficiencyRuntime(c)
+  c.efficiencyOutputCommand=nil;c.efficiencyFieldCommand=nil;c.efficiencyStableSince=nil
+  c.efficiencyPendingExport=nil;c.efficiencyPendingSince=nil;c.efficiencyPendingBaseFlow=nil
+  c.efficiencyPendingBaseGeneration=nil;c.efficiencyLastStep=nil;c.efficiencyLastRollback=nil
+  c.efficiencyLastInjectorTune=nil;c.efficiencyPriorField=nil;c.efficiencyPaused=false;c.efficiencyStatus="IDLE"
+end
+local function setManualEfficiency(c,d,enabled)
+  normalizeManualEfficiency(c)
+  resetManualEfficiencyRuntime(c)
+  if enabled then
+    if c.mode~="UNRESTRICTED" then return false,"Unrestricted control is required" end
+    c.manualEfficiencyEnabled=true
+    c.efficiencyOutputCommand=positive(d and d.outputSet) or positive(d and d.outputFlow) or positive(c.manualExport) or 0
+    c.efficiencyFieldCommand=positive(d and d.inputSet) or positive(d and d.inputFlow) or positive(c.manualField) or positive(c.injectorBaseline)
+    local now=lifecycleNow(d and d.reactor or {});c.efficiencyLastRollback=now;c.efficiencyLastInjectorTune=now
+    c.manualExport=c.efficiencyOutputCommand;c.manualField=c.efficiencyFieldCommand;c.request="MANUAL"
+    c.message="Manual efficiency Guardian ON: evaluating operator rules"
+    return true,c.message
+  end
+  c.manualEfficiencyEnabled=false
+  c.manualField=positive(d and d.inputSet) or positive(d and d.inputFlow) or c.manualField or c.injectorBaseline
+  c.manualExport=positive(d and d.outputSet) or positive(d and d.outputFlow) or 0
+  c.request="MANUAL";c.overdriveApplied=0;c.liveGatesSelected=true
+  c.message="Manual efficiency Guardian OFF: live gates frozen for manual control"
+  return true,c.message
+end
+local function manualEfficiencyTargets(c,d)
+  normalizeManualEfficiency(c)
+  local r=d.reactor or {};local now=lifecycleNow(r)
+  local field=pct(r.fieldStrength,r.maxFieldStrength) or 0
+  local temp=tonumber(r.temperature) or math.huge
+  local saturation=pct(r.energySaturation,r.maxEnergySaturation) or 0
+  local flow=tonumber(d.outputFlow) or 0;local generation=tonumber(r.generationRate) or 0
+  local outputSet=tonumber(d.outputSet) or 0
+  local output=tonumber(c.efficiencyOutputCommand) or outputSet
+  local injector=positive(c.efficiencyFieldCommand) or positive(d.inputSet) or positive(d.inputFlow) or positive(c.manualField) or positive(c.injectorBaseline) or MINIMUM_FIELD_INPUT
+  local previousField=tonumber(c.efficiencyPriorField);c.efficiencyPriorField=field
+  local reasons={}
+  if c.efficiencyFieldEnabled and field<c.efficiencyFieldTarget then reasons[#reasons+1]=string.format("field %.1f%% < %.1f%%",field,c.efficiencyFieldTarget) end
+  if c.efficiencyTrendEnabled and previousField and field<previousField-.2 then reasons[#reasons+1]="field trend falling" end
+  if c.efficiencyTempEnabled and temp>c.efficiencyTempLimit then reasons[#reasons+1]=string.format("temperature %.0f > %.0f C",temp,c.efficiencyTempLimit) end
+  if c.efficiencySaturationEnabled and saturation<c.efficiencySaturationFloor then reasons[#reasons+1]=string.format("saturation %.1f%% < %.1f%%",saturation,c.efficiencySaturationFloor) end
+  if c.efficiencyDeliveryEnabled then
+    local tolerance=math.max(50000,math.abs(outputSet)*.15)
+    if math.abs(flow-outputSet)>tolerance then reasons[#reasons+1]="export delivery not tracking command" end
+  end
+  if c.efficiencyPendingExport then
+    local delta=math.max(1000,(tonumber(c.efficiencyLastStep) or 0)*.10)
+    local gateConfirmed=math.abs(outputSet-c.efficiencyPendingExport)<=math.max(50000,c.efficiencyPendingExport*.02)
+    local responseConfirmed=flow>=(tonumber(c.efficiencyPendingBaseFlow) or 0)+delta or generation>=(tonumber(c.efficiencyPendingBaseGeneration) or 0)+delta
+    if gateConfirmed and responseConfirmed then
+      c.efficiencyPendingExport=nil;c.efficiencyPendingSince=nil;c.efficiencyStableSince=now
+      c.efficiencyStatus="CONFIRMED: previous increase produced a measurable response"
+    elseif now-(tonumber(c.efficiencyPendingSince) or now)>=math.max(10,c.efficiencyInterval*2) then
+      c.efficiencyPaused=true;c.efficiencyStatus="PAUSED: previous adjustment was not confirmed"
+    else
+      c.efficiencyStatus="VERIFYING: waiting for the previous output increase to respond"
+    end
+  end
+  if c.efficiencyPaused then return injector,output,c.efficiencyStatus,reasons end
+  if c.efficiencyPendingExport then return injector,output,c.efficiencyStatus,reasons end
+  local allClear=#reasons==0 and not c.efficiencyPendingExport
+  if allClear then
+    c.efficiencyStableSince=tonumber(c.efficiencyStableSince) or now
+    local remaining=c.efficiencyInterval-(now-c.efficiencyStableSince)
+    c.efficiencyStatus=remaining>0 and ("HOLDING: all rules true; next increase in "..math.ceil(remaining).."s") or "INCREASING"
+    if remaining<=0 then
+      local step=math.max(1000,math.floor(math.max(output,100000)*c.efficiencyIncreasePercent/100))
+      c.efficiencyLastStep=step;c.efficiencyPendingBaseFlow=flow;c.efficiencyPendingBaseGeneration=generation
+      output=output+step;c.efficiencyOutputCommand=output;c.efficiencyPendingExport=output;c.efficiencyPendingSince=now;c.efficiencyStableSince=nil
+      c.efficiencyStatus="INCREASED: +"..fmt(step).." RF/t; verifying response"
+      guardianRecord("log.guardian_command","info",{mode="manual_efficiency",step=step,output=output},{c.efficiencyStatus})
+    end
+    if c.efficiencyInjectorEnabled and field>c.efficiencyFieldTarget+10 and now-(tonumber(c.efficiencyLastInjectorTune) or 0)>=c.efficiencyInterval then
+      injector=math.max(MINIMUM_FIELD_INPUT,injector-c.efficiencyInjectorStep);c.efficiencyLastInjectorTune=now
+      guardianRecord("log.guardian_command","info",{mode="manual_efficiency",injector=injector},{"Injector trimmed after sustained field surplus"})
+    end
+  else
+    c.efficiencyStableSince=nil
+    c.efficiencyStatus="HOLDING: "..table.concat(reasons,"; ")
+    if c.efficiencyInjectorEnabled and field<c.efficiencyFieldTarget and now-(tonumber(c.efficiencyLastInjectorTune) or 0)>=math.min(10,c.efficiencyInterval) then
+      injector=injector+c.efficiencyInjectorStep;c.efficiencyLastInjectorTune=now
+      guardianRecord("log.guardian_command","warning",{mode="manual_efficiency",injector=injector},{"Injector raised because field was below the operator threshold"})
+    end
+    local response=c.efficiencyFailureResponse
+    local mayRollback=now-(tonumber(c.efficiencyLastRollback) or 0)>=c.efficiencyInterval
+    if mayRollback and response=="STEP BACK" and (tonumber(c.efficiencyLastStep) or 0)>0 then
+      output=math.max(0,output-c.efficiencyLastStep);c.efficiencyLastStep=0;c.efficiencyLastRollback=now
+      c.efficiencyStatus="STEPPED BACK: "..table.concat(reasons,"; ")
+      guardianRecord("log.guardian_command","warning",{mode="manual_efficiency",output=output},{c.efficiencyStatus})
+    elseif mayRollback and response=="ROLL BACK" then
+      local reduction=math.max(1000,math.floor(output*c.efficiencyRollbackPercent/100))
+      output=math.max(0,output-reduction);c.efficiencyLastRollback=now
+      c.efficiencyStatus="ROLLING BACK -"..fmt(reduction)..": "..table.concat(reasons,"; ")
+      guardianRecord("log.guardian_command","warning",{mode="manual_efficiency",output=output},{c.efficiencyStatus})
+    end
+  end
+  c.efficiencyOutputCommand=output;c.efficiencyFieldCommand=injector
+  return injector,output,c.efficiencyStatus,reasons
 end
 
 -- AUTO and ASSISTED retain containment. UNRESTRICTED is visibly armed and lets
@@ -963,23 +1084,16 @@ local function supervise(b,d,c)
     return
   end
   -- Manual Gates normally use the operator's exact field/export pair. The
-  -- explicit curve switch turns that pair into a ceiling: Guardian may move
-  -- below it along the learned lifecycle curve without regaining shutdown
-  -- authority. Overdrive still ramps rather than applying its full load at
-  -- once.
+  -- opt-in manual efficiency Guardian instead advances from the live pair
+  -- whenever every operator-selected rule remains true for its dwell time.
   if c.request=="MANUAL" or c.request=="OVERDRIVE" then
     local fieldTarget=positive(c.request=="OVERDRIVE" and c.overdriveField or c.manualField) or injectorCap
     local exportTarget=positive(c.request=="OVERDRIVE" and c.overdriveExport or c.manualExport) or 0
-    local curveNote,operatorMaximum
-    if free and c.manualCurveAutomation then
-      operatorMaximum=exportTarget
-      local curveTarget
-      curveTarget,curveNote=lifecycleTarget(c,r)
-      exportTarget=math.min(operatorMaximum,curveTarget)
-      fieldTarget=lifecycleFieldTarget(c,r,fieldTarget)
-    end
     if not live then ensureStarted(b,c,status,"Manual power demand",fieldTarget,r);return end
     if live then
+      if free and c.manualEfficiencyEnabled and c.request=="MANUAL" then
+        fieldTarget,exportTarget=manualEfficiencyTargets(c,d)
+      end
       gate(b.input,fieldTarget)
       local applied=exportTarget
       if c.request=="OVERDRIVE" then
@@ -990,9 +1104,7 @@ local function supervise(b,d,c)
         c.overdriveApplied=previous;applied=previous
         c.message="Overdrive preset ramp: "..fmt(applied).." / "..fmt(exportTarget).." RF/t"
       else c.message="Manual gates applied: field "..fmt(fieldTarget)..", export "..fmt(exportTarget).." RF/t" end
-      if c.manualCurveAutomation then
-        c.message="Manual efficiency curve ON: "..fmt(applied).." / "..fmt(operatorMaximum).." RF/t max, field "..fmt(fieldTarget)..(curveNote and " - "..curveNote or "")
-      end
+      if c.manualEfficiencyEnabled and c.request=="MANUAL" then c.message="Manual efficiency Guardian: "..tostring(c.efficiencyStatus) end
       gate(b.output,applied)
       return
     end
@@ -1013,7 +1125,7 @@ end
 local function enterAssisted(c,d)
   local status=string.lower(tostring(d and d.reactor and d.reactor.status or "unknown"))
   local live=status=="online" or status=="running"
-  c.mode="ASSISTED";c.arm=0;c.startActivated=false;c.manualCurveAutomation=false
+  c.mode="ASSISTED";c.arm=0;c.startActivated=false;c.manualEfficiencyEnabled=false;resetManualEfficiencyRuntime(c)
   if live then
     -- Assisted is the vestibule to Unrestricted control. Preserve the exact
     -- live gate pair so turning the authorization keys cannot stop a healthy
@@ -1025,27 +1137,6 @@ local function enterAssisted(c,d)
   else
     c.request="OFF";c.message="Assisted manual enabled: inactive reactor remains OFF"
   end
-end
-local function setManualCurveAutomation(c,d,enabled)
-  if enabled then
-    if c.mode~="UNRESTRICTED" then return false,"Unrestricted control is required" end
-    if not c.commissioned or not positive(c.rated) then return false,"Complete automatic calibration before enabling the efficiency curve" end
-    c.manualCurveAutomation=true
-    c.lifecycleApplied=positive(c.rated)
-    c.lifecycleFieldApplied=positive(d and d.inputSet) or positive(d and d.inputFlow) or positive(c.manualField) or positive(c.injectorBaseline)
-    c.lifecycleSamples=0;c.lifecycleBandKey=nil;c.lifecycleStartField=nil;c.fieldTuneSamples=0;c.lastFuelConversion=nil
-    c.message="Efficiency curve automation ON: manual export remains the maximum"
-    return true,c.message
-  end
-  c.manualCurveAutomation=false
-  c.manualField=positive(d and d.inputSet) or positive(d and d.inputFlow) or c.manualField or c.injectorBaseline
-  c.manualExport=positive(d and d.outputSet) or positive(d and d.outputFlow) or 0
-  c.request="MANUAL";c.overdriveApplied=0
-  c.lifecycleApplied=nil;c.lifecycleFieldApplied=nil;c.lifecycleSamples=0;c.lifecycleBandKey=nil
-  c.lifecycleStartField=nil;c.fieldTuneSamples=0;c.lastFuelConversion=nil
-  c.liveGatesSelected=true
-  c.message="Efficiency curve automation OFF: live gates frozen for manual control"
-  return true,c.message
 end
 local function draw(t,b,d,page,c,bs)
   local w,h=t.getSize();t.setBackgroundColor(colors.black);t.setTextColor(colors.white);t.clear();text(t,1,1,tr("guardian.title",{version=GUARDIAN_VERSION},"HELIOS // DRACONIC GUARDIAN  "..GUARDIAN_VERSION),colors.yellow)
@@ -1094,6 +1185,33 @@ local function draw(t,b,d,page,c,bs)
   if critical then replaceLine(t,2,criticalMessage,colors.red) end
   if page=="setup" then text(t,1,5,"FIXED GATE TOPOLOGY VALID",colors.lime);text(t,1,7,"Reactor component: "..b.reactor);text(t,1,8,"Export gate (LEFT/RIGHT): "..b.output);text(t,1,9,"Injector field gate (MODEM): "..b.input);text(t,1,10,"Wired modem: "..b.modem);text(t,1,11,"Wired monitor: "..(b.monitor or ((b.monitorCount or 0)>1 and "MULTIPLE - NOT CLAIMED" or "OPTIONAL / NOT FOUND")),(b.monitorCount or 0)>1 and colors.orange or colors.lightGray);text(t,1,13,"Export and containment roles are fixed; Guardian will not infer them.",colors.orange);return end
   if page=="raw" then text(t,1,5,"RAW DRACONIC TELEMETRY",colors.cyan);local ks={};for k in pairs(d.reactor) do ks[#ks+1]=tostring(k) end;sort(ks);for i,k in ipairs(ks) do if i+6<h then text(t,1,i+6,k..": "..tostring(d.reactor[k])) end end;return end
+  if page=="efficiency" then
+    normalizeManualEfficiency(c)
+    text(t,1,5,"MANUAL EFFICIENCY GUARDIAN // unrestricted only",colors.orange)
+    if c.mode~="UNRESTRICTED" then text(t,1,7,"Arm Unrestricted control before enabling this governor.",colors.orange);bs[#bs+1]=button(t,1,9,"BACK",colors.lightGray,1);return end
+    bs[#bs+1]=button(t,1,7,"ENABLED: "..(c.manualEfficiencyEnabled and "ON" or "OFF"),c.manualEfficiencyEnabled and colors.lime or colors.orange,1,"TOGGLE MANUAL EFFICIENCY")
+    bs[#bs+1]=button(t,22,7,"PROFILE: "..c.efficiencyProfile,colors.cyan,1,"CYCLE EFFICIENCY PROFILE")
+    local function toggleRow(y,label,enabled,value,minus,plus)
+      bs[#bs+1]=button(t,1,y,label..": "..(enabled and "ON" or "OFF"),enabled and colors.lime or colors.lightGray,1,"TOGGLE "..label)
+      text(t,25,y,tostring(value),colors.white)
+      if minus then bs[#bs+1]=button(t,38,y,"-",colors.cyan,1,minus);bs[#bs+1]=button(t,45,y,"+",colors.cyan,1,plus) end
+    end
+    toggleRow(10,"FIELD",c.efficiencyFieldEnabled,string.format("target %.0f%%",c.efficiencyFieldTarget),"FIELD TARGET -","FIELD TARGET +")
+    toggleRow(12,"FIELD TREND",c.efficiencyTrendEnabled,"stable or rising")
+    toggleRow(14,"TEMPERATURE",c.efficiencyTempEnabled,string.format("max %.0f C",c.efficiencyTempLimit),"TEMP LIMIT -","TEMP LIMIT +")
+    toggleRow(16,"SATURATION",c.efficiencySaturationEnabled,string.format("floor %.0f%%",c.efficiencySaturationFloor),"SAT FLOOR -","SAT FLOOR +")
+    toggleRow(18,"GATE DELIVERY",c.efficiencyDeliveryEnabled,"actual tracks command")
+    toggleRow(20,"AUTO INJECTOR",c.efficiencyInjectorEnabled,"step "..fmt(c.efficiencyInjectorStep),"INJECTOR STEP -","INJECTOR STEP +")
+    bs[#bs+1]=button(t,1,22,"INTERVAL: "..tostring(c.efficiencyInterval).."s",colors.cyan,1,"CYCLE EFFICIENCY INTERVAL")
+    bs[#bs+1]=button(t,22,22,"INCREASE: "..tostring(c.efficiencyIncreasePercent).."%",colors.cyan,1,"CYCLE EFFICIENCY INCREASE")
+    bs[#bs+1]=button(t,1,24,"FAILED CHECK: "..c.efficiencyFailureResponse,colors.orange,1,"CYCLE FAILURE RESPONSE")
+    bs[#bs+1]=button(t,34,24,"ROLLBACK: "..tostring(c.efficiencyRollbackPercent).."%",colors.cyan,1,"CYCLE ROLLBACK PERCENT")
+    bs[#bs+1]=button(t,1,26,"CLEAR PAUSE",colors.cyan,1,"CLEAR EFFICIENCY PAUSE")
+    text(t,1,28,tostring(c.efficiencyStatus or "IDLE"),c.efficiencyPaused and colors.red or colors.lightGray)
+    text(t,1,30,"No output ceiling: every confirmed interval may advance again.",colors.orange)
+    bs[#bs+1]=button(t,1,32,"BACK",colors.lightGray,1)
+    return
+  end
   if page=="gates" then
     text(t,1,5,"MANUAL GATES // unrestricted only",c.mode=="UNRESTRICTED" and colors.red or colors.orange)
     if c.mode~="UNRESTRICTED" then text(t,1,7,"Arm Unrestricted control before changing either gate manually.",colors.orange);return end
@@ -1117,7 +1235,7 @@ local function draw(t,b,d,page,c,bs)
       local exportSteps={{"EXPORT -1k",1},{"EXPORT -10k",9},{"EXPORT -100k",18},{"EXPORT -1M",28},{"EXPORT +1k",1},{"EXPORT +10k",9},{"EXPORT +100k",18},{"EXPORT +1M",28}}
       for index,item in ipairs(exportSteps) do bs[#bs+1]=button(t,item[2],index<=4 and 16 or 18,string.sub(item[1],8),colors.cyan,1);bs[#bs].label=item[1] end
       bs[#bs+1]=button(t,1,20,"USE LIVE GATES",liveGatesSelected and colors.lime or colors.lightGray,1);bs[#bs+1]=button(t,24,20,"APPLY MANUAL",manualApplied and colors.lime or colors.orange,1)
-      bs[#bs+1]=button(t,1,21,"EFFICIENCY CURVE AUTOMATION: "..(c.manualCurveAutomation and "ON" or "OFF"),c.manualCurveAutomation and colors.lime or colors.orange,1);bs[#bs].label="TOGGLE EFFICIENCY CURVE"
+      bs[#bs+1]=button(t,1,21,"MANUAL EFFICIENCY GUARDIAN: "..(c.manualEfficiencyEnabled and "ON" or "OFF"),c.manualEfficiencyEnabled and colors.lime or colors.orange,1,"OPEN EFFICIENCY GUARDIAN")
       bs[#bs+1]=button(t,1,23,"SAVE AS OVERDRIVE PRESET",presetSaved and colors.lime or colors.red,1);bs[#bs+1]=button(t,40,23,"BACK",colors.lightGray,1)
       text(t,1,26,"Overdrive keeps this field setting and ramps only export to the saved target.",colors.lightGray)
     else
@@ -1127,7 +1245,7 @@ local function draw(t,b,d,page,c,bs)
       bs[#bs+1]=button(t,1,14,"EXPORT -1k",colors.cyan,1);bs[#bs+1]=button(t,16,14,"EXPORT -10k",colors.cyan,1);bs[#bs+1]=button(t,33,14,"EXPORT -100k",colors.cyan,1);bs[#bs+1]=button(t,51,14,"EXPORT -1M",colors.cyan,1)
       bs[#bs+1]=button(t,1,16,"EXPORT +1k",colors.cyan,1);bs[#bs+1]=button(t,16,16,"EXPORT +10k",colors.cyan,1);bs[#bs+1]=button(t,33,16,"EXPORT +100k",colors.cyan,1);bs[#bs+1]=button(t,51,16,"EXPORT +1M",colors.cyan,1)
       bs[#bs+1]=button(t,1,19,"USE LIVE GATES",liveGatesSelected and colors.lime or colors.lightGray,1);bs[#bs+1]=button(t,22,19,"APPLY MANUAL",manualApplied and colors.lime or colors.orange,1)
-      bs[#bs+1]=button(t,1,20,"EFFICIENCY CURVE AUTOMATION: "..(c.manualCurveAutomation and "ON" or "OFF"),c.manualCurveAutomation and colors.lime or colors.orange,1);bs[#bs].label="TOGGLE EFFICIENCY CURVE"
+      bs[#bs+1]=button(t,1,20,"MANUAL EFFICIENCY GUARDIAN: "..(c.manualEfficiencyEnabled and "ON" or "OFF"),c.manualEfficiencyEnabled and colors.lime or colors.orange,1,"OPEN EFFICIENCY GUARDIAN")
       bs[#bs+1]=button(t,1,22,"SAVE AS OVERDRIVE PRESET",presetSaved and colors.lime or colors.red,1);bs[#bs+1]=button(t,35,22,"BACK",colors.lightGray,1)
       text(t,1,25,"Overdrive keeps this field setting and ramps only export to the saved target.",colors.lightGray)
     end
@@ -1238,7 +1356,7 @@ if rawget(_G,"HELIOS_GUARDIAN_TEST") then
   return {lifecycleTarget=lifecycleTarget,lifecycleFieldTarget=lifecycleFieldTarget,lifecycleCeiling=lifecycleCeiling,
     lifecycleUnsafe=lifecycleUnsafe,thermalHoldRequired=thermalHoldRequired,emergencyFieldTarget=emergencyFieldTarget,
     beginRefuelMaintenance=beginRefuelMaintenance,resetAfterRefuel=resetAfterRefuel,
-    enterAssisted=enterAssisted,setManualCurveAutomation=setManualCurveAutomation,
+    enterAssisted=enterAssisted,setManualEfficiency=setManualEfficiency,manualEfficiencyTargets=manualEfficiencyTargets,
     chargeableStatus=chargeableStatus,requiresContainment=requiresContainment,mailboxHasRemoteDemand=mailboxHasRemoteDemand,
     updateMeltdownTrend=updateMeltdownTrend,imminentMeltdown=imminentMeltdown,
     updateAutomaticSafetyVotes=updateAutomaticSafetyVotes,
@@ -1273,9 +1391,24 @@ local function beginCalibration()
   controls.safetyRecovery=nil;controls.safetyLockout=false;controls.lastSafetyTrip=nil
   controls.initialRequested=true;controls.startActivated=false;controls.message="Automatic calibration requested by operator"
 end
+local function applyEfficiencyProfile(name)
+  controls.efficiencyProfile=name
+  if name=="PASSIVE" then
+    controls.efficiencyFieldTarget=80;controls.efficiencyIncreasePercent=.5;controls.efficiencyInterval=60;controls.efficiencyFailureResponse="STEP BACK";controls.efficiencyRollbackPercent=5;controls.efficiencyInjectorStep=25000
+  elseif name=="AGGRESSIVE" then
+    controls.efficiencyFieldTarget=60;controls.efficiencyIncreasePercent=2;controls.efficiencyInterval=10;controls.efficiencyFailureResponse="ROLL BACK";controls.efficiencyRollbackPercent=20;controls.efficiencyInjectorStep=100000
+  else
+    controls.efficiencyProfile="BALANCED";controls.efficiencyFieldTarget=70;controls.efficiencyIncreasePercent=1;controls.efficiencyInterval=30;controls.efficiencyFailureResponse="STEP BACK";controls.efficiencyRollbackPercent=10;controls.efficiencyInjectorStep=50000
+  end
+  resetManualEfficiencyRuntime(controls);controls.message="Manual efficiency profile loaded: "..controls.efficiencyProfile
+end
+local function customizeEfficiency(message)
+  controls.efficiencyProfile="CUSTOM";resetManualEfficiencyRuntime(controls);controls.message=message
+end
 local function act(choice,d)
-  if type(choice)=="string" and (string.find(choice,"FIELD",1,true)==1 or string.find(choice,"EXPORT",1,true)==1) then
+  if type(choice)=="string" and ((string.find(choice,"FIELD",1,true)==1 and string.find(choice,"FIELD TARGET",1,true)~=1) or string.find(choice,"EXPORT",1,true)==1) then
     controls.liveGatesSelected=false
+    if controls.manualEfficiencyEnabled then controls.manualEfficiencyEnabled=false;resetManualEfficiencyRuntime(controls) end
   end
   if choice=="REFRESH NETWORK" then
     local opened=facilityNetwork and facilityNetwork.openAll() or 0
@@ -1309,7 +1442,7 @@ local function act(choice,d)
   elseif choice=="ARM UNRESTRICTED" then controls.arm=1;controls.message="Unrestricted arming started"
   elseif choice=="CANCEL" then controls.arm=0;controls.message="Unrestricted arming cancelled"
   elseif controls.arm and controls.arm>0 and choice then controls.arm=controls.arm+1;if controls.arm>4 then
-    controls.arm=0;controls.mode="UNRESTRICTED";controls.safetyRecovery=nil;controls.safetyLockout=false;controls.lastSafetyTrip=nil;controls.manualCurveAutomation=false
+    controls.arm=0;controls.mode="UNRESTRICTED";controls.safetyRecovery=nil;controls.safetyLockout=false;controls.lastSafetyTrip=nil;controls.manualEfficiencyEnabled=false;resetManualEfficiencyRuntime(controls)
     local status=string.lower(tostring(d and d.reactor and d.reactor.status or "unknown"))
     local live=status=="online" or status=="running"
     -- Arming manual control must be a bumpless transfer. Adopt both live gate
@@ -1320,8 +1453,29 @@ local function act(choice,d)
     controls.liveGatesSelected=true;controls.request=live and "MANUAL" or "OFF"
     controls.message=live and "UNRESTRICTED CONTROL ARMED: live gates adopted without shutdown" or "UNRESTRICTED CONTROL ARMED: reactor remains OFF"
   end
-  elseif choice=="RESTORE AUTOMATIC" then controls.mode="AUTO";controls.request="OFF";controls.arm=0;controls.manualCurveAutomation=false;controls.message="Automatic safety restored"
-  elseif choice=="TOGGLE EFFICIENCY CURVE" then setManualCurveAutomation(controls,d,not controls.manualCurveAutomation)
+  elseif choice=="RESTORE AUTOMATIC" then controls.mode="AUTO";controls.request="OFF";controls.arm=0;controls.manualEfficiencyEnabled=false;resetManualEfficiencyRuntime(controls);controls.message="Automatic safety restored"
+  elseif choice=="TOGGLE MANUAL EFFICIENCY" then setManualEfficiency(controls,d,not controls.manualEfficiencyEnabled)
+  elseif choice=="CYCLE EFFICIENCY PROFILE" then
+    local nextProfile=controls.efficiencyProfile=="PASSIVE" and "BALANCED" or controls.efficiencyProfile=="BALANCED" and "AGGRESSIVE" or "PASSIVE";applyEfficiencyProfile(nextProfile)
+  elseif choice=="TOGGLE FIELD" then controls.efficiencyFieldEnabled=not controls.efficiencyFieldEnabled;customizeEfficiency("Field threshold monitoring toggled")
+  elseif choice=="TOGGLE FIELD TREND" then controls.efficiencyTrendEnabled=not controls.efficiencyTrendEnabled;customizeEfficiency("Field trend monitoring toggled")
+  elseif choice=="TOGGLE TEMPERATURE" then controls.efficiencyTempEnabled=not controls.efficiencyTempEnabled;customizeEfficiency("Temperature monitoring toggled")
+  elseif choice=="TOGGLE SATURATION" then controls.efficiencySaturationEnabled=not controls.efficiencySaturationEnabled;customizeEfficiency("Saturation monitoring toggled")
+  elseif choice=="TOGGLE GATE DELIVERY" then controls.efficiencyDeliveryEnabled=not controls.efficiencyDeliveryEnabled;customizeEfficiency("Gate delivery monitoring toggled")
+  elseif choice=="TOGGLE AUTO INJECTOR" then controls.efficiencyInjectorEnabled=not controls.efficiencyInjectorEnabled;customizeEfficiency("Automatic injector tuning toggled")
+  elseif choice=="FIELD TARGET -" then controls.efficiencyFieldTarget=math.max(1,controls.efficiencyFieldTarget-5);customizeEfficiency("Field target reduced")
+  elseif choice=="FIELD TARGET +" then controls.efficiencyFieldTarget=math.min(99,controls.efficiencyFieldTarget+5);customizeEfficiency("Field target increased")
+  elseif choice=="TEMP LIMIT -" then controls.efficiencyTempLimit=math.max(1000,controls.efficiencyTempLimit-250);customizeEfficiency("Temperature limit reduced")
+  elseif choice=="TEMP LIMIT +" then controls.efficiencyTempLimit=controls.efficiencyTempLimit+250;customizeEfficiency("Temperature limit increased")
+  elseif choice=="SAT FLOOR -" then controls.efficiencySaturationFloor=math.max(0,controls.efficiencySaturationFloor-5);customizeEfficiency("Saturation floor reduced")
+  elseif choice=="SAT FLOOR +" then controls.efficiencySaturationFloor=math.min(99,controls.efficiencySaturationFloor+5);customizeEfficiency("Saturation floor increased")
+  elseif choice=="INJECTOR STEP -" then controls.efficiencyInjectorStep=math.max(1000,controls.efficiencyInjectorStep-25000);customizeEfficiency("Injector tuning step reduced")
+  elseif choice=="INJECTOR STEP +" then controls.efficiencyInjectorStep=controls.efficiencyInjectorStep+25000;customizeEfficiency("Injector tuning step increased")
+  elseif choice=="CYCLE EFFICIENCY INTERVAL" then controls.efficiencyInterval=cycleValue({10,30,60,120},controls.efficiencyInterval);customizeEfficiency("Evaluation interval changed")
+  elseif choice=="CYCLE EFFICIENCY INCREASE" then controls.efficiencyIncreasePercent=cycleValue({.5,1,2,5},controls.efficiencyIncreasePercent);customizeEfficiency("Output increase changed")
+  elseif choice=="CYCLE FAILURE RESPONSE" then controls.efficiencyFailureResponse=cycleValue({"HOLD","STEP BACK","ROLL BACK"},controls.efficiencyFailureResponse);customizeEfficiency("Failed-check response changed")
+  elseif choice=="CYCLE ROLLBACK PERCENT" then controls.efficiencyRollbackPercent=cycleValue({5,10,20,30},controls.efficiencyRollbackPercent);customizeEfficiency("Rollback percentage changed")
+  elseif choice=="CLEAR EFFICIENCY PAUSE" then resetManualEfficiencyRuntime(controls);controls.message="Manual efficiency pause cleared; rules must settle again"
   elseif choice=="USE LIVE GATES" then controls.manualField=positive(d.inputSet) or positive(d.inputFlow) or controls.injectorBaseline;controls.manualExport=positive(d.outputSet) or positive(d.outputFlow) or 0;controls.liveGatesSelected=true;controls.message="Copied live gate limits into manual controls"
   elseif choice=="FIELD -1k" then controls.manualField=math.max(0,(tonumber(controls.manualField) or positive(d.inputSet) or controls.injectorBaseline or 0)-MANUAL_GATE_FINE_STEP)
   elseif choice=="FIELD +1k" then controls.manualField=(tonumber(controls.manualField) or positive(d.inputSet) or controls.injectorBaseline or 0)+MANUAL_GATE_FINE_STEP
@@ -1396,7 +1550,9 @@ local function inputWorker()
       elseif c==4 then page=b<=10 and "network" or "accessibility";requestDraw()
       else
         local choice=hit(buttons,b,c)
-        if choice=="BACK" then page="overview";requestDraw() else enqueue(choice) end
+        if choice=="OPEN EFFICIENCY GUARDIAN" then page="efficiency";requestDraw()
+        elseif choice=="BACK" then page=page=="efficiency" and "gates" or "overview";requestDraw()
+        else enqueue(choice) end
       end
     elseif e=="peripheral" or e=="peripheral_detach" then
       if facilityNetwork then facilityNetwork.openAll() end
@@ -1490,7 +1646,8 @@ local function facilityWorker()
       fieldGate=tonumber(data and data.inputSet),exportGate=tonumber(data and data.outputSet),
       fieldInput=tonumber(data and data.inputFlow),exportFlow=tonumber(data and data.outputFlow),
       mode=controls.mode,request=controls.request,commissioned=controls.commissioned==true,
-      manualCurveAutomation=controls.manualCurveAutomation==true,
+      manualEfficiencyEnabled=controls.manualEfficiencyEnabled==true,
+      manualEfficiencyStatus=controls.efficiencyStatus,manualEfficiencyProfile=controls.efficiencyProfile,
       maintenanceMode=controls.refuelMaintenance==true,maintenanceType=controls.refuelMaintenance and "refuel" or nil,
       maintenancePhase=controls.refuelPhase,
       safetyVoteCount=tonumber(controls.safetyVoteCount) or 0,
@@ -1648,7 +1805,8 @@ local function profilerWorker()
       fieldInput=tonumber(data and data.inputFlow),fieldGate=tonumber(data and data.inputSet),
       exportFlow=tonumber(data and data.outputFlow),exportGate=tonumber(data and data.outputSet),
       mode=controls.mode,request=controls.request,commissioned=controls.commissioned==true,
-      manualCurveAutomation=controls.manualCurveAutomation==true,
+      manualEfficiencyEnabled=controls.manualEfficiencyEnabled==true,
+      manualEfficiencyStatus=controls.efficiencyStatus,manualEfficiencyProfile=controls.efficiencyProfile,
       ratedOutput=tonumber(controls.rated),guardianMessage=tostring(controls.message or ""),
       telemetryStale=controls.telemetryStale==true,alarmLevel=imminent and 3 or nil,
       alarmMessage=alarmMessage,
