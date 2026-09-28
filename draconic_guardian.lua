@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.39
+-- HELIOS Draconic Guardian v1.2.0-alpha.40
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -47,7 +47,7 @@ local SAFETY_LOW_FIELD, SAFETY_HIGH_TEMP = 35, 7750
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.39"
+local GUARDIAN_VERSION = "1.2.0-alpha.40"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -458,7 +458,7 @@ local function load()
     if fs.exists(path) then local ok,value=pcall(dofile,path);if ok and type(value)=="table" then s=value;break end end
   end
   if not s then return d end
-  d.mode=(s.mode=="ASSISTED" or s.mode=="UNRESTRICTED") and s.mode or "AUTO";d.request=(FRACTION[s.request] or s.request=="MANUAL" or s.request=="OVERDRIVE" or s.request=="IDLE") and s.request or "OFF";d.rated=tonumber(s.rated);d.lifecycleCeilings=type(s.lifecycleCeilings)=="table" and s.lifecycleCeilings or {};d.currentCycleCeilings=type(s.currentCycleCeilings)=="table" and s.currentCycleCeilings or {};d.injectorBaseline=positive(s.injectorBaseline);d.manualField=positive(s.manualField);d.manualExport=positive(s.manualExport) or 0;d.overdriveField=positive(s.overdriveField);d.overdriveExport=positive(s.overdriveExport);d.commissioned=s.commissioned==true;d.commissioning=s.commissioning==true;d.commissionFlow=positive(s.commissionFlow);d.commissionSamples=math.max(0,math.floor(tonumber(s.commissionSamples) or 0));d.commissionShortfallSamples=math.max(0,math.floor(tonumber(s.commissionShortfallSamples) or 0));d.commissionSettleSamples=math.max(0,math.floor(tonumber(s.commissionSettleSamples) or 0));d.commissionFieldInput=positive(s.commissionFieldInput);d.commissionFieldTuneSamples=math.max(0,math.floor(tonumber(s.commissionFieldTuneSamples) or 0));d.commissionLastSafe=positive(s.commissionLastSafe);d.recovery=s.recovery==true;d.lifecycleApplied=positive(s.lifecycleApplied);d.lifecycleFieldApplied=positive(s.lifecycleFieldApplied);d.lifecycleSamples=math.max(0,math.floor(tonumber(s.lifecycleSamples) or 0));d.lifecycleBandKey=s.lifecycleBandKey and tostring(s.lifecycleBandKey) or nil;d.lifecycleStartField=tonumber(s.lifecycleStartField);d.fieldTuneSamples=math.max(0,math.floor(tonumber(s.fieldTuneSamples) or 0));d.lastFuelConversion=tonumber(s.lastFuelConversion);d.overdriveApplied=tonumber(s.overdriveApplied);d.refuelMaintenance=s.refuelMaintenance==true;d.refuelPhase=d.refuelMaintenance and tostring(s.refuelPhase or "shutdown") or nil;d.message=tostring(s.message or d.message);return d
+  d.mode=(s.mode=="ASSISTED" or s.mode=="UNRESTRICTED") and s.mode or "AUTO";d.request=(FRACTION[s.request] or s.request=="MANUAL" or s.request=="OVERDRIVE" or s.request=="IDLE") and s.request or "OFF";d.rated=tonumber(s.rated);d.lifecycleCeilings=type(s.lifecycleCeilings)=="table" and s.lifecycleCeilings or {};d.currentCycleCeilings=type(s.currentCycleCeilings)=="table" and s.currentCycleCeilings or {};d.injectorBaseline=positive(s.injectorBaseline);d.manualField=positive(s.manualField);d.manualExport=positive(s.manualExport) or 0;d.overdriveField=positive(s.overdriveField);d.overdriveExport=positive(s.overdriveExport);d.commissioned=s.commissioned==true;d.commissioning=s.commissioning==true;d.commissionFlow=positive(s.commissionFlow);d.commissionSamples=math.max(0,math.floor(tonumber(s.commissionSamples) or 0));d.commissionShortfallSamples=math.max(0,math.floor(tonumber(s.commissionShortfallSamples) or 0));d.commissionSettleSamples=math.max(0,math.floor(tonumber(s.commissionSettleSamples) or 0));d.commissionFieldInput=positive(s.commissionFieldInput);d.commissionFieldTuneSamples=math.max(0,math.floor(tonumber(s.commissionFieldTuneSamples) or 0));d.commissionLastSafe=positive(s.commissionLastSafe);d.recovery=s.recovery==true;d.lifecycleApplied=positive(s.lifecycleApplied);d.lifecycleFieldApplied=positive(s.lifecycleFieldApplied);d.lifecycleSamples=math.max(0,math.floor(tonumber(s.lifecycleSamples) or 0));d.lifecycleBandKey=s.lifecycleBandKey and tostring(s.lifecycleBandKey) or nil;d.lifecycleStartField=tonumber(s.lifecycleStartField);d.fieldTuneSamples=math.max(0,math.floor(tonumber(s.fieldTuneSamples) or 0));d.lastFuelConversion=tonumber(s.lastFuelConversion);d.overdriveApplied=tonumber(s.overdriveApplied);d.refuelMaintenance=s.refuelMaintenance==true;d.refuelPhase=d.refuelMaintenance and tostring(s.refuelPhase or "shutdown") or nil;d.safetyLockout=s.safetyLockout==true;d.lastSafetyTrip=s.lastSafetyTrip and tostring(s.lastSafetyTrip) or nil;d.message=tostring(s.message or d.message);return d
 end
 local function save(c)
   local parent=fs.getDir(SETTINGS);if parent~="" and not fs.exists(parent) then fs.makeDir(parent) end
@@ -658,6 +658,7 @@ local function resetAfterRefuel(c)
   c.commissionSamples=0;c.commissionShortfallSamples=0;c.commissionSettleSamples=0
   c.commissionFieldInput=nil;c.commissionFieldTuneSamples=0;c.commissionLastSafe=nil
   c.recovery=false;c.safetyRecovery=nil;c.fieldRecovery=false;c.initialRequested=false;c.startActivated=false
+  c.safetyLockout=false;c.lastSafetyTrip=nil
   c.injectorBaseline=SAFE_INJECTOR_BASELINE;c.lifecycleCeilings={};c.currentCycleCeilings={}
   c.lifecycleApplied=nil;c.lifecycleFieldApplied=nil;c.lifecycleSamples=0;c.lifecycleBandKey=nil
   c.lifecycleStartField=nil;c.fieldTuneSamples=0;c.lastFuelConversion=nil;c.overdriveApplied=nil
@@ -732,8 +733,8 @@ local function supervise(b,d,c)
   if not free then
     local imminent,warning=imminentMeltdown(r)
     if imminent then return stop(warning,false,true) end
-    if c.mode=="AUTO" and live then
-      local votes,voteCount=updateAutomaticSafetyVotes(d,nil,c.commissioning==true)
+    if c.mode=="AUTO" and live and not c.commissioning then
+      local votes,voteCount=updateAutomaticSafetyVotes(d)
       c.safetyVotes=votes;c.safetyVoteCount=voteCount
       if voteCount>=SAFETY_VOTES_REQUIRED then
         local reason="automatic safety vote "..voteCount.."/"..SAFETY_VOTES_REQUIRED..": "..table.concat(votes,", ")
@@ -751,11 +752,12 @@ local function supervise(b,d,c)
         -- Requiring a new operator request prevents an unattended restart
         -- immediately after the recovery loop declares the core cool.
         c.commissioning=false;c.initialRequested=false;c.startActivated=false;c.request="OFF"
-        c.lastSafetyTrip=reason
+        c.safetyLockout=true;c.lastSafetyTrip=reason
         return stop(reason,false,true)
       end
       c.safetyVoteLatched=false
     else
+      if c.commissioning then automaticSafetyTrend={} end
       c.safetyVotes={};c.safetyVoteCount=0;c.safetyVoteLatched=false
     end
     -- Heat alone is not a reason to cycle a contained Draconic reactor. Close
@@ -804,6 +806,12 @@ local function supervise(b,d,c)
     else
       c.message="Thermal recovery: holding shutdown until core is below 5000 C"
     end
+    return
+  end
+  if c.safetyLockout then
+    closeOutput();gate(b.input,shutdownInput());reactor(b.reactor,"stopReactor")
+    c.request="OFF";c.initialRequested=false;c.startActivated=false;c.commissioning=false
+    c.message="SAFETY SHUTDOWN LATCHED: "..tostring(c.lastSafetyTrip or "automatic safety trip").."; operator restart required"
     return
   end
   if status=="charging" then gate(b.input,injectorCap);c.message="Charging containment";return end
@@ -1187,7 +1195,7 @@ local function cycleValue(values,current)
 end
 local function beginCalibration()
   controls.commissioning=true;controls.commissionFlow=COMMISSION_START_FLOW;controls.commissionSamples=0;controls.commissionShortfallSamples=0;controls.commissionSettleSamples=0;controls.commissionFieldInput=positive(controls.injectorBaseline);controls.commissionFieldTuneSamples=0;controls.commissionLastSafe=nil;controls.recovery=false;controls.commissioned=false;controls.rated=nil;controls.lifecycleCeilings={};controls.currentCycleCeilings={};controls.lifecycleApplied=nil;controls.lifecycleFieldApplied=nil;controls.lifecycleSamples=0;controls.lifecycleBandKey=nil;controls.lastFuelConversion=nil;controls.request="OFF"
-  controls.safetyRecovery=nil;controls.lastSafetyTrip=nil
+  controls.safetyRecovery=nil;controls.safetyLockout=false;controls.lastSafetyTrip=nil
   controls.initialRequested=true;controls.startActivated=false;controls.message="Automatic calibration requested by operator"
 end
 local function act(choice,d)
@@ -1202,7 +1210,7 @@ local function act(choice,d)
     else controls.message=string.format("REFUEL NOT VERIFIED: reactor must be cold with more than %d%% fuel (now %.1f%%)",REFUEL_VERIFY_FUEL,fuel) end
   elseif controls.refuelMaintenance then controls.message="REFUEL MAINTENANCE LOCK: complete physical refueling before other commands"
   elseif (choice=="AUTO COMMISSION" or choice=="RECALIBRATE CEILING") and controls.gatesOwned then beginCalibration()
-  elseif choice=="INITIALIZE & ACTIVATE" and controls.gatesOwned then controls.safetyRecovery=nil;controls.lastSafetyTrip=nil;controls.initialRequested=true;controls.startActivated=false;controls.message="Initial start requested by operator"
+  elseif choice=="INITIALIZE & ACTIVATE" and controls.gatesOwned then controls.safetyRecovery=nil;controls.safetyLockout=false;controls.lastSafetyTrip=nil;controls.initialRequested=true;controls.startActivated=false;controls.message="Initial start requested by operator"
   elseif choice=="SAFE SHUTDOWN" then controls.request="OFF";controls.initialRequested=false;controls.startActivated=false;controls.message="Operator safe shutdown requested"
   elseif choice=="LANGUAGE" and type(guardianConfig)=="table" then
     local available={};local ok,module=pcall(dofile,"/helios/core/i18n.lua")
