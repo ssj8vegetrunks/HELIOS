@@ -664,7 +664,7 @@ function mainframe.run(config)
         -- steam-source summary, so their hot-fluid buffer is not represented
         -- by steamSource.bufferPercent. Read the explicit baseline-wait state
         -- to ensure one turbine remains available as a temporary drain.
-        local calibrationDrainBuffer=reactorGovernor.calibrationDrainBuffer(reactors)
+        local calibrationDrainBuffer=reactorGovernor.commissioningBuffer(reactors)
         turbineGovernor.evaluateAll(governorMemory, turbines, config.control, {
             maintenance = maintenance or manualAuthority or authorityPaused,
             mainframeId = os.getComputerID(),
@@ -673,7 +673,7 @@ function mainframe.run(config)
             calibrationBlocked = reactorGovernorMemory.commissioningActive == true,
             calibrationBlockReason = reactorGovernorMemory.commissioningActive == true and
                 "Waiting for sequential reactor commissioning" or nil,
-            calibrationDrainNeeded = calibrationDrainBuffer ~= nil,
+            calibrationDrainNeeded = reactorGovernorMemory.commissioningActive == true,
             calibrationDrainBufferPercent = calibrationDrainBuffer,
             steamSourceManaged = steamSource.managed,
             steamSourceReady = steamSource.ready,

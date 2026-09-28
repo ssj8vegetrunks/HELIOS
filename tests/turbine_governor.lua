@@ -592,13 +592,26 @@ do
         calibrationDrainBufferPercent = 100,
         calibrationBlockReason = "Waiting for sequential reactor commissioning",
     })
-    equal(first.governor.state, "BUFFER DRAIN", "one turbine drains a full reactor buffer")
+    equal(first.governor.state, "CALIBRATION STEAM SINK", "one turbine consumes steam throughout reactor calibration")
     equal(first.governor.recommendedActive, true, "buffer drain turbine remains active")
-    equal(first.governor.recommendedFlow, 500, "buffer drain uses a bounded steam intake")
+    equal(first.governor.recommendedFlow, 2000, "calibration sink uses the turbine's full bounded intake")
     equal(first.governor.recommendedInductor, true, "buffer drain turbine remains loaded")
     equal(second.governor.state, "QUEUED / ISOLATED", "all other turbines remain isolated")
+    for sample=2,10 do
+        governor.evaluateAll(memory, { first, second }, control, {
+            now = sample,
+            calibrationBlocked = true,
+            calibrationDrainNeeded = true,
+            calibrationDrainBufferPercent = 100,
+            calibrationBlockReason = "Waiting for sequential reactor commissioning",
+        })
+    end
+    equal(second.governor.state, "CALIBRATION STEAM SINK",
+        "a sink with no measured flow rotates to another turbine")
+    equal(first.governor.state, "QUEUED / ISOLATED",
+        "the unsuccessful sink is isolated after rotation")
 
-    governor.evaluateAll(memory, { first, second }, control, { now = 2 })
+    governor.evaluateAll(memory, { first, second }, control, { now = 11 })
     assert(first.governor.state ~= "QUEUED / ISOLATED", "first turbine begins sequential calibration")
     equal(second.governor.state, "QUEUED / ISOLATED", "second turbine waits isolated for first turbine")
     local writes = {}

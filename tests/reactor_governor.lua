@@ -435,7 +435,7 @@ do
     equal(source.managed, true, "steam source detected beside power reactor")
     equal(source.ready, true, "power reactor does not block ready steam source")
     equal(source.bufferPercent, 40, "steam source exposes its hot-fluid buffer")
-    local drainBuffer = governor.calibrationDrainBuffer({
+    local drainBuffer = governor.commissioningBuffer({
         {
             hotFluidPercent = 100,
             governor = {
@@ -447,10 +447,10 @@ do
     })
     equal(drainBuffer, 100,
         "baseline buffer wait explicitly requests a turbine drain path")
-    equal(governor.calibrationDrainBuffer({ {
+    equal(governor.commissioningBuffer({ {
         hotFluidPercent = 100,
         governor = { recalibrating=true, state="AVERAGING", reason="Collecting sample" },
-    } }), nil, "other calibration phases do not request a turbine drain")
+    } }), 100, "the steam sink remains assigned throughout commissioning")
 end
 
 do

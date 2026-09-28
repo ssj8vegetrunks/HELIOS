@@ -372,12 +372,11 @@ function governor.steamSourceStatus(reactors, demand, control)
     }
 end
 
-function governor.calibrationDrainBuffer(reactors)
+function governor.commissioningBuffer(reactors)
     local highest
     for _, reactor in ipairs(reactors or {}) do
         local plan=reactor.governor or {}
-        if plan.recalibrating==true and plan.state=="COOLING" and
-           string.find(tostring(plan.reason or ""),"Hot-fluid buffer",1,true)==1 then
+        if plan.recalibrating==true then
             local buffer=tonumber(reactor.hotFluidPercent)
             if buffer then highest=highest and math.max(highest,buffer) or buffer end
         end

@@ -158,17 +158,18 @@ function governor.evaluate(memory, turbine, control, context)
         local currentFlow = tonumber(turbine.flowRateMax) or 0
         local capacity = math.max(1, tonumber(turbine.flowRateLimit) or 2000)
         local drainFlow = math.min(capacity,
-            math.max(1, tonumber(control.reactorCalibrationDrainFlow) or 500))
-        local action = "DRAIN STEAM BUFFER"
+            math.max(1, tonumber(control.reactorCalibrationDrainFlow) or 2000))
+        local action = "HOLD CALIBRATION STEAM SINK"
         previous.actionSamples = previous.action == action and
             ((previous.actionSamples or 0) + 1) or 1
         previous.action = action
         result = {
             mode = "automatic",
-            state = "BUFFER DRAIN",
+            state = "CALIBRATION STEAM SINK",
             action = action,
-            reason = ("Draining reactor hot-fluid buffer at %.1f%% before baseline calibration"):
-                format(tonumber(context.calibrationDrainBufferPercent) or 0),
+            reason = ("Consuming up to %.0f mB/t for reactor calibration; source buffer %.1f%%"):
+                format(drainFlow,
+                    tonumber(context.calibrationDrainBufferPercent) or 0),
             trusted = true,
             currentActive = turbine.active,
             recommendedActive = true,
@@ -977,10 +978,27 @@ function governor.evaluateAll(memory, turbines, control, context)
     local calibrationDrainName
     if context and context.calibrationBlocked == true and
        context.calibrationDrainNeeded == true then
+        local candidates={}
         for _, turbine in ipairs(turbines or {}) do
-            if not turbine.error then calibrationDrainName=tostring(turbine.name);break end
+            if not turbine.error then candidates[#candidates+1]=turbine end
         end
-    end
+        local selectedIndex=1
+        for index,turbine in ipairs(candidates) do
+            if tostring(turbine.name)==tostring(memory.calibrationDrainName) then selectedIndex=index;break end
+        end
+        local selected=candidates[selectedIndex]
+        if selected and selected.active==true and
+           (tonumber(context.calibrationDrainBufferPercent) or 0)>15 and
+           (tonumber(selected.flowRate) or 0)<=1 then
+            memory.calibrationDrainNoFlow=(memory.calibrationDrainNoFlow or 0)+1
+        else memory.calibrationDrainNoFlow=0 end
+        if #candidates>1 and (memory.calibrationDrainNoFlow or 0)>=10 then
+            selectedIndex=selectedIndex%#candidates+1;selected=candidates[selectedIndex]
+            memory.calibrationDrainNoFlow=0
+        end
+        calibrationDrainName=selected and tostring(selected.name) or nil
+        memory.calibrationDrainName=calibrationDrainName
+    else memory.calibrationDrainName=nil;memory.calibrationDrainNoFlow=0 end
     if not (context and context.calibrationBlocked == true) then
         for _, turbine in ipairs(turbines or {}) do
             local name = tostring(turbine.name)
