@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.40
+-- HELIOS Draconic Guardian v1.2.0-alpha.41
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -47,7 +47,7 @@ local SAFETY_LOW_FIELD, SAFETY_HIGH_TEMP = 35, 7750
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.40"
+local GUARDIAN_VERSION = "1.2.0-alpha.41"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -1002,7 +1002,29 @@ local function draw(t,b,d,page,c,bs)
   local banner=c.mode=="UNRESTRICTED" and tr("guardian.unrestricted",nil,"UNRESTRICTED CONTROL - AUTOMATIC INTERVENTION DISABLED") or c.mode=="ASSISTED" and tr("guardian.assisted",nil,"ASSISTED MANUAL - HARD SAFETY INTERLOCKS ACTIVE") or tr("guardian.automatic",nil,"AUTOMATIC SAFE SUPERVISION")
   if accessibility then banner=accessibility.decorate(banner,c.mode=="UNRESTRICTED" and "critical" or c.mode=="ASSISTED" and "warning" or "healthy",guardianConfig) end
   text(t,1,2,banner,c.mode=="UNRESTRICTED" and colors.red or colors.lime);text(t,1,3,"["..tr("nav.overview",nil,"OVERVIEW").."] ["..tr("nav.raw_data",nil,"RAW DATA").."] ["..tr("nav.setup",nil,"SETUP").."] ["..tr("nav.manual_gates",nil,"MANUAL GATES").."]",colors.cyan)
-  text(t,1,4,"["..tr("accessibility.title",nil,"ACCESSIBILITY & LANGUAGE").."]",colors.cyan)
+  text(t,1,4,"[NETWORK] ["..tr("accessibility.title",nil,"ACCESSIBILITY & LANGUAGE").."]",colors.cyan)
+  if page=="network" then
+    local wired,wireless,opened={},{},0
+    for _,name in ipairs(peripheral.getNames()) do
+      if hasType(name,"modem") then
+        local candidate=peripheral.wrap(name);local ok,isWireless=pcall(function() return candidate.isWireless() end)
+        if ok and isWireless then wireless[#wireless+1]=name else wired[#wired+1]=name end
+        if rednet.isOpen(name) then opened=opened+1 end
+      end
+    end
+    text(t,1,6,"HELIOS NETWORK",colors.yellow)
+    text(t,1,8,"Status: "..(facilityConnected and "CONNECTED" or (facilityNetwork and "WAITING FOR MAINFRAME" or "NETWORK COMPONENTS MISSING")),facilityConnected and colors.lime or colors.orange)
+    text(t,1,9,"Site: "..tostring(facilitySiteId),colors.white)
+    text(t,1,10,"Network: "..tostring(facilityNetwork and facilityNetwork.networkId() or "UNAVAILABLE"),colors.white)
+    text(t,1,11,"Protection: "..(facilityNetwork and facilityNetwork.securityEnabled() and "ENABLED" or "OPEN"),facilityNetwork and facilityNetwork.securityEnabled() and colors.lime or colors.orange)
+    text(t,1,13,"Wireless modems: "..(#wireless>0 and table.concat(wireless,", ") or "NONE"),#wireless>0 and colors.lime or colors.red)
+    text(t,1,14,"Wired modems: "..(#wired>0 and table.concat(wired,", ") or "NONE"),colors.lightGray)
+    text(t,1,15,"Open modem paths: "..opened.." / "..(#wired+#wireless),colors.lightGray)
+    bs[#bs+1]=button(t,1,18,"REFRESH NETWORK",colors.cyan,nil,"REFRESH NETWORK")
+    text(t,1,21,"Attach a wireless modem to join the Mainframe network.",colors.lightGray)
+    text(t,1,22,"Network protection keys remain shared installation settings.",colors.lightGray)
+    return
+  end
   if page=="accessibility" then
     local uiConfig=type(guardianConfig)=="table" and guardianConfig.ui or {}
     text(t,1,6,tr("accessibility.title",nil,"ACCESSIBILITY & LANGUAGE"),colors.yellow)
@@ -1202,7 +1224,13 @@ local function act(choice,d)
   if type(choice)=="string" and (string.find(choice,"FIELD",1,true)==1 or string.find(choice,"EXPORT",1,true)==1) then
     controls.liveGatesSelected=false
   end
-  if choice=="BEGIN REFUEL MAINTENANCE" and controls.gatesOwned then beginRefuelMaintenance(controls,false);save(controls)
+  if choice=="REFRESH NETWORK" then
+    local opened=facilityNetwork and facilityNetwork.openAll() or 0
+    facilityConnected=false;facilityLastWelcome=nil
+    facilityCollectorId,facilityCollectorRole,facilityCollectorPriority=nil,nil,-1
+    facilityCollectorLeaseUntil=0
+    controls.message="Network refreshed: "..tostring(opened).." modem path(s) open; waiting for Mainframe"
+  elseif choice=="BEGIN REFUEL MAINTENANCE" and controls.gatesOwned then beginRefuelMaintenance(controls,false);save(controls)
   elseif choice=="REFUELING COMPLETE" and controls.refuelMaintenance and controls.refuelPhase=="awaiting_refuel" then
     local r=d and d.reactor or {};local status=string.lower(tostring(r.status or "unknown"))
     local fuel=pct((tonumber(r.maxFuelConversion) or 0)-(tonumber(r.fuelConversion) or 0),r.maxFuelConversion) or 0
@@ -1311,12 +1339,13 @@ local function inputWorker()
       requestDraw()
     elseif e=="monitor_touch" and binding.monitor and a==binding.monitor then
       if c==3 then page=b<=10 and "overview" or b<=21 and "raw" or b<=29 and "setup" or "gates";requestDraw()
-      elseif c==4 and b<=15 then page="accessibility";requestDraw()
+      elseif c==4 then page=b<=10 and "network" or "accessibility";requestDraw()
       else
         local choice=hit(buttons,b,c)
         if choice=="BACK" then page="overview";requestDraw() else enqueue(choice) end
       end
     elseif e=="peripheral" or e=="peripheral_detach" then
+      if facilityNetwork then facilityNetwork.openAll() end
       binding=inspect()
       target=binding.monitor and peripheral.wrap(binding.monitor) or computer
       compactMonitor(target,binding.monitor~=nil)
