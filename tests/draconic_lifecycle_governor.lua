@@ -176,5 +176,17 @@ votes, voteCount = governor.updateAutomaticSafetyVotes({
     }, inputFlow=1000000, inputSet=1900000, outputFlow=2000000, outputSet=2800000,
 }, safetyTrend)
 assert(voteCount==0, "a single anomalous sample must not cast persisted danger votes")
+safetyTrend = {}
+for sample = 1, 8 do
+    votes, voteCount = governor.updateAutomaticSafetyVotes({
+        reactor = {
+            status="running", fieldStrength=70, maxFieldStrength=100,
+            energySaturation=70, maxEnergySaturation=100,
+            temperature=4000, generationRate=6000000, fieldDrainRate=500000,
+        }, inputFlow=1900000, inputSet=1900000, outputFlow=5680000, outputSet=0,
+    }, safetyTrend)
+end
+assert(table.concat(votes, ","):find("export gate failed closed",1,true),
+    "continued export after a zero command must become an explicit safety vote")
 
 print("draconic lifecycle governor tests passed")

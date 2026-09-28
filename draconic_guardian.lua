@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.37
+-- HELIOS Draconic Guardian v1.2.0-alpha.38
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -47,7 +47,7 @@ local SAFETY_LOW_FIELD, SAFETY_HIGH_TEMP = 35, 7750
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.37"
+local GUARDIAN_VERSION = "1.2.0-alpha.38"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -346,7 +346,7 @@ local function updateAutomaticSafetyVotes(d,trend)
     return trend[name]
   end
   if not live then
-    for _,name in ipairs({"fieldFalling","saturationFalling","injectorShortfall","containmentDeficit","generationDeficit","exportShortfall"}) do trend[name]=0 end
+    for _,name in ipairs({"fieldFalling","saturationFalling","injectorShortfall","containmentDeficit","generationDeficit","exportMismatch"}) do trend[name]=0 end
     trend.field=field;trend.saturation=saturation
     return {},0,trend
   end
@@ -355,7 +355,8 @@ local function updateAutomaticSafetyVotes(d,trend)
   count("injectorShortfall",inputCommand>0 and input<inputCommand*.90)
   count("containmentDeficit",drain>0 and input<drain*1.05)
   count("generationDeficit",output>50000 and generation<output*.90)
-  count("exportShortfall",outputCommand>50000 and output<outputCommand*.90)
+  local exportTolerance=math.max(50000,outputCommand*.10)
+  count("exportMismatch",math.abs(output-outputCommand)>exportTolerance)
   trend.field=field;trend.saturation=saturation
   local votes={}
   local function vote(active,label) if active then votes[#votes+1]=label end end
@@ -365,7 +366,8 @@ local function updateAutomaticSafetyVotes(d,trend)
   vote((trend.injectorShortfall or 0)>=SAFETY_DEFICIT_SAMPLES,"injector shortfall")
   vote((trend.containmentDeficit or 0)>=SAFETY_DEFICIT_SAMPLES,"field power deficit")
   vote((trend.generationDeficit or 0)>=SAFETY_DEFICIT_SAMPLES,"generation below export")
-  vote((trend.exportShortfall or 0)>=SAFETY_DEFICIT_SAMPLES,"export path restricted")
+  vote((trend.exportMismatch or 0)>=SAFETY_DEFICIT_SAMPLES,
+    outputCommand<=50000 and "export gate failed closed" or "export flow not tracking command")
   vote(temperature and temperature>SAFETY_HIGH_TEMP,"high temperature")
   return votes,#votes,trend
 end
@@ -669,6 +671,12 @@ local function supervise(b,d,c)
   local containmentRequired=requiresContainment(status)
   local fuel=pct((tonumber(r.maxFuelConversion) or 0)-(tonumber(r.fuelConversion) or 0),r.maxFuelConversion) or 0;local temp=tonumber(r.temperature) or math.huge;local free=c.mode=="UNRESTRICTED"
   local injectorCap=positive(c.injectorBaseline) or 0
+  local function closeOutput()
+    -- A zero override setpoint is not proof that energy flow stopped. During
+    -- the observed failure the gate reported command=0 while passing 5.68M
+    -- RF/t. Reassert the override on every sample until measured flow closes.
+    return gate(b.output,0,(tonumber(d.outputFlow) or 0)>50000)
+  end
   local function shutdownInput()
     if not containmentRequired then return 0 end
     if field<SHUTDOWN_FIELD_EMERGENCY or (tonumber(meltdownTrend.fallingField) or 0)>=2 then return injectorCap end
@@ -678,7 +686,7 @@ local function supervise(b,d,c)
     return math.min(injectorCap,math.max(MINIMUM_FIELD_INPUT,math.ceil(drain*margin)))
   end
   local function stop(reason,charge,thermalRecovery)
-    gate(b.output,0);reactor(b.reactor,"stopReactor")
+    closeOutput();reactor(b.reactor,"stopReactor")
     if charge then reactor(b.reactor,"chargeReactor") end
     local input=charge and injectorCap or shutdownInput();gate(b.input,input)
     if thermalRecovery then c.safetyRecovery=reason end
@@ -746,7 +754,7 @@ local function supervise(b,d,c)
     -- demand after the core falls back into the normal lifecycle envelope.
     if thermalHoldRequired(c,temp) then
       local recoveryInput=math.max(injectorCap,positive(c.lifecycleFieldApplied) or 0)
-      gate(b.output,0);gate(b.input,recoveryInput)
+      closeOutput();gate(b.input,recoveryInput)
       c.lifecycleApplied=tonumber(c.rated) or c.lifecycleApplied
       c.lifecycleSamples=0;c.lifecycleLastSampleAt=nil;c.lifecycleStartField=nil
       c.remoteApplied=0;c.remotePrimed=false
@@ -757,7 +765,7 @@ local function supervise(b,d,c)
       c.fieldRecovery=true
       local recoveryInput=emergencyFieldTarget(c,r,injectorCap)
       c.lifecycleFieldApplied=recoveryInput
-      gate(b.output,0);gate(b.input,recoveryInput)
+      closeOutput();gate(b.input,recoveryInput)
       if field>=FIELD_TARGET then
         c.fieldRecovery=false
         c.message="Containment recovery complete; resuming accepted demand"
@@ -778,7 +786,7 @@ local function supervise(b,d,c)
     if imminent then c.message="UNRESTRICTED WARNING: "..warning end
   end
   if c.safetyRecovery then
-    gate(b.output,0);gate(b.input,shutdownInput());reactor(b.reactor,"stopReactor")
+    closeOutput();gate(b.input,shutdownInput());reactor(b.reactor,"stopReactor")
     if temp<=5000 and not live then
       c.safetyRecovery=nil;c.initialRequested=false;c.startActivated=false
       c.remoteApplied=0;c.remotePrimed=false
