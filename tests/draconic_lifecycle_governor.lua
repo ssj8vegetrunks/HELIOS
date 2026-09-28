@@ -18,6 +18,10 @@ assert(governor.chargeableStatus("cold") and governor.chargeableStatus("offline"
     "both Draconic stopped-state names must enter the charging sequence")
 assert(not governor.chargeableStatus("cooling"),
     "a cooling reactor must finish stopping before it is charged")
+assert(governor.requiresContainment("beyond_hope") and governor.requiresContainment("explosion_imminent"),
+    "terminal reactor states must retain maximum injector support")
+assert(not governor.requiresContainment("cold"),
+    "a fully cold reactor no longer requires containment input")
 assert(not governor.lifecycleUnsafe(89, 7700),
     "strong containment may use the proven 7,500-7,750 C lifecycle leeway")
 assert(governor.lifecycleUnsafe(39, 7700),

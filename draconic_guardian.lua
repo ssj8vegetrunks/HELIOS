@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.36
+-- HELIOS Draconic Guardian v1.2.0-alpha.37
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -47,7 +47,7 @@ local SAFETY_LOW_FIELD, SAFETY_HIGH_TEMP = 35, 7750
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.36"
+local GUARDIAN_VERSION = "1.2.0-alpha.37"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -318,6 +318,13 @@ local function updateMeltdownTrend(r,trend)
     (tonumber(trend.fallingField) or 0)+1 or 0
   trend.temperature=temperature;trend.field=field
   return trend
+end
+local function requiresContainment(status)
+  status=string.lower(tostring(status or "unknown"))
+  local normalized=status:gsub("[^%w]","")
+  return status=="online" or status=="running" or status=="stopping" or status=="cooling" or
+    normalized=="beyondhope" or normalized=="exploding" or normalized=="meltdown" or
+    normalized=="explosionimminent"
 end
 local automaticSafetyTrend={}
 local function updateAutomaticSafetyVotes(d,trend)
@@ -659,7 +666,7 @@ local function supervise(b,d,c)
   local r=d.reactor;local status=string.lower(tostring(r.status or "unknown"));local field=pct(r.fieldStrength,r.maxFieldStrength) or 0
   updateMeltdownTrend(r)
   local live=status=="online" or status=="running"
-  local containmentRequired=live or status=="stopping" or status=="cooling"
+  local containmentRequired=requiresContainment(status)
   local fuel=pct((tonumber(r.maxFuelConversion) or 0)-(tonumber(r.fuelConversion) or 0),r.maxFuelConversion) or 0;local temp=tonumber(r.temperature) or math.huge;local free=c.mode=="UNRESTRICTED"
   local injectorCap=positive(c.injectorBaseline) or 0
   local function shutdownInput()
@@ -683,6 +690,10 @@ local function supervise(b,d,c)
     reactor(b.reactor,"stopReactor")
     return
   end
+  -- acquireGates may adopt or seed a replacement injector during this very
+  -- control pass. Refresh the local value before any safety action; retaining
+  -- the pre-acquisition zero would turn a shutdown into loss of containment.
+  injectorCap=positive(c.injectorBaseline) or injectorCap
   if not c.refuelMaintenance and fuel<=MINIMUM_FUEL then beginRefuelMaintenance(c,true);save(c) end
   if c.refuelMaintenance then
     gate(b.output,0);c.request="OFF";c.initialRequested=false;c.startActivated=false
@@ -1127,7 +1138,7 @@ if rawget(_G,"HELIOS_GUARDIAN_TEST") then
   return {lifecycleTarget=lifecycleTarget,lifecycleFieldTarget=lifecycleFieldTarget,lifecycleCeiling=lifecycleCeiling,
     lifecycleUnsafe=lifecycleUnsafe,thermalHoldRequired=thermalHoldRequired,emergencyFieldTarget=emergencyFieldTarget,
     beginRefuelMaintenance=beginRefuelMaintenance,resetAfterRefuel=resetAfterRefuel,
-    chargeableStatus=chargeableStatus,mailboxHasRemoteDemand=mailboxHasRemoteDemand,
+    chargeableStatus=chargeableStatus,requiresContainment=requiresContainment,mailboxHasRemoteDemand=mailboxHasRemoteDemand,
     updateMeltdownTrend=updateMeltdownTrend,imminentMeltdown=imminentMeltdown,
     updateAutomaticSafetyVotes=updateAutomaticSafetyVotes,
     gate=gate,read=read,adoptInjectorBaseline=adoptInjectorBaseline}
