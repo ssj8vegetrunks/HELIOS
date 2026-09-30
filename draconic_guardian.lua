@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.44
+-- HELIOS Draconic Guardian v1.2.0-alpha.45
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -47,7 +47,7 @@ local SAFETY_LOW_FIELD, SAFETY_HIGH_TEMP = 35, 7750
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.44"
+local GUARDIAN_VERSION = "1.2.0-alpha.45"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -687,28 +687,36 @@ local function resetAfterRefuel(c)
   c.message="REFUEL VERIFIED: learned reactor profile cleared; fresh calibration required"
 end
 
-local function resetManualEfficiencyRuntime(c)
+local function resetManualEfficiencyRuntime(c,preserveTargets)
+  local output=preserveTargets and c.efficiencyOutputCommand or nil
+  local field=preserveTargets and c.efficiencyFieldCommand or nil
   c.efficiencyOutputCommand=nil;c.efficiencyFieldCommand=nil;c.efficiencyStableSince=nil
   c.efficiencyPendingExport=nil;c.efficiencyPendingSince=nil;c.efficiencyPendingBaseFlow=nil
   c.efficiencyPendingBaseGeneration=nil;c.efficiencyLastStep=nil;c.efficiencyLastRollback=nil
   c.efficiencyLastInjectorTune=nil;c.efficiencyPriorField=nil;c.efficiencyPaused=false;c.efficiencyStatus="IDLE"
+  c.efficiencyOutputCommand=output;c.efficiencyFieldCommand=field
 end
 local function setManualEfficiency(c,d,enabled)
   normalizeManualEfficiency(c)
-  resetManualEfficiencyRuntime(c)
   if enabled then
     if c.mode~="UNRESTRICTED" then return false,"Unrestricted control is required" end
+    resetManualEfficiencyRuntime(c)
     c.manualEfficiencyEnabled=true
-    c.efficiencyOutputCommand=positive(d and d.outputSet) or positive(d and d.outputFlow) or positive(c.manualExport) or 0
-    c.efficiencyFieldCommand=positive(d and d.inputSet) or positive(d and d.inputFlow) or positive(c.manualField) or positive(c.injectorBaseline)
+    -- The Flux Gate API may expose its redstone-low fallback (normally the
+    -- old 1.9M containment baseline) when getFlowOverride is unavailable.
+    -- Guardian's accepted manual pair is therefore the authoritative handoff;
+    -- telemetry is only a fallback when no manual command exists.
+    c.efficiencyOutputCommand=positive(c.manualExport) or positive(d and d.outputSet) or positive(d and d.outputFlow) or 0
+    c.efficiencyFieldCommand=positive(c.manualField) or positive(d and d.inputFlow) or positive(d and d.inputSet) or positive(c.injectorBaseline)
     local now=lifecycleNow(d and d.reactor or {});c.efficiencyLastRollback=now;c.efficiencyLastInjectorTune=now
     c.manualExport=c.efficiencyOutputCommand;c.manualField=c.efficiencyFieldCommand;c.request="MANUAL"
     c.message="Manual efficiency Guardian ON: evaluating operator rules"
     return true,c.message
   end
   c.manualEfficiencyEnabled=false
-  c.manualField=positive(d and d.inputSet) or positive(d and d.inputFlow) or c.manualField or c.injectorBaseline
-  c.manualExport=positive(d and d.outputSet) or positive(d and d.outputFlow) or 0
+  local field=positive(c.efficiencyFieldCommand) or positive(c.manualField) or positive(d and d.inputFlow) or positive(d and d.inputSet) or c.injectorBaseline
+  local output=positive(c.efficiencyOutputCommand) or positive(c.manualExport) or positive(d and d.outputSet) or positive(d and d.outputFlow) or 0
+  resetManualEfficiencyRuntime(c);c.manualField=field;c.manualExport=output
   c.request="MANUAL";c.overdriveApplied=0;c.liveGatesSelected=true
   c.message="Manual efficiency Guardian OFF: live gates frozen for manual control"
   return true,c.message
@@ -721,8 +729,8 @@ local function manualEfficiencyTargets(c,d)
   local saturation=pct(r.energySaturation,r.maxEnergySaturation) or 0
   local flow=tonumber(d.outputFlow) or 0;local generation=tonumber(r.generationRate) or 0
   local outputSet=tonumber(d.outputSet) or 0
-  local output=tonumber(c.efficiencyOutputCommand) or outputSet
-  local injector=positive(c.efficiencyFieldCommand) or positive(d.inputSet) or positive(d.inputFlow) or positive(c.manualField) or positive(c.injectorBaseline) or MINIMUM_FIELD_INPUT
+  local output=tonumber(c.efficiencyOutputCommand) or tonumber(c.manualExport) or outputSet
+  local injector=positive(c.efficiencyFieldCommand) or positive(c.manualField) or positive(d.inputFlow) or positive(d.inputSet) or positive(c.injectorBaseline) or MINIMUM_FIELD_INPUT
   local previousField=tonumber(c.efficiencyPriorField);c.efficiencyPriorField=field
   local reasons={}
   if c.efficiencyFieldEnabled and field<c.efficiencyFieldTarget then reasons[#reasons+1]=string.format("field %.1f%% < %.1f%%",field,c.efficiencyFieldTarget) end
@@ -1400,10 +1408,10 @@ local function applyEfficiencyProfile(name)
   else
     controls.efficiencyProfile="BALANCED";controls.efficiencyFieldTarget=70;controls.efficiencyIncreasePercent=1;controls.efficiencyInterval=30;controls.efficiencyFailureResponse="STEP BACK";controls.efficiencyRollbackPercent=10;controls.efficiencyInjectorStep=50000
   end
-  resetManualEfficiencyRuntime(controls);controls.message="Manual efficiency profile loaded: "..controls.efficiencyProfile
+  resetManualEfficiencyRuntime(controls,controls.manualEfficiencyEnabled);controls.message="Manual efficiency profile loaded: "..controls.efficiencyProfile
 end
 local function customizeEfficiency(message)
-  controls.efficiencyProfile="CUSTOM";resetManualEfficiencyRuntime(controls);controls.message=message
+  controls.efficiencyProfile="CUSTOM";resetManualEfficiencyRuntime(controls,controls.manualEfficiencyEnabled);controls.message=message
 end
 local function act(choice,d)
   if type(choice)=="string" and ((string.find(choice,"FIELD",1,true)==1 and string.find(choice,"FIELD TARGET",1,true)~=1) or string.find(choice,"EXPORT",1,true)==1) then
@@ -1475,7 +1483,7 @@ local function act(choice,d)
   elseif choice=="CYCLE EFFICIENCY INCREASE" then controls.efficiencyIncreasePercent=cycleValue({.5,1,2,5},controls.efficiencyIncreasePercent);customizeEfficiency("Output increase changed")
   elseif choice=="CYCLE FAILURE RESPONSE" then controls.efficiencyFailureResponse=cycleValue({"HOLD","STEP BACK","ROLL BACK"},controls.efficiencyFailureResponse);customizeEfficiency("Failed-check response changed")
   elseif choice=="CYCLE ROLLBACK PERCENT" then controls.efficiencyRollbackPercent=cycleValue({5,10,20,30},controls.efficiencyRollbackPercent);customizeEfficiency("Rollback percentage changed")
-  elseif choice=="CLEAR EFFICIENCY PAUSE" then resetManualEfficiencyRuntime(controls);controls.message="Manual efficiency pause cleared; rules must settle again"
+  elseif choice=="CLEAR EFFICIENCY PAUSE" then resetManualEfficiencyRuntime(controls,true);controls.message="Manual efficiency pause cleared; rules must settle again"
   elseif choice=="USE LIVE GATES" then controls.manualField=positive(d.inputSet) or positive(d.inputFlow) or controls.injectorBaseline;controls.manualExport=positive(d.outputSet) or positive(d.outputFlow) or 0;controls.liveGatesSelected=true;controls.message="Copied live gate limits into manual controls"
   elseif choice=="FIELD -1k" then controls.manualField=math.max(0,(tonumber(controls.manualField) or positive(d.inputSet) or controls.injectorBaseline or 0)-MANUAL_GATE_FINE_STEP)
   elseif choice=="FIELD +1k" then controls.manualField=(tonumber(controls.manualField) or positive(d.inputSet) or controls.injectorBaseline or 0)+MANUAL_GATE_FINE_STEP

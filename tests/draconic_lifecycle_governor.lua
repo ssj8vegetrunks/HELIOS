@@ -37,12 +37,19 @@ local manualEfficiency = { mode="UNRESTRICTED", manualField=1900000, manualExpor
 local enabled = governor.setManualEfficiency(manualEfficiency, { inputSet=2000000, outputSet=3900000 }, true)
 assert(enabled and manualEfficiency.manualEfficiencyEnabled and manualEfficiency.request=="MANUAL",
     "the manual efficiency Guardian must start from the live manual gate pair")
+local lowManual = { mode="UNRESTRICTED", manualField=9900, manualExport=5050000 }
+governor.setManualEfficiency(lowManual, {
+    inputSet=1900000,inputFlow=9900,outputSet=5050000,outputFlow=5050000,
+    reactor={status="running",sampleTime=0},
+}, true)
+assert(lowManual.efficiencyFieldCommand==9900,
+    "enabling manual efficiency must not replace a low manual injector command with the stale 1.9M fallback")
 local fieldTarget,outputTarget,status = governor.manualEfficiencyTargets(manualEfficiency, {
     reactor={status="running",fieldStrength=80,maxFieldStrength=100,temperature=4000,
         energySaturation=70,maxEnergySaturation=100,generationRate=3900000,sampleTime=0},
     inputSet=2000000,inputFlow=2000000,outputSet=3900000,outputFlow=3900000,
 })
-assert(fieldTarget==2000000 and outputTarget==3900000 and status:find("next increase",1,true),
+assert(fieldTarget==1900000 and outputTarget==3900000 and status:find("next increase",1,true),
     "healthy rules must begin a dwell interval without immediately changing gates")
 fieldTarget,outputTarget,status = governor.manualEfficiencyTargets(manualEfficiency, {
     reactor={status="running",fieldStrength=80,maxFieldStrength=100,temperature=4000,
@@ -53,7 +60,7 @@ assert(outputTarget==3939000 and status:find("INCREASED",1,true),
     "a full healthy interval must increase output by the configured percentage without a ceiling")
 governor.setManualEfficiency(manualEfficiency, { inputSet=2100000, outputSet=4200000 }, false)
 assert(not manualEfficiency.manualEfficiencyEnabled and manualEfficiency.request=="MANUAL" and
-    manualEfficiency.manualField==2100000 and manualEfficiency.manualExport==4200000,
+    manualEfficiency.manualField==1900000 and manualEfficiency.manualExport==3939000,
     "disabling the governor must freeze the current live gates without a jump")
 assert(not governor.lifecycleUnsafe(89, 7700),
     "strong containment may use the proven 7,500-7,750 C lifecycle leeway")
