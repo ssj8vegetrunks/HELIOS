@@ -79,6 +79,15 @@ fieldTarget,outputTarget,status = governor.manualEfficiencyTargets(manualEfficie
 })
 assert(manualEfficiency.overdriveField==fieldTarget and manualEfficiency.overdriveExport==3939000,
     "a verified increase must automatically advance the durable Overdrive recovery preset")
+assert(manualEfficiency.efficiencyLastStep==0,
+    "a confirmed increase must not remain armed for a later unrelated step-back")
+fieldTarget,outputTarget,status = governor.manualEfficiencyTargets(manualEfficiency, {
+    reactor={status="running",fieldStrength=79,maxFieldStrength=100,temperature=4000,
+        energySaturation=70,maxEnergySaturation=100,generationRate=3939000,sampleTime=32},
+    inputSet=1900000,inputFlow=1900000,outputSet=0,outputFlow=3939000,
+})
+assert(outputTarget==3939000 and status:find("field trend falling",1,true),
+    "a later injector-related field dip may hold, but must not undo a confirmed export point")
 governor.setManualEfficiency(manualEfficiency, { inputSet=2100000, outputSet=4200000 }, false)
 assert(not manualEfficiency.manualEfficiencyEnabled and manualEfficiency.request=="MANUAL" and
     manualEfficiency.manualField==1900000 and manualEfficiency.manualExport==3939000,

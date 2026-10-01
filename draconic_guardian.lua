@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.49
+-- HELIOS Draconic Guardian v1.2.0-alpha.50
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -47,7 +47,7 @@ local SAFETY_LOW_FIELD, SAFETY_HIGH_TEMP = 35, 7750
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.49"
+local GUARDIAN_VERSION = "1.2.0-alpha.50"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -802,6 +802,10 @@ local function manualEfficiencyTargets(c,d)
     local responseConfirmed=flow>=(tonumber(c.efficiencyPendingBaseFlow) or 0)+delta or generation>=(tonumber(c.efficiencyPendingBaseGeneration) or 0)+delta
     if gateConfirmed and responseConfirmed then
       confirmedIncrease=true
+      -- Once accepted, this step belongs to the verified Overdrive recovery
+      -- point. A later field trend (often caused by an injector trim) must not
+      -- reuse the old step amount and undo an already-proven export increase.
+      c.efficiencyLastStep=0
       c.efficiencyPendingExport=nil;c.efficiencyPendingSince=nil;c.efficiencyStableSince=now
       c.efficiencyStatus="CONFIRMED: previous increase produced a measurable response"
     elseif now-(tonumber(c.efficiencyPendingSince) or now)>=math.max(10,c.efficiencyInterval*2) then
