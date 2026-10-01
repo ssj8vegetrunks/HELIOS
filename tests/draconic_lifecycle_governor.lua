@@ -37,6 +37,8 @@ local manualEfficiency = { mode="UNRESTRICTED", manualField=1900000, manualExpor
 local enabled = governor.setManualEfficiency(manualEfficiency, { inputSet=2000000, outputSet=3900000 }, true)
 assert(enabled and manualEfficiency.manualEfficiencyEnabled and manualEfficiency.request=="MANUAL",
     "the manual efficiency Guardian must start from the live manual gate pair")
+assert(manualEfficiency.overdriveField==1900000 and manualEfficiency.overdriveExport==3900000,
+    "enabling the manual efficiency Guardian must seed its Overdrive recovery preset")
 local lowManual = { mode="UNRESTRICTED", manualField=9900, manualExport=5050000 }
 governor.setManualEfficiency(lowManual, {
     inputSet=1900000,inputFlow=9900,outputSet=5050000,outputFlow=5050000,
@@ -70,6 +72,13 @@ fieldTarget,outputTarget,status = governor.manualEfficiencyTargets(manualEfficie
 })
 assert(outputTarget==3939000 and status:find("INCREASED",1,true),
     "a full healthy interval must increase output by the configured percentage without a ceiling")
+fieldTarget,outputTarget,status = governor.manualEfficiencyTargets(manualEfficiency, {
+    reactor={status="running",fieldStrength=80,maxFieldStrength=100,temperature=4000,
+        energySaturation=70,maxEnergySaturation=100,generationRate=3939000,sampleTime=31},
+    inputSet=1900000,inputFlow=1900000,outputSet=0,outputFlow=3939000,
+})
+assert(manualEfficiency.overdriveField==fieldTarget and manualEfficiency.overdriveExport==3939000,
+    "a verified increase must automatically advance the durable Overdrive recovery preset")
 governor.setManualEfficiency(manualEfficiency, { inputSet=2100000, outputSet=4200000 }, false)
 assert(not manualEfficiency.manualEfficiencyEnabled and manualEfficiency.request=="MANUAL" and
     manualEfficiency.manualField==1900000 and manualEfficiency.manualExport==3939000,

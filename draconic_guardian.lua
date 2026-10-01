@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.48
+-- HELIOS Draconic Guardian v1.2.0-alpha.49
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -47,7 +47,7 @@ local SAFETY_LOW_FIELD, SAFETY_HIGH_TEMP = 35, 7750
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.48"
+local GUARDIAN_VERSION = "1.2.0-alpha.49"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -756,6 +756,9 @@ local function setManualEfficiency(c,d,enabled)
     -- telemetry is only a fallback when no manual command exists.
     c.efficiencyOutputCommand=positive(c.manualExport) or positive(d and d.outputSet) or positive(d and d.outputFlow) or 0
     c.efficiencyFieldCommand=positive(c.manualField) or positive(d and d.inputFlow) or positive(d and d.inputSet) or positive(c.injectorBaseline)
+    -- Overdrive is the durable recovery preset for unrestricted manual work.
+    -- Automatic calibration and its learned ceiling remain entirely separate.
+    c.overdriveField=c.efficiencyFieldCommand;c.overdriveExport=c.efficiencyOutputCommand
     local now=lifecycleNow(d and d.reactor or {});c.efficiencyLastRollback=now;c.efficiencyLastInjectorTune=now
     c.manualExport=c.efficiencyOutputCommand;c.manualField=c.efficiencyFieldCommand;c.request="MANUAL"
     c.message="Manual efficiency Guardian ON: evaluating operator rules"
@@ -779,6 +782,7 @@ local function manualEfficiencyTargets(c,d)
   local outputSet=tonumber(d.outputSet) or 0
   local output=tonumber(c.efficiencyOutputCommand) or tonumber(c.manualExport) or outputSet
   local injector=positive(c.efficiencyFieldCommand) or positive(c.manualField) or positive(d.inputFlow) or positive(d.inputSet) or positive(c.injectorBaseline) or MINIMUM_FIELD_INPUT
+  local confirmedIncrease=false
   local previousField=tonumber(c.efficiencyPriorField);c.efficiencyPriorField=field
   local reasons={}
   if c.efficiencyFieldEnabled and field<c.efficiencyFieldTarget then reasons[#reasons+1]=string.format("field %.1f%% < %.1f%%",field,c.efficiencyFieldTarget) end
@@ -797,6 +801,7 @@ local function manualEfficiencyTargets(c,d)
     local gateConfirmed=math.abs(flow-c.efficiencyPendingExport)<=math.max(50000,c.efficiencyPendingExport*.05)
     local responseConfirmed=flow>=(tonumber(c.efficiencyPendingBaseFlow) or 0)+delta or generation>=(tonumber(c.efficiencyPendingBaseGeneration) or 0)+delta
     if gateConfirmed and responseConfirmed then
+      confirmedIncrease=true
       c.efficiencyPendingExport=nil;c.efficiencyPendingSince=nil;c.efficiencyStableSince=now
       c.efficiencyStatus="CONFIRMED: previous increase produced a measurable response"
     elseif now-(tonumber(c.efficiencyPendingSince) or now)>=math.max(10,c.efficiencyInterval*2) then
@@ -844,6 +849,12 @@ local function manualEfficiencyTargets(c,d)
     end
   end
   c.efficiencyOutputCommand=output;c.efficiencyFieldCommand=injector
+  if confirmedIncrease then
+    c.manualField=injector;c.manualExport=output
+    c.overdriveField=injector;c.overdriveExport=output
+    guardianRecord("log.guardian_command","info",{mode="manual_efficiency",field=injector,output=output},
+      {"Confirmed manual efficiency point saved as Overdrive preset"})
+  end
   return injector,output,c.efficiencyStatus,reasons
 end
 
