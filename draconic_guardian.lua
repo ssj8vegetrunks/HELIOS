@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.46
+-- HELIOS Draconic Guardian v1.2.0-alpha.47
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -47,7 +47,7 @@ local SAFETY_LOW_FIELD, SAFETY_HIGH_TEMP = 35, 7750
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.46"
+local GUARDIAN_VERSION = "1.2.0-alpha.47"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -770,12 +770,15 @@ local function manualEfficiencyTargets(c,d)
   if c.efficiencyTempEnabled and temp>c.efficiencyTempLimit then reasons[#reasons+1]=string.format("temperature %.0f > %.0f C",temp,c.efficiencyTempLimit) end
   if c.efficiencySaturationEnabled and saturation<c.efficiencySaturationFloor then reasons[#reasons+1]=string.format("saturation %.1f%% < %.1f%%",saturation,c.efficiencySaturationFloor) end
   if c.efficiencyDeliveryEnabled then
-    local tolerance=math.max(50000,math.abs(outputSet)*.15)
-    if math.abs(flow-outputSet)>tolerance then reasons[#reasons+1]="export delivery not tracking command" end
+    -- getFlowOverride is absent or stale in some Flux Gate builds and read()
+    -- then sees the redstone-low fallback instead. Compare measured delivery
+    -- with Guardian's own active command, which is also what the UI displays.
+    local tolerance=math.max(50000,math.abs(output)*.15)
+    if math.abs(flow-output)>tolerance then reasons[#reasons+1]="export delivery not tracking Guardian command" end
   end
   if c.efficiencyPendingExport then
     local delta=math.max(1000,(tonumber(c.efficiencyLastStep) or 0)*.10)
-    local gateConfirmed=math.abs(outputSet-c.efficiencyPendingExport)<=math.max(50000,c.efficiencyPendingExport*.02)
+    local gateConfirmed=math.abs(flow-c.efficiencyPendingExport)<=math.max(50000,c.efficiencyPendingExport*.05)
     local responseConfirmed=flow>=(tonumber(c.efficiencyPendingBaseFlow) or 0)+delta or generation>=(tonumber(c.efficiencyPendingBaseGeneration) or 0)+delta
     if gateConfirmed and responseConfirmed then
       c.efficiencyPendingExport=nil;c.efficiencyPendingSince=nil;c.efficiencyStableSince=now
@@ -1263,6 +1266,12 @@ local function draw(t,b,d,page,c,bs)
     local fieldSet=tonumber(d.inputSet) or 0
     local manualApplied=c.request=="MANUAL" and math.abs(fieldSet-fieldTarget)<1 and math.abs(exportSet-exportTarget)<1
     local exportApplied=manualApplied and (status=="online" or status=="running")
+    if c.manualEfficiencyEnabled and c.request=="MANUAL" then
+      local governedExport=tonumber(c.efficiencyOutputCommand) or exportTarget
+      exportApplied=(status=="online" or status=="running") and
+        math.abs((tonumber(d.outputFlow) or 0)-governedExport)<=math.max(50000,math.abs(governedExport)*.05)
+      manualApplied=exportApplied
+    end
     local liveGatesSelected=c.liveGatesSelected==true and math.abs(fieldTarget-fieldSet)<1 and math.abs(exportTarget-exportSet)<1
     local presetField,presetExport=positive(c.overdriveField),positive(c.overdriveExport)
     local presetSaved=presetField and presetExport and presetField==positive(c.manualField or d.inputSet) and presetExport==positive(exportTarget)

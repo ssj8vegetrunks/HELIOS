@@ -44,6 +44,18 @@ governor.setManualEfficiency(lowManual, {
 }, true)
 assert(lowManual.efficiencyFieldCommand==9900,
     "enabling manual efficiency must not replace a low manual injector command with the stale 1.9M fallback")
+local staleExport = { mode="UNRESTRICTED", manualField=1800000, manualExport=8000000 }
+governor.setManualEfficiency(staleExport, {
+    inputSet=1900000,inputFlow=1800000,outputSet=0,outputFlow=8000000,
+    reactor={status="running",sampleTime=0},
+}, true)
+local _,staleTarget,_,staleReasons = governor.manualEfficiencyTargets(staleExport, {
+    reactor={status="running",fieldStrength=70,maxFieldStrength=100,temperature=5400,
+        energySaturation=50,maxEnergySaturation=100,generationRate=8000000,sampleTime=0},
+    inputSet=1900000,inputFlow=1800000,outputSet=0,outputFlow=8000000,
+})
+assert(staleTarget==8000000 and #staleReasons==0,
+    "delivery checks must trust Guardian's 8M command when the gate API reports a stale zero fallback")
 local fieldTarget,outputTarget,status = governor.manualEfficiencyTargets(manualEfficiency, {
     reactor={status="running",fieldStrength=80,maxFieldStrength=100,temperature=4000,
         energySaturation=70,maxEnergySaturation=100,generationRate=3900000,sampleTime=0},
