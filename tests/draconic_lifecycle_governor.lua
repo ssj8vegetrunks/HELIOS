@@ -77,10 +77,14 @@ assert(not manualEfficiency.manualEfficiencyEnabled and manualEfficiency.request
 local transient = {};transient.self=transient
 local checkpoint = governor.persistentState({
     mode="UNRESTRICTED",manualField=9900,efficiencyFieldTarget=10,
+    manualEfficiencyEnabled=true,efficiencyOutputCommand=13420000,efficiencyFieldCommand=1320000,
     transientRuntime=transient,efficiencyPendingTelemetry=transient,
 })
 assert(checkpoint.mode=="UNRESTRICTED" and checkpoint.manualField==9900 and checkpoint.efficiencyFieldTarget==10,
     "durable manual-efficiency settings must survive a checkpoint")
+assert(checkpoint.manualEfficiencyEnabled==true and checkpoint.efficiencyOutputCommand==13420000 and
+    checkpoint.efficiencyFieldCommand==1320000,
+    "enabled governor and its live ramp commands must survive a controller restart")
 assert(checkpoint.transientRuntime==nil and checkpoint.efficiencyPendingTelemetry==nil,
     "checkpoint serialization must exclude cyclic or growing transient controller state")
 assert(not governor.lifecycleUnsafe(89, 7700),

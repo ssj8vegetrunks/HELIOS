@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.47
+-- HELIOS Draconic Guardian v1.2.0-alpha.48
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -47,7 +47,7 @@ local SAFETY_LOW_FIELD, SAFETY_HIGH_TEMP = 35, 7750
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.47"
+local GUARDIAN_VERSION = "1.2.0-alpha.48"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -477,6 +477,7 @@ local function load()
   end
   if not s then return normalizeManualEfficiency(d) end
   d.mode=(s.mode=="ASSISTED" or s.mode=="UNRESTRICTED") and s.mode or "AUTO";d.request=(FRACTION[s.request] or s.request=="MANUAL" or s.request=="OVERDRIVE" or s.request=="IDLE") and s.request or "OFF";d.rated=tonumber(s.rated);d.lifecycleCeilings=type(s.lifecycleCeilings)=="table" and s.lifecycleCeilings or {};d.currentCycleCeilings=type(s.currentCycleCeilings)=="table" and s.currentCycleCeilings or {};d.injectorBaseline=positive(s.injectorBaseline);d.manualField=positive(s.manualField);d.manualExport=positive(s.manualExport) or 0;d.overdriveField=positive(s.overdriveField);d.overdriveExport=positive(s.overdriveExport);d.commissioned=s.commissioned==true;d.commissioning=s.commissioning==true;d.commissionFlow=positive(s.commissionFlow);d.commissionSamples=math.max(0,math.floor(tonumber(s.commissionSamples) or 0));d.commissionShortfallSamples=math.max(0,math.floor(tonumber(s.commissionShortfallSamples) or 0));d.commissionSettleSamples=math.max(0,math.floor(tonumber(s.commissionSettleSamples) or 0));d.commissionFieldInput=positive(s.commissionFieldInput);d.commissionFieldTuneSamples=math.max(0,math.floor(tonumber(s.commissionFieldTuneSamples) or 0));d.commissionLastSafe=positive(s.commissionLastSafe);d.recovery=s.recovery==true;d.lifecycleApplied=positive(s.lifecycleApplied);d.lifecycleFieldApplied=positive(s.lifecycleFieldApplied);d.lifecycleSamples=math.max(0,math.floor(tonumber(s.lifecycleSamples) or 0));d.lifecycleBandKey=s.lifecycleBandKey and tostring(s.lifecycleBandKey) or nil;d.lifecycleStartField=tonumber(s.lifecycleStartField);d.fieldTuneSamples=math.max(0,math.floor(tonumber(s.fieldTuneSamples) or 0));d.lastFuelConversion=tonumber(s.lastFuelConversion);d.overdriveApplied=tonumber(s.overdriveApplied);d.refuelMaintenance=s.refuelMaintenance==true;d.refuelPhase=d.refuelMaintenance and tostring(s.refuelPhase or "shutdown") or nil;d.safetyLockout=s.safetyLockout==true;d.lastSafetyTrip=s.lastSafetyTrip and tostring(s.lastSafetyTrip) or nil;d.message=tostring(s.message or d.message)
+  d.manualEfficiencyEnabled=s.manualEfficiencyEnabled==true;d.efficiencyOutputCommand=positive(s.efficiencyOutputCommand);d.efficiencyFieldCommand=positive(s.efficiencyFieldCommand)
   d.efficiencyProfile=s.efficiencyProfile;d.efficiencyFieldEnabled=s.efficiencyFieldEnabled;d.efficiencyFieldTarget=s.efficiencyFieldTarget;d.efficiencyTrendEnabled=s.efficiencyTrendEnabled;d.efficiencyTempEnabled=s.efficiencyTempEnabled;d.efficiencyTempLimit=s.efficiencyTempLimit;d.efficiencySaturationEnabled=s.efficiencySaturationEnabled;d.efficiencySaturationFloor=s.efficiencySaturationFloor;d.efficiencyDeliveryEnabled=s.efficiencyDeliveryEnabled;d.efficiencyInterval=s.efficiencyInterval;d.efficiencyIncreasePercent=s.efficiencyIncreasePercent;d.efficiencyFailureResponse=s.efficiencyFailureResponse;d.efficiencyRollbackPercent=s.efficiencyRollbackPercent;d.efficiencyInjectorEnabled=s.efficiencyInjectorEnabled;d.efficiencyInjectorStep=s.efficiencyInjectorStep
   return normalizeManualEfficiency(d)
 end
@@ -489,7 +490,8 @@ local PERSIST_FIELDS={
   "lifecycleLastSampleAt","lifecycleNextProbeAt","fieldTuneSamples","lastFuelConversion","overdriveApplied",
   "refuelMaintenance","refuelPhase","safetyLockout","lastSafetyTrip","message",
   "lastAppliedCommandRevision","lastCommandStatus","lastCommandDetail","remoteLevel","remoteTarget",
-  "remoteApplied","remotePrimed","efficiencyProfile","efficiencyFieldEnabled","efficiencyFieldTarget",
+  "remoteApplied","remotePrimed","manualEfficiencyEnabled","efficiencyOutputCommand","efficiencyFieldCommand",
+  "efficiencyProfile","efficiencyFieldEnabled","efficiencyFieldTarget",
   "efficiencyTrendEnabled","efficiencyTempEnabled","efficiencyTempLimit","efficiencySaturationEnabled",
   "efficiencySaturationFloor","efficiencyDeliveryEnabled","efficiencyInterval","efficiencyIncreasePercent",
   "efficiencyFailureResponse","efficiencyRollbackPercent","efficiencyInjectorEnabled","efficiencyInjectorStep",
@@ -507,21 +509,35 @@ local function checkpointYield()
   local event="helios_guardian_checkpoint_"..tostring(os.getComputerID and os.getComputerID() or "local")
   os.queueEvent(event);os.pullEvent(event)
 end
+local saveInProgress=false
 local function save(c)
-  local parent=fs.getDir(SETTINGS);if parent~="" and not fs.exists(parent) then fs.makeDir(parent) end
-  local h=fs.open(SETTINGS_PENDING,"w");if not h then return false end
-  -- Never serialize live/transient controller state. Besides being unnecessary
-  -- after a restart, an accidentally retained table can make ComputerCraft's
-  -- cooperative watchdog terminate the entire controller while checkpointing.
-  h.write("return "..textutils.serialize(persistentState(c)));h.close()
-  checkpointYield()
-  -- Keep the previous valid checkpoint until the replacement has been fully
-  -- written. load() can recover either side of an interrupted rotation.
-  if fs.exists(SETTINGS_BACKUP) then fs.delete(SETTINGS_BACKUP) end
-  if fs.exists(SETTINGS) then fs.move(SETTINGS,SETTINGS_BACKUP) end
-  checkpointYield()
-  fs.move(SETTINGS_PENDING,SETTINGS)
-  if fs.exists(SETTINGS_BACKUP) then fs.delete(SETTINGS_BACKUP) end
+  -- save() yields so the CC watchdog cannot kill a long serialization. Other
+  -- workers may request a save during that yield, so serialize rotations or
+  -- they can move/delete one another's shared .new checkpoint.
+  if saveInProgress then return false,"checkpoint already in progress" end
+  saveInProgress=true
+  local ok,reason=pcall(function()
+    local parent=fs.getDir(SETTINGS);if parent~="" and not fs.exists(parent) then fs.makeDir(parent) end
+    local h=fs.open(SETTINGS_PENDING,"w");if not h then error("could not open pending checkpoint",0) end
+    -- Never serialize live/transient controller state. Besides being unnecessary
+    -- after a restart, an accidentally retained table can make ComputerCraft's
+    -- cooperative watchdog terminate the entire controller while checkpointing.
+    h.write("return "..textutils.serialize(persistentState(c)));h.close()
+    checkpointYield()
+    -- Keep the previous valid checkpoint until the replacement has been fully
+    -- written. load() can recover either side of an interrupted rotation.
+    if fs.exists(SETTINGS_BACKUP) then fs.delete(SETTINGS_BACKUP) end
+    if fs.exists(SETTINGS) then fs.move(SETTINGS,SETTINGS_BACKUP) end
+    checkpointYield()
+    if not fs.exists(SETTINGS_PENDING) then error("pending checkpoint disappeared during rotation",0) end
+    fs.move(SETTINGS_PENDING,SETTINGS)
+    if fs.exists(SETTINGS_BACKUP) then fs.delete(SETTINGS_BACKUP) end
+  end)
+  saveInProgress=false
+  if not ok then
+    guardianRecord("log.guardian_checkpoint","error",{reason=tostring(reason)},{"Guardian checkpoint failed",tostring(reason)})
+    return false,tostring(reason)
+  end
   return true
 end
 
