@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.45
+-- HELIOS Draconic Guardian v1.2.0-alpha.46
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -47,7 +47,7 @@ local SAFETY_LOW_FIELD, SAFETY_HIGH_TEMP = 35, 7750
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.45"
+local GUARDIAN_VERSION = "1.2.0-alpha.46"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -480,14 +480,46 @@ local function load()
   d.efficiencyProfile=s.efficiencyProfile;d.efficiencyFieldEnabled=s.efficiencyFieldEnabled;d.efficiencyFieldTarget=s.efficiencyFieldTarget;d.efficiencyTrendEnabled=s.efficiencyTrendEnabled;d.efficiencyTempEnabled=s.efficiencyTempEnabled;d.efficiencyTempLimit=s.efficiencyTempLimit;d.efficiencySaturationEnabled=s.efficiencySaturationEnabled;d.efficiencySaturationFloor=s.efficiencySaturationFloor;d.efficiencyDeliveryEnabled=s.efficiencyDeliveryEnabled;d.efficiencyInterval=s.efficiencyInterval;d.efficiencyIncreasePercent=s.efficiencyIncreasePercent;d.efficiencyFailureResponse=s.efficiencyFailureResponse;d.efficiencyRollbackPercent=s.efficiencyRollbackPercent;d.efficiencyInjectorEnabled=s.efficiencyInjectorEnabled;d.efficiencyInjectorStep=s.efficiencyInjectorStep
   return normalizeManualEfficiency(d)
 end
+local PERSIST_FIELDS={
+  "mode","request","rated","lifecycleCeilings","currentCycleCeilings","injectorBaseline",
+  "manualField","manualExport","overdriveField","overdriveExport","commissioned","commissioning",
+  "commissionFlow","commissionSamples","commissionShortfallSamples","commissionSettleSamples",
+  "commissionFieldInput","commissionFieldTuneSamples","commissionLastSafe","recovery",
+  "lifecycleApplied","lifecycleFieldApplied","lifecycleSamples","lifecycleBandKey","lifecycleStartField",
+  "lifecycleLastSampleAt","lifecycleNextProbeAt","fieldTuneSamples","lastFuelConversion","overdriveApplied",
+  "refuelMaintenance","refuelPhase","safetyLockout","lastSafetyTrip","message",
+  "lastAppliedCommandRevision","lastCommandStatus","lastCommandDetail","remoteLevel","remoteTarget",
+  "remoteApplied","remotePrimed","efficiencyProfile","efficiencyFieldEnabled","efficiencyFieldTarget",
+  "efficiencyTrendEnabled","efficiencyTempEnabled","efficiencyTempLimit","efficiencySaturationEnabled",
+  "efficiencySaturationFloor","efficiencyDeliveryEnabled","efficiencyInterval","efficiencyIncreasePercent",
+  "efficiencyFailureResponse","efficiencyRollbackPercent","efficiencyInjectorEnabled","efficiencyInjectorStep",
+}
+local function persistentState(c)
+  local state={}
+  for _,key in ipairs(PERSIST_FIELDS) do
+    local value=c[key]
+    if value~=nil then state[key]=value end
+  end
+  return state
+end
+local function checkpointYield()
+  if type(os.queueEvent)~="function" or type(os.pullEvent)~="function" then return end
+  local event="helios_guardian_checkpoint_"..tostring(os.getComputerID and os.getComputerID() or "local")
+  os.queueEvent(event);os.pullEvent(event)
+end
 local function save(c)
   local parent=fs.getDir(SETTINGS);if parent~="" and not fs.exists(parent) then fs.makeDir(parent) end
   local h=fs.open(SETTINGS_PENDING,"w");if not h then return false end
-  h.write("return "..textutils.serialize(c));h.close()
+  -- Never serialize live/transient controller state. Besides being unnecessary
+  -- after a restart, an accidentally retained table can make ComputerCraft's
+  -- cooperative watchdog terminate the entire controller while checkpointing.
+  h.write("return "..textutils.serialize(persistentState(c)));h.close()
+  checkpointYield()
   -- Keep the previous valid checkpoint until the replacement has been fully
   -- written. load() can recover either side of an interrupted rotation.
   if fs.exists(SETTINGS_BACKUP) then fs.delete(SETTINGS_BACKUP) end
   if fs.exists(SETTINGS) then fs.move(SETTINGS,SETTINGS_BACKUP) end
+  checkpointYield()
   fs.move(SETTINGS_PENDING,SETTINGS)
   if fs.exists(SETTINGS_BACKUP) then fs.delete(SETTINGS_BACKUP) end
   return true
@@ -1368,7 +1400,7 @@ if rawget(_G,"HELIOS_GUARDIAN_TEST") then
     chargeableStatus=chargeableStatus,requiresContainment=requiresContainment,mailboxHasRemoteDemand=mailboxHasRemoteDemand,
     updateMeltdownTrend=updateMeltdownTrend,imminentMeltdown=imminentMeltdown,
     updateAutomaticSafetyVotes=updateAutomaticSafetyVotes,
-    gate=gate,read=read,adoptInjectorBaseline=adoptInjectorBaseline}
+    gate=gate,read=read,adoptInjectorBaseline=adoptInjectorBaseline,persistentState=persistentState}
 end
 local binding,page,controls,buttons=inspect(),"overview",load(),{}
 restoreMailbox(controls)
@@ -1621,7 +1653,10 @@ local function controlWorker()
       end
       ticks=ticks+1
       if ticks%2==0 then requestDraw() end
-      if ticks>=5 then ticks=0;save(controls) end
+      -- Durable settings do not need a disk rotation every control second.
+      -- Five-second checkpoints reduce filesystem churn while explicit safety,
+      -- maintenance, and mailbox transitions still save immediately.
+      if ticks>=25 then ticks=0;save(controls) end
       timer=os.startTimer(.2)
     end
   end

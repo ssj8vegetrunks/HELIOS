@@ -62,6 +62,15 @@ governor.setManualEfficiency(manualEfficiency, { inputSet=2100000, outputSet=420
 assert(not manualEfficiency.manualEfficiencyEnabled and manualEfficiency.request=="MANUAL" and
     manualEfficiency.manualField==1900000 and manualEfficiency.manualExport==3939000,
     "disabling the governor must freeze the current live gates without a jump")
+local transient = {};transient.self=transient
+local checkpoint = governor.persistentState({
+    mode="UNRESTRICTED",manualField=9900,efficiencyFieldTarget=10,
+    transientRuntime=transient,efficiencyPendingTelemetry=transient,
+})
+assert(checkpoint.mode=="UNRESTRICTED" and checkpoint.manualField==9900 and checkpoint.efficiencyFieldTarget==10,
+    "durable manual-efficiency settings must survive a checkpoint")
+assert(checkpoint.transientRuntime==nil and checkpoint.efficiencyPendingTelemetry==nil,
+    "checkpoint serialization must exclude cyclic or growing transient controller state")
 assert(not governor.lifecycleUnsafe(89, 7700),
     "strong containment may use the proven 7,500-7,750 C lifecycle leeway")
 assert(governor.lifecycleUnsafe(39, 7700),
@@ -191,7 +200,7 @@ assert(cascade, "a hot rising core with low falling containment must raise a mel
 -- pattern must be classified with enough telemetry to explain the shutdown.
 local safetyTrend = {}
 local votes, voteCount
-for sample = 1, 12 do
+for sample = 1, 13 do
     votes, voteCount = governor.updateAutomaticSafetyVotes({
         reactor = {
             status="running", fieldStrength=70-sample, maxFieldStrength=100,
@@ -229,7 +238,7 @@ end
 assert(table.concat(votes, ","):find("export gate failed closed",1,true),
     "continued export after a zero command must become an explicit safety vote")
 safetyTrend = {}
-for sample = 1, 12 do
+for sample = 1, 13 do
     votes, voteCount = governor.updateAutomaticSafetyVotes({
         reactor = {
             status="running", fieldStrength=70, maxFieldStrength=100,
