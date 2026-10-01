@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.50
+-- HELIOS Draconic Guardian v1.2.0-alpha.50a
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -47,7 +47,7 @@ local SAFETY_LOW_FIELD, SAFETY_HIGH_TEMP = 35, 7750
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.50"
+local GUARDIAN_VERSION = "1.2.0-alpha.50a"
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -741,7 +741,8 @@ local function resetManualEfficiencyRuntime(c,preserveTargets)
   c.efficiencyOutputCommand=nil;c.efficiencyFieldCommand=nil;c.efficiencyStableSince=nil
   c.efficiencyPendingExport=nil;c.efficiencyPendingSince=nil;c.efficiencyPendingBaseFlow=nil
   c.efficiencyPendingBaseGeneration=nil;c.efficiencyLastStep=nil;c.efficiencyLastRollback=nil
-  c.efficiencyLastInjectorTune=nil;c.efficiencyPriorField=nil;c.efficiencyPaused=false;c.efficiencyStatus="IDLE"
+  c.efficiencyLastInjectorTune=nil;c.efficiencyPriorField=nil;c.efficiencyFieldResponseUntil=nil
+  c.efficiencyPaused=false;c.efficiencyStatus="IDLE"
   c.efficiencyOutputCommand=output;c.efficiencyFieldCommand=field
 end
 local function setManualEfficiency(c,d,enabled)
@@ -784,9 +785,12 @@ local function manualEfficiencyTargets(c,d)
   local injector=positive(c.efficiencyFieldCommand) or positive(c.manualField) or positive(d.inputFlow) or positive(d.inputSet) or positive(c.injectorBaseline) or MINIMUM_FIELD_INPUT
   local confirmedIncrease=false
   local previousField=tonumber(c.efficiencyPriorField);c.efficiencyPriorField=field
+  local fieldFalling=previousField and field<previousField-.2
+  local outputIncreased=false
+  local fieldSupportStatus
   local reasons={}
   if c.efficiencyFieldEnabled and field<c.efficiencyFieldTarget then reasons[#reasons+1]=string.format("field %.1f%% < %.1f%%",field,c.efficiencyFieldTarget) end
-  if c.efficiencyTrendEnabled and previousField and field<previousField-.2 then reasons[#reasons+1]="field trend falling" end
+  if c.efficiencyTrendEnabled and fieldFalling then reasons[#reasons+1]="field trend falling" end
   if c.efficiencyTempEnabled and temp>c.efficiencyTempLimit then reasons[#reasons+1]=string.format("temperature %.0f > %.0f C",temp,c.efficiencyTempLimit) end
   if c.efficiencySaturationEnabled and saturation<c.efficiencySaturationFloor then reasons[#reasons+1]=string.format("saturation %.1f%% < %.1f%%",saturation,c.efficiencySaturationFloor) end
   if c.efficiencyDeliveryEnabled then
@@ -814,8 +818,19 @@ local function manualEfficiencyTargets(c,d)
       c.efficiencyStatus="VERIFYING: waiting for the previous output increase to respond"
     end
   end
-  if c.efficiencyPaused then return injector,output,c.efficiencyStatus,reasons end
-  if c.efficiencyPendingExport then return injector,output,c.efficiencyStatus,reasons end
+  local responseUntil=tonumber(c.efficiencyFieldResponseUntil)
+  if responseUntil and now>responseUntil then c.efficiencyFieldResponseUntil=nil;responseUntil=nil end
+  if c.efficiencyInjectorEnabled and fieldFalling and responseUntil then
+    injector=injector+c.efficiencyInjectorStep
+    c.efficiencyFieldCommand=injector;c.manualField=injector;c.overdriveField=injector
+    c.efficiencyLastInjectorTune=now;c.efficiencyFieldResponseUntil=nil
+    fieldSupportStatus="SUPPORTING FIELD: export held; injector +"..fmt(c.efficiencyInjectorStep).." RF/t"
+    c.efficiencyStatus=fieldSupportStatus
+    guardianRecord("log.guardian_command","warning",{mode="manual_efficiency",injector=injector,output=output},
+      {"Injector raised after export increase caused a falling field trend"})
+  end
+  if c.efficiencyPaused then c.efficiencyFieldCommand=injector;return injector,output,c.efficiencyStatus,reasons end
+  if c.efficiencyPendingExport then c.efficiencyFieldCommand=injector;return injector,output,c.efficiencyStatus,reasons end
   local allClear=#reasons==0 and not c.efficiencyPendingExport
   if allClear then
     c.efficiencyStableSince=tonumber(c.efficiencyStableSince) or now
@@ -825,10 +840,13 @@ local function manualEfficiencyTargets(c,d)
       local step=math.max(1000,math.floor(math.max(output,100000)*c.efficiencyIncreasePercent/100))
       c.efficiencyLastStep=step;c.efficiencyPendingBaseFlow=flow;c.efficiencyPendingBaseGeneration=generation
       output=output+step;c.efficiencyOutputCommand=output;c.efficiencyPendingExport=output;c.efficiencyPendingSince=now;c.efficiencyStableSince=nil
+      c.efficiencyFieldResponseUntil=now+math.max(5,math.min(15,c.efficiencyInterval))
+      outputIncreased=true
       c.efficiencyStatus="INCREASED: +"..fmt(step).." RF/t; verifying response"
       guardianRecord("log.guardian_command","info",{mode="manual_efficiency",step=step,output=output},{c.efficiencyStatus})
     end
-    if c.efficiencyInjectorEnabled and field>c.efficiencyFieldTarget+10 and now-(tonumber(c.efficiencyLastInjectorTune) or 0)>=c.efficiencyInterval then
+    if c.efficiencyInjectorEnabled and not outputIncreased and not c.efficiencyFieldResponseUntil and
+        field>c.efficiencyFieldTarget+10 and now-(tonumber(c.efficiencyLastInjectorTune) or 0)>=c.efficiencyInterval then
       injector=math.max(MINIMUM_FIELD_INPUT,injector-c.efficiencyInjectorStep);c.efficiencyLastInjectorTune=now
       guardianRecord("log.guardian_command","info",{mode="manual_efficiency",injector=injector},{"Injector trimmed after sustained field surplus"})
     end
@@ -853,6 +871,7 @@ local function manualEfficiencyTargets(c,d)
     end
   end
   c.efficiencyOutputCommand=output;c.efficiencyFieldCommand=injector
+  if fieldSupportStatus then c.efficiencyStatus=fieldSupportStatus end
   if confirmedIncrease then
     c.manualField=injector;c.manualExport=output
     c.overdriveField=injector;c.overdriveExport=output

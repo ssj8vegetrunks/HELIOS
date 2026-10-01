@@ -86,11 +86,13 @@ fieldTarget,outputTarget,status = governor.manualEfficiencyTargets(manualEfficie
         energySaturation=70,maxEnergySaturation=100,generationRate=3939000,sampleTime=32},
     inputSet=1900000,inputFlow=1900000,outputSet=0,outputFlow=3939000,
 })
-assert(outputTarget==3939000 and status:find("field trend falling",1,true),
-    "a later injector-related field dip may hold, but must not undo a confirmed export point")
+assert(outputTarget==3939000 and status:find("SUPPORTING FIELD",1,true),
+    "a later injector-related field dip must hold, but must not undo a confirmed export point")
+assert(fieldTarget==1950000 and manualEfficiency.overdriveField==1950000,
+    "a falling field immediately after an export increase must add one injector step and save the supported recovery point")
 governor.setManualEfficiency(manualEfficiency, { inputSet=2100000, outputSet=4200000 }, false)
 assert(not manualEfficiency.manualEfficiencyEnabled and manualEfficiency.request=="MANUAL" and
-    manualEfficiency.manualField==1900000 and manualEfficiency.manualExport==3939000,
+    manualEfficiency.manualField==1950000 and manualEfficiency.manualExport==3939000,
     "disabling the governor must freeze the current live gates without a jump")
 local transient = {};transient.self=transient
 local checkpoint = governor.persistentState({
