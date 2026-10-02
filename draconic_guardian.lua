@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.50c
+-- HELIOS Draconic Guardian v1.2.0-alpha.50d
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -47,9 +47,9 @@ local SAFETY_LOW_FIELD, SAFETY_HIGH_TEMP = 35, 7750
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.50c"
+local GUARDIAN_VERSION = "1.2.0-alpha.50d"
 local EFFICIENCY_THERMAL_STRIKES, EFFICIENCY_THERMAL_COOLDOWN = 3, 15*60
-local EFFICIENCY_THERMAL_TOLERANCE = .02
+local EFFICIENCY_THERMAL_TOLERANCES = {.25,.5,1,2}
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -457,6 +457,12 @@ local function normalizeManualEfficiency(c)
   c.efficiencyTrendEnabled=c.efficiencyTrendEnabled~=false
   c.efficiencyTempEnabled=c.efficiencyTempEnabled~=false
   c.efficiencyTempLimit=math.max(1000,tonumber(c.efficiencyTempLimit) or 7500)
+  local thermalTolerance=tonumber(c.efficiencyThermalTolerancePercent)
+  local validThermalTolerance=false
+  for _,allowed in ipairs(EFFICIENCY_THERMAL_TOLERANCES) do
+    if thermalTolerance==allowed then validThermalTolerance=true;break end
+  end
+  c.efficiencyThermalTolerancePercent=validThermalTolerance and thermalTolerance or 2
   c.efficiencySaturationEnabled=c.efficiencySaturationEnabled~=false
   c.efficiencySaturationFloor=math.max(0,math.min(99,tonumber(c.efficiencySaturationFloor) or 40))
   c.efficiencyDeliveryEnabled=c.efficiencyDeliveryEnabled~=false
@@ -482,7 +488,7 @@ local function load()
   d.manualEfficiencyEnabled=s.manualEfficiencyEnabled==true;d.efficiencyOutputCommand=positive(s.efficiencyOutputCommand);d.efficiencyFieldCommand=positive(s.efficiencyFieldCommand)
   d.efficiencyPendingExport=positive(s.efficiencyPendingExport);d.efficiencyPendingSince=tonumber(s.efficiencyPendingSince);d.efficiencyPendingBaseFlow=tonumber(s.efficiencyPendingBaseFlow);d.efficiencyPendingBaseGeneration=tonumber(s.efficiencyPendingBaseGeneration);d.efficiencyLastStep=tonumber(s.efficiencyLastStep);d.efficiencyFieldResponseUntil=tonumber(s.efficiencyFieldResponseUntil)
   d.efficiencyThermalCandidateOutput=positive(s.efficiencyThermalCandidateOutput);d.efficiencyThermalSoakUntil=tonumber(s.efficiencyThermalSoakUntil);d.efficiencyThermalStrikes=math.max(0,math.floor(tonumber(s.efficiencyThermalStrikes) or 0));d.efficiencyCooldownUntil=tonumber(s.efficiencyCooldownUntil)
-  d.efficiencyProfile=s.efficiencyProfile;d.efficiencyFieldEnabled=s.efficiencyFieldEnabled;d.efficiencyFieldTarget=s.efficiencyFieldTarget;d.efficiencyTrendEnabled=s.efficiencyTrendEnabled;d.efficiencyTempEnabled=s.efficiencyTempEnabled;d.efficiencyTempLimit=s.efficiencyTempLimit;d.efficiencySaturationEnabled=s.efficiencySaturationEnabled;d.efficiencySaturationFloor=s.efficiencySaturationFloor;d.efficiencyDeliveryEnabled=s.efficiencyDeliveryEnabled;d.efficiencyInterval=s.efficiencyInterval;d.efficiencyIncreasePercent=s.efficiencyIncreasePercent;d.efficiencyFailureResponse=s.efficiencyFailureResponse;d.efficiencyRollbackPercent=s.efficiencyRollbackPercent;d.efficiencyInjectorEnabled=s.efficiencyInjectorEnabled;d.efficiencyInjectorStep=s.efficiencyInjectorStep
+  d.efficiencyProfile=s.efficiencyProfile;d.efficiencyFieldEnabled=s.efficiencyFieldEnabled;d.efficiencyFieldTarget=s.efficiencyFieldTarget;d.efficiencyTrendEnabled=s.efficiencyTrendEnabled;d.efficiencyTempEnabled=s.efficiencyTempEnabled;d.efficiencyTempLimit=s.efficiencyTempLimit;d.efficiencyThermalTolerancePercent=s.efficiencyThermalTolerancePercent;d.efficiencySaturationEnabled=s.efficiencySaturationEnabled;d.efficiencySaturationFloor=s.efficiencySaturationFloor;d.efficiencyDeliveryEnabled=s.efficiencyDeliveryEnabled;d.efficiencyInterval=s.efficiencyInterval;d.efficiencyIncreasePercent=s.efficiencyIncreasePercent;d.efficiencyFailureResponse=s.efficiencyFailureResponse;d.efficiencyRollbackPercent=s.efficiencyRollbackPercent;d.efficiencyInjectorEnabled=s.efficiencyInjectorEnabled;d.efficiencyInjectorStep=s.efficiencyInjectorStep
   return normalizeManualEfficiency(d)
 end
 local PERSIST_FIELDS={
@@ -499,7 +505,7 @@ local PERSIST_FIELDS={
   "efficiencyLastStep","efficiencyFieldResponseUntil","efficiencyThermalCandidateOutput","efficiencyThermalSoakUntil",
   "efficiencyThermalStrikes","efficiencyCooldownUntil",
   "efficiencyProfile","efficiencyFieldEnabled","efficiencyFieldTarget",
-  "efficiencyTrendEnabled","efficiencyTempEnabled","efficiencyTempLimit","efficiencySaturationEnabled",
+  "efficiencyTrendEnabled","efficiencyTempEnabled","efficiencyTempLimit","efficiencyThermalTolerancePercent","efficiencySaturationEnabled",
   "efficiencySaturationFloor","efficiencyDeliveryEnabled","efficiencyInterval","efficiencyIncreasePercent",
   "efficiencyFailureResponse","efficiencyRollbackPercent","efficiencyInjectorEnabled","efficiencyInjectorStep",
 }
@@ -798,7 +804,7 @@ local function manualEfficiencyTargets(c,d)
   local outputIncreased=false
   local fieldSupportStatus
   local thermalLimit=tonumber(c.efficiencyTempLimit) or 7500
-  local thermalToleranceCeiling=thermalLimit*(1+EFFICIENCY_THERMAL_TOLERANCE)
+  local thermalToleranceCeiling=thermalLimit*(1+c.efficiencyThermalTolerancePercent/100)
   local fieldBelowTarget=c.efficiencyFieldEnabled and field<c.efficiencyFieldTarget
   local trendBlocked=c.efficiencyTrendEnabled and fieldFalling
   local temperatureBlocksProbe=c.efficiencyTempEnabled and temp>thermalLimit
@@ -1357,6 +1363,8 @@ local function draw(t,b,d,page,c,bs)
     toggleRow(10,"FIELD",c.efficiencyFieldEnabled,string.format("target %.0f%%",c.efficiencyFieldTarget),"FIELD TARGET -","FIELD TARGET +")
     toggleRow(12,"FIELD TREND",c.efficiencyTrendEnabled,"stable or rising")
     toggleRow(14,"TEMPERATURE",c.efficiencyTempEnabled,string.format("max %.0f C",c.efficiencyTempLimit),"TEMP LIMIT -","TEMP LIMIT +")
+    local leewayLabels={[.25]="0.25",[.5]="0.5",[1]="1.0",[2]="2.0"}
+    bs[#bs+1]=button(t,25,15,"THERMAL LEEWAY: "..leewayLabels[c.efficiencyThermalTolerancePercent].."%",colors.cyan,1,"CYCLE THERMAL LEEWAY")
     toggleRow(16,"SATURATION",c.efficiencySaturationEnabled,string.format("floor %.0f%%",c.efficiencySaturationFloor),"SAT FLOOR -","SAT FLOOR +")
     toggleRow(18,"GATE DELIVERY",c.efficiencyDeliveryEnabled,"actual tracks command")
     toggleRow(20,"AUTO INJECTOR",c.efficiencyInjectorEnabled,"step "..fmt(c.efficiencyInjectorStep),"INJECTOR STEP -","INJECTOR STEP +")
@@ -1631,6 +1639,7 @@ local function act(choice,d)
   elseif choice=="FIELD TARGET +" then controls.efficiencyFieldTarget=math.min(99,controls.efficiencyFieldTarget+5);customizeEfficiency("Field target increased")
   elseif choice=="TEMP LIMIT -" then controls.efficiencyTempLimit=math.max(1000,controls.efficiencyTempLimit-250);customizeEfficiency("Temperature limit reduced")
   elseif choice=="TEMP LIMIT +" then controls.efficiencyTempLimit=controls.efficiencyTempLimit+250;customizeEfficiency("Temperature limit increased")
+  elseif choice=="CYCLE THERMAL LEEWAY" then controls.efficiencyThermalTolerancePercent=cycleValue(EFFICIENCY_THERMAL_TOLERANCES,controls.efficiencyThermalTolerancePercent);customizeEfficiency("Thermal variance leeway changed")
   elseif choice=="SAT FLOOR -" then controls.efficiencySaturationFloor=math.max(0,controls.efficiencySaturationFloor-5);customizeEfficiency("Saturation floor reduced")
   elseif choice=="SAT FLOOR +" then controls.efficiencySaturationFloor=math.min(99,controls.efficiencySaturationFloor+5);customizeEfficiency("Saturation floor increased")
   elseif choice=="INJECTOR STEP -" then controls.efficiencyInjectorStep=math.max(1000,controls.efficiencyInjectorStep-25000);customizeEfficiency("Injector tuning step reduced")

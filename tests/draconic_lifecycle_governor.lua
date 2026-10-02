@@ -102,18 +102,19 @@ assert(not manualEfficiency.manualEfficiencyEnabled and manualEfficiency.request
     "disabling the governor must freeze the current live gates without a jump")
 local tolerantCandidate = {mode="UNRESTRICTED",manualField=1900000,manualExport=3900000,
     manualEfficiencyEnabled=true,efficiencyFieldCommand=1900000,efficiencyOutputCommand=4000000,
-    efficiencyTempLimit=8000,efficiencyThermalCandidateOutput=4000000,efficiencyThermalSoakUntil=10,
+    efficiencyTempLimit=8000,efficiencyThermalTolerancePercent=.5,
+    efficiencyThermalCandidateOutput=4000000,efficiencyThermalSoakUntil=10,
     efficiencyLastStep=100000,overdriveField=1900000,overdriveExport=3900000}
 local _,tolerantOutput,tolerantStatus = governor.manualEfficiencyTargets(tolerantCandidate, {
-    reactor={status="running",fieldStrength=70,maxFieldStrength=100,temperature=8080,
+    reactor={status="running",fieldStrength=70,maxFieldStrength=100,temperature=8030,
         energySaturation=60,maxEnergySaturation=100,generationRate=4000000,sampleTime=10},
     inputSet=1900000,inputFlow=1900000,outputSet=0,outputFlow=4000000,
 })
 assert(tolerantOutput==4000000 and tolerantCandidate.overdriveExport==4000000 and
     tolerantStatus:find("above probe threshold",1,true),
-    "a candidate inside the 2% thermal tolerance may be accepted but must remain probe-locked above the nominal limit")
+    "a candidate inside the selected 0.5% thermal tolerance may be accepted but must remain probe-locked above the nominal limit")
 _,tolerantOutput,tolerantStatus = governor.manualEfficiencyTargets(tolerantCandidate, {
-    reactor={status="running",fieldStrength=70,maxFieldStrength=100,temperature=8080,
+    reactor={status="running",fieldStrength=70,maxFieldStrength=100,temperature=8030,
         energySaturation=60,maxEnergySaturation=100,generationRate=4000000,sampleTime=40},
     inputSet=1900000,inputFlow=1900000,outputSet=0,outputFlow=4000000,
 })
@@ -145,6 +146,7 @@ assert(cooldownOutput==3900000 and cooldownStatus:find("retry in",1,true),
 local transient = {};transient.self=transient
 local checkpoint = governor.persistentState({
     mode="UNRESTRICTED",manualField=9900,efficiencyFieldTarget=10,
+    efficiencyThermalTolerancePercent=.25,
     manualEfficiencyEnabled=true,efficiencyOutputCommand=13420000,efficiencyFieldCommand=1320000,
     efficiencyThermalCandidateOutput=13420000,efficiencyThermalSoakUntil=500,
     efficiencyThermalStrikes=2,efficiencyCooldownUntil=1200,
@@ -152,6 +154,8 @@ local checkpoint = governor.persistentState({
 })
 assert(checkpoint.mode=="UNRESTRICTED" and checkpoint.manualField==9900 and checkpoint.efficiencyFieldTarget==10,
     "durable manual-efficiency settings must survive a checkpoint")
+assert(checkpoint.efficiencyThermalTolerancePercent==.25,
+    "the operator-selected thermal variance leeway must survive a checkpoint")
 assert(checkpoint.manualEfficiencyEnabled==true and checkpoint.efficiencyOutputCommand==13420000 and
     checkpoint.efficiencyFieldCommand==1320000,
     "enabled governor and its live ramp commands must survive a controller restart")
