@@ -33,7 +33,8 @@ assisted = { injectorBaseline=1900000 }
 governor.enterAssisted(assisted, { reactor={status="cold"}, inputSet=1900000, outputSet=0 })
 assert(assisted.request=="OFF",
     "entering assisted manual must not start an inactive reactor")
-local manualEfficiency = { mode="UNRESTRICTED", manualField=1900000, manualExport=3900000 }
+local manualEfficiency = { mode="UNRESTRICTED", manualField=1900000, manualExport=3900000,
+    efficiencyFieldFloor=10, efficiencyFieldCeiling=90 }
 local enabled = governor.setManualEfficiency(manualEfficiency, { inputSet=2000000, outputSet=3900000 }, true)
 assert(enabled and manualEfficiency.manualEfficiencyEnabled and manualEfficiency.request=="MANUAL",
     "the manual efficiency Guardian must start from the live manual gate pair")
@@ -96,6 +97,47 @@ fieldTarget,outputTarget,status = governor.manualEfficiencyTargets(manualEfficie
 })
 assert(manualEfficiency.overdriveExport==3939000 and manualEfficiency.efficiencyLastStep==0,
     "a completed thermal soak must save the proven output and clear its rollback step")
+
+local fieldBand = {mode="UNRESTRICTED",manualField=1900000,manualExport=3900000,
+    efficiencyFieldFloor=10,efficiencyFieldCeiling=25}
+governor.setManualEfficiency(fieldBand, {inputSet=1900000,outputSet=3900000,
+    reactor={status="running",sampleTime=0}}, true)
+local recoveredField,recoveredOutput,recoveryStatus = governor.manualEfficiencyTargets(fieldBand, {
+    reactor={status="running",fieldStrength=10,maxFieldStrength=100,fieldDrainRate=2000000,
+        temperature=4000,energySaturation=70,maxEnergySaturation=100,generationRate=3900000,
+        fuelConversion=50,maxFuelConversion=100,sampleTime=1},
+    inputSet=1900000,inputFlow=1900000,outputSet=0,outputFlow=3900000,
+})
+assert(recoveredField>=2300000 and recoveredOutput==3900000 and recoveryStatus:find("FIELD RECOVERY",1,true),
+    "the lower field boundary must trigger immediate injector recovery instead of acting as a target")
+
+local ceilingBand = {mode="UNRESTRICTED",manualField=1900000,manualExport=3900000,
+    efficiencyFieldFloor=10,efficiencyFieldCeiling=25}
+governor.setManualEfficiency(ceilingBand, {inputSet=1900000,outputSet=3900000,
+    reactor={status="running",sampleTime=0}}, true)
+local trimmedField = governor.manualEfficiencyTargets(ceilingBand, {
+    reactor={status="running",fieldStrength=26,maxFieldStrength=100,temperature=4000,
+        energySaturation=70,maxEnergySaturation=100,generationRate=3900000,
+        fuelConversion=50,maxFuelConversion=100,sampleTime=30},
+    inputSet=1900000,inputFlow=1900000,outputSet=0,outputFlow=3900000,
+})
+assert(trimmedField==1850000,
+    "injector efficiency trimming must occur only above the configured field ceiling")
+
+local fuelReserve = {mode="UNRESTRICTED",manualField=1900000,manualExport=3900000,
+    efficiencyFieldFloor=10,efficiencyFieldCeiling=25}
+governor.setManualEfficiency(fuelReserve, {inputSet=1900000,outputSet=3900000,
+    reactor={status="running",sampleTime=0}}, true)
+local _,reserveOutput,reserveStatus,reserveReasons = governor.manualEfficiencyTargets(fuelReserve, {
+    reactor={status="running",fieldStrength=30,maxFieldStrength=100,temperature=4000,
+        energySaturation=70,maxEnergySaturation=100,generationRate=3900000,
+        fuelConversion=95,maxFuelConversion=100,sampleTime=60},
+    inputSet=1900000,inputFlow=1900000,outputSet=0,outputFlow=3900000,
+})
+assert(reserveOutput==3900000 and reserveStatus:find("HOLDING",1,true) and
+    table.concat(reserveReasons," "):find("fuel reserve",1,true),
+    "the final five percent of fuel must lock out further efficiency probes")
+
 governor.setManualEfficiency(manualEfficiency, { inputSet=2100000, outputSet=4200000 }, false)
 assert(not manualEfficiency.manualEfficiencyEnabled and manualEfficiency.request=="MANUAL" and
     manualEfficiency.manualField==1950000 and manualEfficiency.manualExport==3939000,
@@ -145,15 +187,16 @@ assert(cooldownOutput==3900000 and cooldownStatus:find("retry in",1,true),
     "thermal cooldown must hold the last verified output instead of probing every interval")
 local transient = {};transient.self=transient
 local checkpoint = governor.persistentState({
-    mode="UNRESTRICTED",manualField=9900,efficiencyFieldTarget=10,
+    mode="UNRESTRICTED",manualField=9900,efficiencyFieldFloor=10,efficiencyFieldCeiling=25,
     efficiencyThermalTolerancePercent=.25,
     manualEfficiencyEnabled=true,efficiencyOutputCommand=13420000,efficiencyFieldCommand=1320000,
     efficiencyThermalCandidateOutput=13420000,efficiencyThermalSoakUntil=500,
     efficiencyThermalStrikes=2,efficiencyCooldownUntil=1200,
     transientRuntime=transient,efficiencyPendingTelemetry=transient,
 })
-assert(checkpoint.mode=="UNRESTRICTED" and checkpoint.manualField==9900 and checkpoint.efficiencyFieldTarget==10,
-    "durable manual-efficiency settings must survive a checkpoint")
+assert(checkpoint.mode=="UNRESTRICTED" and checkpoint.manualField==9900 and
+    checkpoint.efficiencyFieldFloor==10 and checkpoint.efficiencyFieldCeiling==25,
+    "durable manual-efficiency field band must survive a checkpoint")
 assert(checkpoint.efficiencyThermalTolerancePercent==.25,
     "the operator-selected thermal variance leeway must survive a checkpoint")
 assert(checkpoint.manualEfficiencyEnabled==true and checkpoint.efficiencyOutputCommand==13420000 and

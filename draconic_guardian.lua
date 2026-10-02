@@ -1,9 +1,9 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.50f
+-- HELIOS Draconic Guardian v1.2.0-alpha.51
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
 local FIELD_TARGET, FIELD_EMERGENCY = 50, 15
-local MAX_TEMPERATURE, MINIMUM_FUEL = 8000, 1
+local MAX_TEMPERATURE, MINIMUM_FUEL = 8000, 5
 local REFUEL_OFFER_FUEL, REFUEL_VERIFY_FUEL = 5, 5
 -- Draconic's peripheral telemetry reports live generation but not a safe
 -- maximum output. Establish one by proving progressively larger exports.
@@ -47,7 +47,7 @@ local SAFETY_LOW_FIELD, SAFETY_HIGH_TEMP = 35, 7750
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.50f"
+local GUARDIAN_VERSION = "1.2.0-alpha.51"
 local EFFICIENCY_THERMAL_STRIKES, EFFICIENCY_THERMAL_COOLDOWN = 3, 15*60
 local EFFICIENCY_THERMAL_TOLERANCES = {.25,.5,1,2}
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
@@ -453,7 +453,9 @@ end
 local function normalizeManualEfficiency(c)
   c.efficiencyProfile=tostring(c.efficiencyProfile or "BALANCED")
   c.efficiencyFieldEnabled=c.efficiencyFieldEnabled~=false
-  c.efficiencyFieldTarget=math.max(1,math.min(99,tonumber(c.efficiencyFieldTarget) or 70))
+  c.efficiencyFieldFloor=math.max(5,math.min(90,tonumber(c.efficiencyFieldFloor) or 10))
+  c.efficiencyFieldCeiling=math.max(c.efficiencyFieldFloor+5,
+    math.min(99,tonumber(c.efficiencyFieldCeiling) or 25))
   c.efficiencyTrendEnabled=c.efficiencyTrendEnabled~=false
   c.efficiencyTempEnabled=c.efficiencyTempEnabled~=false
   c.efficiencyTempLimit=math.max(1000,tonumber(c.efficiencyTempLimit) or 7500)
@@ -488,7 +490,7 @@ local function load()
   d.manualEfficiencyEnabled=s.manualEfficiencyEnabled==true;d.efficiencyOutputCommand=positive(s.efficiencyOutputCommand);d.efficiencyFieldCommand=positive(s.efficiencyFieldCommand)
   d.efficiencyPendingExport=positive(s.efficiencyPendingExport);d.efficiencyPendingSince=tonumber(s.efficiencyPendingSince);d.efficiencyPendingBaseFlow=tonumber(s.efficiencyPendingBaseFlow);d.efficiencyPendingBaseGeneration=tonumber(s.efficiencyPendingBaseGeneration);d.efficiencyLastStep=tonumber(s.efficiencyLastStep);d.efficiencyFieldResponseUntil=tonumber(s.efficiencyFieldResponseUntil)
   d.efficiencyThermalCandidateOutput=positive(s.efficiencyThermalCandidateOutput);d.efficiencyThermalSoakUntil=tonumber(s.efficiencyThermalSoakUntil);d.efficiencyThermalStrikes=math.max(0,math.floor(tonumber(s.efficiencyThermalStrikes) or 0));d.efficiencyCooldownUntil=tonumber(s.efficiencyCooldownUntil)
-  d.efficiencyProfile=s.efficiencyProfile;d.efficiencyFieldEnabled=s.efficiencyFieldEnabled;d.efficiencyFieldTarget=s.efficiencyFieldTarget;d.efficiencyTrendEnabled=s.efficiencyTrendEnabled;d.efficiencyTempEnabled=s.efficiencyTempEnabled;d.efficiencyTempLimit=s.efficiencyTempLimit;d.efficiencyThermalTolerancePercent=s.efficiencyThermalTolerancePercent;d.efficiencySaturationEnabled=s.efficiencySaturationEnabled;d.efficiencySaturationFloor=s.efficiencySaturationFloor;d.efficiencyDeliveryEnabled=s.efficiencyDeliveryEnabled;d.efficiencyInterval=s.efficiencyInterval;d.efficiencyIncreasePercent=s.efficiencyIncreasePercent;d.efficiencyFailureResponse=s.efficiencyFailureResponse;d.efficiencyRollbackPercent=s.efficiencyRollbackPercent;d.efficiencyInjectorEnabled=s.efficiencyInjectorEnabled;d.efficiencyInjectorStep=s.efficiencyInjectorStep
+  d.efficiencyProfile=s.efficiencyProfile;d.efficiencyFieldEnabled=s.efficiencyFieldEnabled;d.efficiencyFieldFloor=s.efficiencyFieldFloor;d.efficiencyFieldCeiling=s.efficiencyFieldCeiling;d.efficiencyTrendEnabled=s.efficiencyTrendEnabled;d.efficiencyTempEnabled=s.efficiencyTempEnabled;d.efficiencyTempLimit=s.efficiencyTempLimit;d.efficiencyThermalTolerancePercent=s.efficiencyThermalTolerancePercent;d.efficiencySaturationEnabled=s.efficiencySaturationEnabled;d.efficiencySaturationFloor=s.efficiencySaturationFloor;d.efficiencyDeliveryEnabled=s.efficiencyDeliveryEnabled;d.efficiencyInterval=s.efficiencyInterval;d.efficiencyIncreasePercent=s.efficiencyIncreasePercent;d.efficiencyFailureResponse=s.efficiencyFailureResponse;d.efficiencyRollbackPercent=s.efficiencyRollbackPercent;d.efficiencyInjectorEnabled=s.efficiencyInjectorEnabled;d.efficiencyInjectorStep=s.efficiencyInjectorStep
   return normalizeManualEfficiency(d)
 end
 local PERSIST_FIELDS={
@@ -504,7 +506,7 @@ local PERSIST_FIELDS={
   "efficiencyPendingExport","efficiencyPendingSince","efficiencyPendingBaseFlow","efficiencyPendingBaseGeneration",
   "efficiencyLastStep","efficiencyFieldResponseUntil","efficiencyThermalCandidateOutput","efficiencyThermalSoakUntil",
   "efficiencyThermalStrikes","efficiencyCooldownUntil",
-  "efficiencyProfile","efficiencyFieldEnabled","efficiencyFieldTarget",
+  "efficiencyProfile","efficiencyFieldEnabled","efficiencyFieldFloor","efficiencyFieldCeiling",
   "efficiencyTrendEnabled","efficiencyTempEnabled","efficiencyTempLimit","efficiencyThermalTolerancePercent","efficiencySaturationEnabled",
   "efficiencySaturationFloor","efficiencyDeliveryEnabled","efficiencyInterval","efficiencyIncreasePercent",
   "efficiencyFailureResponse","efficiencyRollbackPercent","efficiencyInjectorEnabled","efficiencyInjectorStep",
@@ -795,6 +797,8 @@ local function manualEfficiencyTargets(c,d)
   local temp=tonumber(r.temperature) or math.huge
   local saturation=pct(r.energySaturation,r.maxEnergySaturation) or 0
   local flow=tonumber(d.outputFlow) or 0;local generation=tonumber(r.generationRate) or 0
+  local fuel=pct((tonumber(r.maxFuelConversion) or 0)-(tonumber(r.fuelConversion) or 0),r.maxFuelConversion)
+  local fuelReserveBlocked=fuel~=nil and fuel<=MINIMUM_FUEL
   local outputSet=tonumber(d.outputSet) or 0
   local output=tonumber(c.efficiencyOutputCommand) or tonumber(c.manualExport) or outputSet
   local injector=positive(c.efficiencyFieldCommand) or positive(c.manualField) or positive(d.inputFlow) or positive(d.inputSet) or positive(c.injectorBaseline) or MINIMUM_FIELD_INPUT
@@ -805,13 +809,19 @@ local function manualEfficiencyTargets(c,d)
   local fieldSupportStatus
   local thermalLimit=tonumber(c.efficiencyTempLimit) or 7500
   local thermalToleranceCeiling=thermalLimit*(1+c.efficiencyThermalTolerancePercent/100)
-  local fieldBelowTarget=c.efficiencyFieldEnabled and field<c.efficiencyFieldTarget
+  local fieldFloor=tonumber(c.efficiencyFieldFloor) or 10
+  local fieldCeiling=tonumber(c.efficiencyFieldCeiling) or 25
+  local fieldRecoveryMargin=math.min(fieldCeiling,fieldFloor+3)
+  local fieldBelowFloor=c.efficiencyFieldEnabled and field<=fieldFloor
+  local fieldNearFloor=c.efficiencyFieldEnabled and field<=fieldRecoveryMargin
   local trendBlocked=c.efficiencyTrendEnabled and fieldFalling
   local temperatureBlocksProbe=c.efficiencyTempEnabled and temp>thermalLimit
   local saturationBlocked=c.efficiencySaturationEnabled and saturation<c.efficiencySaturationFloor
   local deliveryBlocked=false
   local reasons={}
-  if fieldBelowTarget then reasons[#reasons+1]=string.format("field %.1f%% < %.1f%%",field,c.efficiencyFieldTarget) end
+  if fieldBelowFloor then reasons[#reasons+1]=string.format("field %.1f%% <= %.1f%% hard floor",field,fieldFloor)
+  elseif fieldNearFloor and fieldFalling then reasons[#reasons+1]=string.format("field %.1f%% falling near %.1f%% floor",field,fieldFloor) end
+  if fuelReserveBlocked then reasons[#reasons+1]=string.format("fuel reserve %.1f%% <= %.1f%%",fuel,MINIMUM_FUEL) end
   if trendBlocked then reasons[#reasons+1]="field trend falling" end
   if temperatureBlocksProbe then reasons[#reasons+1]=string.format("temperature %.0f > %.0f C probe threshold",temp,thermalLimit) end
   if saturationBlocked then reasons[#reasons+1]=string.format("saturation %.1f%% < %.1f%%",saturation,c.efficiencySaturationFloor) end
@@ -822,6 +832,27 @@ local function manualEfficiencyTargets(c,d)
     local tolerance=math.max(50000,math.abs(output)*.15)
     deliveryBlocked=math.abs(flow-output)>tolerance
     if deliveryBlocked then reasons[#reasons+1]="export delivery not tracking Guardian command" end
+  end
+  -- The lower edge is a safety floor, never an efficiency target. Recover
+  -- before the field crosses it and abandon any unproved export immediately
+  -- once it does. This remains part of the explicitly enabled manual
+  -- efficiency governor; unrestricted mode itself still has no hidden safety.
+  if c.efficiencyInjectorEnabled and (fieldBelowFloor or (fieldNearFloor and fieldFalling)) and
+      now-(tonumber(c.efficiencyLastInjectorTune) or -math.huge)>=1 then
+    local drain=positive(r.fieldDrainRate) or 0
+    local recoveryStep=math.max(c.efficiencyInjectorStep,math.ceil(drain*1.15-injector),0)
+    injector=injector+recoveryStep;c.efficiencyLastInjectorTune=now
+    c.efficiencyFieldCommand=injector;c.manualField=injector;c.overdriveField=injector
+    fieldSupportStatus=string.format("FIELD RECOVERY: %.1f%%; injector +%s RF/t",field,fmt(recoveryStep))
+    if fieldBelowFloor then
+      output=positive(c.overdriveExport) or math.max(0,output-(tonumber(c.efficiencyLastStep) or 0))
+      c.efficiencyOutputCommand=output;c.manualExport=output
+      c.efficiencyPendingExport=nil;c.efficiencyPendingSince=nil;c.efficiencyThermalCandidateOutput=nil
+      c.efficiencyThermalSoakUntil=nil;c.efficiencyFieldResponseUntil=nil;c.efficiencyLastStep=0
+      c.efficiencyStableSince=nil
+    end
+    guardianRecord("log.guardian_command","critical",{mode="manual_efficiency",field=field,
+      floor=fieldFloor,injector=injector,output=output},{fieldSupportStatus})
   end
   local cooldownUntil=tonumber(c.efficiencyCooldownUntil)
   if cooldownUntil and now<cooldownUntil then
@@ -885,7 +916,7 @@ local function manualEfficiencyTargets(c,d)
   if c.efficiencyPendingExport then c.efficiencyFieldCommand=injector;return injector,output,c.efficiencyStatus,reasons end
   if c.efficiencyThermalCandidateOutput then
     local soakUntil=tonumber(c.efficiencyThermalSoakUntil) or now
-    local candidateSafe=not fieldBelowTarget and not trendBlocked and not saturationBlocked and
+    local candidateSafe=not fieldBelowFloor and not trendBlocked and not fuelReserveBlocked and not saturationBlocked and
       not deliveryBlocked and (not c.efficiencyTempEnabled or temp<=thermalToleranceCeiling)
     if now>=soakUntil and candidateSafe then
       thermalAccepted=true;c.efficiencyThermalCandidateOutput=nil;c.efficiencyThermalSoakUntil=nil
@@ -914,14 +945,17 @@ local function manualEfficiencyTargets(c,d)
       guardianRecord("log.guardian_command","info",{mode="manual_efficiency",step=step,output=output},{c.efficiencyStatus})
     end
     if c.efficiencyInjectorEnabled and not outputIncreased and not c.efficiencyFieldResponseUntil and
-        field>c.efficiencyFieldTarget+10 and now-(tonumber(c.efficiencyLastInjectorTune) or 0)>=c.efficiencyInterval then
+        field>fieldCeiling and not fieldFalling and not fuelReserveBlocked and
+        now-(tonumber(c.efficiencyLastInjectorTune) or 0)>=c.efficiencyInterval then
       injector=math.max(MINIMUM_FIELD_INPUT,injector-c.efficiencyInjectorStep);c.efficiencyLastInjectorTune=now
-      guardianRecord("log.guardian_command","info",{mode="manual_efficiency",injector=injector},{"Injector trimmed after sustained field surplus"})
+      guardianRecord("log.guardian_command","info",{mode="manual_efficiency",injector=injector,
+        field=field,ceiling=fieldCeiling},{"Injector trimmed only above the configured field ceiling"})
     end
   else
     c.efficiencyStableSince=nil
     c.efficiencyStatus="HOLDING: "..table.concat(reasons,"; ")
-    if c.efficiencyInjectorEnabled and field<c.efficiencyFieldTarget and now-(tonumber(c.efficiencyLastInjectorTune) or 0)>=math.min(10,c.efficiencyInterval) then
+    if c.efficiencyInjectorEnabled and field<fieldCeiling and not fieldSupportStatus and
+        now-(tonumber(c.efficiencyLastInjectorTune) or 0)>=math.min(10,c.efficiencyInterval) then
       injector=injector+c.efficiencyInjectorStep;c.efficiencyLastInjectorTune=now
       guardianRecord("log.guardian_command","warning",{mode="manual_efficiency",injector=injector},{"Injector raised because field was below the operator threshold"})
     end
@@ -1361,24 +1395,25 @@ local function draw(t,b,d,page,c,bs)
       if minus then bs[#bs+1]=button(t,49,y,"-",colors.cyan,1,minus);bs[#bs+1]=button(t,56,y,"+",colors.cyan,1,plus) end
     end
     text(t,1,9,"-- PROBE CONDITIONS --------------------------------",colors.gray)
-    toggleRow(11,"FIELD",c.efficiencyFieldEnabled,string.format("target %.0f%%",c.efficiencyFieldTarget),"FIELD TARGET -","FIELD TARGET +")
-    toggleRow(13,"FIELD TREND",c.efficiencyTrendEnabled,"stable or rising")
-    toggleRow(15,"TEMPERATURE",c.efficiencyTempEnabled,string.format("max %.0f C",c.efficiencyTempLimit),"TEMP LIMIT -","TEMP LIMIT +")
+    toggleRow(11,"FIELD BAND",c.efficiencyFieldEnabled,string.format("%.0f-%.0f%%",c.efficiencyFieldFloor,c.efficiencyFieldCeiling))
+    bs[#bs+1]=button(t,1,13,"FLOOR -",colors.cyan,1,"FIELD FLOOR -");bs[#bs+1]=button(t,10,13,"FLOOR +",colors.cyan,1,"FIELD FLOOR +")
+    bs[#bs+1]=button(t,27,13,"CEILING -",colors.cyan,1,"FIELD CEILING -");bs[#bs+1]=button(t,39,13,"CEILING +",colors.cyan,1,"FIELD CEILING +")
+    toggleRow(15,"FIELD TREND",c.efficiencyTrendEnabled,"stable or rising")
+    toggleRow(17,"TEMPERATURE",c.efficiencyTempEnabled,string.format("max %.0f C",c.efficiencyTempLimit),"TEMP LIMIT -","TEMP LIMIT +")
     local leewayLabels={[.25]="0.25",[.5]="0.5",[1]="1.0",[2]="2.0"}
-    text(t,1,17,"THERMAL VARIANCE",colors.lightGray)
-    bs[#bs+1]=button(t,27,17,"LEEWAY: "..leewayLabels[c.efficiencyThermalTolerancePercent].."%",colors.cyan,1,"CYCLE THERMAL LEEWAY")
-    toggleRow(19,"SATURATION",c.efficiencySaturationEnabled,string.format("floor %.0f%%",c.efficiencySaturationFloor),"SAT FLOOR -","SAT FLOOR +")
-    toggleRow(21,"GATE DELIVERY",c.efficiencyDeliveryEnabled,"actual tracks command")
-    text(t,1,23,"-- RESPONSE TUNING ---------------------------------",colors.gray)
-    toggleRow(25,"AUTO INJECTOR",c.efficiencyInjectorEnabled,"step "..fmt(c.efficiencyInjectorStep),"INJECTOR STEP -","INJECTOR STEP +")
-    bs[#bs+1]=button(t,1,27,"INTERVAL: "..tostring(c.efficiencyInterval).."s",colors.cyan,1,"CYCLE EFFICIENCY INTERVAL")
-    bs[#bs+1]=button(t,27,27,"INCREASE: "..tostring(c.efficiencyIncreasePercent).."%",colors.cyan,1,"CYCLE EFFICIENCY INCREASE")
-    bs[#bs+1]=button(t,1,29,"FAILED CHECK: "..c.efficiencyFailureResponse,colors.orange,1,"CYCLE FAILURE RESPONSE")
-    bs[#bs+1]=button(t,36,29,"ROLLBACK: "..tostring(c.efficiencyRollbackPercent).."%",colors.cyan,1,"CYCLE ROLLBACK PERCENT")
-    text(t,1,31,"-- RUNTIME -----------------------------------------",colors.gray)
-    bs[#bs+1]=button(t,1,33,"CLEAR PAUSE",colors.cyan,1,"CLEAR EFFICIENCY PAUSE")
-    text(t,1,35,tostring(c.efficiencyStatus or "IDLE"),c.efficiencyPaused and colors.red or colors.lightGray)
-    text(t,1,37,"No output ceiling; each confirmed interval may advance.",colors.orange)
+    text(t,1,19,"THERMAL VARIANCE",colors.lightGray)
+    bs[#bs+1]=button(t,27,19,"LEEWAY: "..leewayLabels[c.efficiencyThermalTolerancePercent].."%",colors.cyan,1,"CYCLE THERMAL LEEWAY")
+    toggleRow(21,"SATURATION",c.efficiencySaturationEnabled,string.format("floor %.0f%%",c.efficiencySaturationFloor),"SAT FLOOR -","SAT FLOOR +")
+    toggleRow(23,"GATE DELIVERY",c.efficiencyDeliveryEnabled,"actual tracks command")
+    text(t,1,25,"-- RESPONSE TUNING ---------------------------------",colors.gray)
+    toggleRow(27,"AUTO INJECTOR",c.efficiencyInjectorEnabled,"step "..fmt(c.efficiencyInjectorStep),"INJECTOR STEP -","INJECTOR STEP +")
+    bs[#bs+1]=button(t,1,29,"INTERVAL: "..tostring(c.efficiencyInterval).."s",colors.cyan,1,"CYCLE EFFICIENCY INTERVAL")
+    bs[#bs+1]=button(t,27,29,"INCREASE: "..tostring(c.efficiencyIncreasePercent).."%",colors.cyan,1,"CYCLE EFFICIENCY INCREASE")
+    bs[#bs+1]=button(t,1,31,"FAILED CHECK: "..c.efficiencyFailureResponse,colors.orange,1,"CYCLE FAILURE RESPONSE")
+    bs[#bs+1]=button(t,36,31,"ROLLBACK: "..tostring(c.efficiencyRollbackPercent).."%",colors.cyan,1,"CYCLE ROLLBACK PERCENT")
+    text(t,1,33,"-- RUNTIME -- HARD FLOOR / 5% FUEL RESERVE --------",colors.gray)
+    bs[#bs+1]=button(t,1,35,"CLEAR PAUSE",colors.cyan,1,"CLEAR EFFICIENCY PAUSE")
+    text(t,1,37,tostring(c.efficiencyStatus or "IDLE"),c.efficiencyPaused and colors.red or colors.lightGray)
     bs[#bs+1]=button(t,1,39,"BACK",colors.lightGray,1)
     return
   end
@@ -1570,11 +1605,11 @@ end
 local function applyEfficiencyProfile(name)
   controls.efficiencyProfile=name
   if name=="PASSIVE" then
-    controls.efficiencyFieldTarget=80;controls.efficiencyIncreasePercent=.5;controls.efficiencyInterval=60;controls.efficiencyFailureResponse="STEP BACK";controls.efficiencyRollbackPercent=5;controls.efficiencyInjectorStep=25000
+    controls.efficiencyFieldFloor=20;controls.efficiencyFieldCeiling=35;controls.efficiencyIncreasePercent=.5;controls.efficiencyInterval=60;controls.efficiencyFailureResponse="STEP BACK";controls.efficiencyRollbackPercent=5;controls.efficiencyInjectorStep=25000
   elseif name=="AGGRESSIVE" then
-    controls.efficiencyFieldTarget=60;controls.efficiencyIncreasePercent=2;controls.efficiencyInterval=10;controls.efficiencyFailureResponse="ROLL BACK";controls.efficiencyRollbackPercent=20;controls.efficiencyInjectorStep=100000
+    controls.efficiencyFieldFloor=10;controls.efficiencyFieldCeiling=20;controls.efficiencyIncreasePercent=2;controls.efficiencyInterval=10;controls.efficiencyFailureResponse="ROLL BACK";controls.efficiencyRollbackPercent=20;controls.efficiencyInjectorStep=100000
   else
-    controls.efficiencyProfile="BALANCED";controls.efficiencyFieldTarget=70;controls.efficiencyIncreasePercent=1;controls.efficiencyInterval=30;controls.efficiencyFailureResponse="STEP BACK";controls.efficiencyRollbackPercent=10;controls.efficiencyInjectorStep=50000
+    controls.efficiencyProfile="BALANCED";controls.efficiencyFieldFloor=10;controls.efficiencyFieldCeiling=25;controls.efficiencyIncreasePercent=1;controls.efficiencyInterval=30;controls.efficiencyFailureResponse="STEP BACK";controls.efficiencyRollbackPercent=10;controls.efficiencyInjectorStep=50000
   end
   resetManualEfficiencyRuntime(controls,controls.manualEfficiencyEnabled);controls.message="Manual efficiency profile loaded: "..controls.efficiencyProfile
 end
@@ -1582,7 +1617,9 @@ local function customizeEfficiency(message)
   controls.efficiencyProfile="CUSTOM";resetManualEfficiencyRuntime(controls,controls.manualEfficiencyEnabled);controls.message=message
 end
 local function act(choice,d)
-  if type(choice)=="string" and ((string.find(choice,"FIELD",1,true)==1 and string.find(choice,"FIELD TARGET",1,true)~=1) or string.find(choice,"EXPORT",1,true)==1) then
+  if type(choice)=="string" and ((string.find(choice,"FIELD",1,true)==1 and
+      string.find(choice,"FIELD FLOOR",1,true)~=1 and string.find(choice,"FIELD CEILING",1,true)~=1) or
+      string.find(choice,"EXPORT",1,true)==1) then
     controls.liveGatesSelected=false
     if controls.manualEfficiencyEnabled then controls.manualEfficiencyEnabled=false;resetManualEfficiencyRuntime(controls) end
   end
@@ -1639,8 +1676,10 @@ local function act(choice,d)
   elseif choice=="TOGGLE SATURATION" then controls.efficiencySaturationEnabled=not controls.efficiencySaturationEnabled;customizeEfficiency("Saturation monitoring toggled")
   elseif choice=="TOGGLE GATE DELIVERY" then controls.efficiencyDeliveryEnabled=not controls.efficiencyDeliveryEnabled;customizeEfficiency("Gate delivery monitoring toggled")
   elseif choice=="TOGGLE AUTO INJECTOR" then controls.efficiencyInjectorEnabled=not controls.efficiencyInjectorEnabled;customizeEfficiency("Automatic injector tuning toggled")
-  elseif choice=="FIELD TARGET -" then controls.efficiencyFieldTarget=math.max(1,controls.efficiencyFieldTarget-5);customizeEfficiency("Field target reduced")
-  elseif choice=="FIELD TARGET +" then controls.efficiencyFieldTarget=math.min(99,controls.efficiencyFieldTarget+5);customizeEfficiency("Field target increased")
+  elseif choice=="FIELD FLOOR -" then controls.efficiencyFieldFloor=math.max(5,controls.efficiencyFieldFloor-5);customizeEfficiency("Field floor reduced")
+  elseif choice=="FIELD FLOOR +" then controls.efficiencyFieldFloor=math.min(controls.efficiencyFieldCeiling-5,controls.efficiencyFieldFloor+5);customizeEfficiency("Field floor increased")
+  elseif choice=="FIELD CEILING -" then controls.efficiencyFieldCeiling=math.max(controls.efficiencyFieldFloor+5,controls.efficiencyFieldCeiling-5);customizeEfficiency("Field ceiling reduced")
+  elseif choice=="FIELD CEILING +" then controls.efficiencyFieldCeiling=math.min(99,controls.efficiencyFieldCeiling+5);customizeEfficiency("Field ceiling increased")
   elseif choice=="TEMP LIMIT -" then controls.efficiencyTempLimit=math.max(1000,controls.efficiencyTempLimit-250);customizeEfficiency("Temperature limit reduced")
   elseif choice=="TEMP LIMIT +" then controls.efficiencyTempLimit=controls.efficiencyTempLimit+250;customizeEfficiency("Temperature limit increased")
   elseif choice=="CYCLE THERMAL LEEWAY" then controls.efficiencyThermalTolerancePercent=cycleValue(EFFICIENCY_THERMAL_TOLERANCES,controls.efficiencyThermalTolerancePercent);customizeEfficiency("Thermal variance leeway changed")
