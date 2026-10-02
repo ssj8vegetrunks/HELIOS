@@ -77,10 +77,9 @@ fieldTarget,outputTarget,status = governor.manualEfficiencyTargets(manualEfficie
         energySaturation=70,maxEnergySaturation=100,generationRate=3939000,sampleTime=31},
     inputSet=1900000,inputFlow=1900000,outputSet=0,outputFlow=3939000,
 })
-assert(manualEfficiency.overdriveField==fieldTarget and manualEfficiency.overdriveExport==3939000,
-    "a verified increase must automatically advance the durable Overdrive recovery preset")
-assert(manualEfficiency.efficiencyLastStep==0,
-    "a confirmed increase must not remain armed for a later unrelated step-back")
+assert(manualEfficiency.overdriveExport==3900000 and manualEfficiency.efficiencyLastStep==39000 and
+    status:find("THERMAL SOAK",1,true),
+    "electrical confirmation must begin a thermal soak before advancing the Overdrive preset")
 fieldTarget,outputTarget,status = governor.manualEfficiencyTargets(manualEfficiency, {
     reactor={status="running",fieldStrength=79,maxFieldStrength=100,temperature=4000,
         energySaturation=70,maxEnergySaturation=100,generationRate=3939000,sampleTime=32},
@@ -90,14 +89,46 @@ assert(outputTarget==3939000 and status:find("SUPPORTING FIELD",1,true),
     "a later injector-related field dip must hold, but must not undo a confirmed export point")
 assert(fieldTarget==1950000 and manualEfficiency.overdriveField==1950000,
     "a falling field immediately after an export increase must add one injector step and save the supported recovery point")
+fieldTarget,outputTarget,status = governor.manualEfficiencyTargets(manualEfficiency, {
+    reactor={status="running",fieldStrength=79,maxFieldStrength=100,temperature=4000,
+        energySaturation=70,maxEnergySaturation=100,generationRate=3939000,sampleTime=121},
+    inputSet=1950000,inputFlow=1950000,outputSet=0,outputFlow=3939000,
+})
+assert(manualEfficiency.overdriveExport==3939000 and manualEfficiency.efficiencyLastStep==0,
+    "a completed thermal soak must save the proven output and clear its rollback step")
 governor.setManualEfficiency(manualEfficiency, { inputSet=2100000, outputSet=4200000 }, false)
 assert(not manualEfficiency.manualEfficiencyEnabled and manualEfficiency.request=="MANUAL" and
     manualEfficiency.manualField==1950000 and manualEfficiency.manualExport==3939000,
     "disabling the governor must freeze the current live gates without a jump")
+local thermalProbe = { mode="UNRESTRICTED",manualField=1900000,manualExport=3900000 }
+governor.setManualEfficiency(thermalProbe, {inputSet=1900000,outputSet=3900000,
+    reactor={status="running",sampleTime=0}}, true)
+for strike=1,3 do
+    thermalProbe.efficiencyOutputCommand=4000000;thermalProbe.efficiencyThermalCandidateOutput=4000000
+    thermalProbe.efficiencyThermalSoakUntil=100;thermalProbe.efficiencyLastStep=100000
+    local _,held,thermalStatus = governor.manualEfficiencyTargets(thermalProbe, {
+        reactor={status="running",fieldStrength=70,maxFieldStrength=100,temperature=8001,
+            energySaturation=60,maxEnergySaturation=100,generationRate=4000000,sampleTime=strike},
+        inputSet=1900000,inputFlow=1900000,outputSet=0,outputFlow=4000000,
+    })
+    assert(held==3900000 and thermalProbe.efficiencyThermalStrikes==strike,
+        "each overheated probe must restore the verified Overdrive point and record a strike")
+    if strike==3 then assert(thermalStatus:find("15m",1,true) and thermalProbe.efficiencyCooldownUntil==903,
+        "three thermal rejections must begin a fifteen-minute cooldown") end
+end
+local _,cooldownOutput,cooldownStatus = governor.manualEfficiencyTargets(thermalProbe, {
+    reactor={status="running",fieldStrength=70,maxFieldStrength=100,temperature=7000,
+        energySaturation=60,maxEnergySaturation=100,generationRate=3900000,sampleTime=4},
+    inputSet=1900000,inputFlow=1900000,outputSet=0,outputFlow=3900000,
+})
+assert(cooldownOutput==3900000 and cooldownStatus:find("retry in",1,true),
+    "thermal cooldown must hold the last verified output instead of probing every interval")
 local transient = {};transient.self=transient
 local checkpoint = governor.persistentState({
     mode="UNRESTRICTED",manualField=9900,efficiencyFieldTarget=10,
     manualEfficiencyEnabled=true,efficiencyOutputCommand=13420000,efficiencyFieldCommand=1320000,
+    efficiencyThermalCandidateOutput=13420000,efficiencyThermalSoakUntil=500,
+    efficiencyThermalStrikes=2,efficiencyCooldownUntil=1200,
     transientRuntime=transient,efficiencyPendingTelemetry=transient,
 })
 assert(checkpoint.mode=="UNRESTRICTED" and checkpoint.manualField==9900 and checkpoint.efficiencyFieldTarget==10,
@@ -105,6 +136,9 @@ assert(checkpoint.mode=="UNRESTRICTED" and checkpoint.manualField==9900 and chec
 assert(checkpoint.manualEfficiencyEnabled==true and checkpoint.efficiencyOutputCommand==13420000 and
     checkpoint.efficiencyFieldCommand==1320000,
     "enabled governor and its live ramp commands must survive a controller restart")
+assert(checkpoint.efficiencyThermalCandidateOutput==13420000 and checkpoint.efficiencyThermalStrikes==2 and
+    checkpoint.efficiencyCooldownUntil==1200,
+    "thermal candidates, strikes, and cooldowns must survive a controller restart")
 assert(checkpoint.transientRuntime==nil and checkpoint.efficiencyPendingTelemetry==nil,
     "checkpoint serialization must exclude cyclic or growing transient controller state")
 assert(not governor.lifecycleUnsafe(89, 7700),

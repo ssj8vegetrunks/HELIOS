@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.50a
+-- HELIOS Draconic Guardian v1.2.0-alpha.50b
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -47,7 +47,8 @@ local SAFETY_LOW_FIELD, SAFETY_HIGH_TEMP = 35, 7750
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.50a"
+local GUARDIAN_VERSION = "1.2.0-alpha.50b"
+local EFFICIENCY_THERMAL_STRIKES, EFFICIENCY_THERMAL_COOLDOWN = 3, 15*60
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -478,6 +479,8 @@ local function load()
   if not s then return normalizeManualEfficiency(d) end
   d.mode=(s.mode=="ASSISTED" or s.mode=="UNRESTRICTED") and s.mode or "AUTO";d.request=(FRACTION[s.request] or s.request=="MANUAL" or s.request=="OVERDRIVE" or s.request=="IDLE") and s.request or "OFF";d.rated=tonumber(s.rated);d.lifecycleCeilings=type(s.lifecycleCeilings)=="table" and s.lifecycleCeilings or {};d.currentCycleCeilings=type(s.currentCycleCeilings)=="table" and s.currentCycleCeilings or {};d.injectorBaseline=positive(s.injectorBaseline);d.manualField=positive(s.manualField);d.manualExport=positive(s.manualExport) or 0;d.overdriveField=positive(s.overdriveField);d.overdriveExport=positive(s.overdriveExport);d.commissioned=s.commissioned==true;d.commissioning=s.commissioning==true;d.commissionFlow=positive(s.commissionFlow);d.commissionSamples=math.max(0,math.floor(tonumber(s.commissionSamples) or 0));d.commissionShortfallSamples=math.max(0,math.floor(tonumber(s.commissionShortfallSamples) or 0));d.commissionSettleSamples=math.max(0,math.floor(tonumber(s.commissionSettleSamples) or 0));d.commissionFieldInput=positive(s.commissionFieldInput);d.commissionFieldTuneSamples=math.max(0,math.floor(tonumber(s.commissionFieldTuneSamples) or 0));d.commissionLastSafe=positive(s.commissionLastSafe);d.recovery=s.recovery==true;d.lifecycleApplied=positive(s.lifecycleApplied);d.lifecycleFieldApplied=positive(s.lifecycleFieldApplied);d.lifecycleSamples=math.max(0,math.floor(tonumber(s.lifecycleSamples) or 0));d.lifecycleBandKey=s.lifecycleBandKey and tostring(s.lifecycleBandKey) or nil;d.lifecycleStartField=tonumber(s.lifecycleStartField);d.fieldTuneSamples=math.max(0,math.floor(tonumber(s.fieldTuneSamples) or 0));d.lastFuelConversion=tonumber(s.lastFuelConversion);d.overdriveApplied=tonumber(s.overdriveApplied);d.refuelMaintenance=s.refuelMaintenance==true;d.refuelPhase=d.refuelMaintenance and tostring(s.refuelPhase or "shutdown") or nil;d.safetyLockout=s.safetyLockout==true;d.lastSafetyTrip=s.lastSafetyTrip and tostring(s.lastSafetyTrip) or nil;d.message=tostring(s.message or d.message)
   d.manualEfficiencyEnabled=s.manualEfficiencyEnabled==true;d.efficiencyOutputCommand=positive(s.efficiencyOutputCommand);d.efficiencyFieldCommand=positive(s.efficiencyFieldCommand)
+  d.efficiencyPendingExport=positive(s.efficiencyPendingExport);d.efficiencyPendingSince=tonumber(s.efficiencyPendingSince);d.efficiencyPendingBaseFlow=tonumber(s.efficiencyPendingBaseFlow);d.efficiencyPendingBaseGeneration=tonumber(s.efficiencyPendingBaseGeneration);d.efficiencyLastStep=tonumber(s.efficiencyLastStep);d.efficiencyFieldResponseUntil=tonumber(s.efficiencyFieldResponseUntil)
+  d.efficiencyThermalCandidateOutput=positive(s.efficiencyThermalCandidateOutput);d.efficiencyThermalSoakUntil=tonumber(s.efficiencyThermalSoakUntil);d.efficiencyThermalStrikes=math.max(0,math.floor(tonumber(s.efficiencyThermalStrikes) or 0));d.efficiencyCooldownUntil=tonumber(s.efficiencyCooldownUntil)
   d.efficiencyProfile=s.efficiencyProfile;d.efficiencyFieldEnabled=s.efficiencyFieldEnabled;d.efficiencyFieldTarget=s.efficiencyFieldTarget;d.efficiencyTrendEnabled=s.efficiencyTrendEnabled;d.efficiencyTempEnabled=s.efficiencyTempEnabled;d.efficiencyTempLimit=s.efficiencyTempLimit;d.efficiencySaturationEnabled=s.efficiencySaturationEnabled;d.efficiencySaturationFloor=s.efficiencySaturationFloor;d.efficiencyDeliveryEnabled=s.efficiencyDeliveryEnabled;d.efficiencyInterval=s.efficiencyInterval;d.efficiencyIncreasePercent=s.efficiencyIncreasePercent;d.efficiencyFailureResponse=s.efficiencyFailureResponse;d.efficiencyRollbackPercent=s.efficiencyRollbackPercent;d.efficiencyInjectorEnabled=s.efficiencyInjectorEnabled;d.efficiencyInjectorStep=s.efficiencyInjectorStep
   return normalizeManualEfficiency(d)
 end
@@ -491,6 +494,9 @@ local PERSIST_FIELDS={
   "refuelMaintenance","refuelPhase","safetyLockout","lastSafetyTrip","message",
   "lastAppliedCommandRevision","lastCommandStatus","lastCommandDetail","remoteLevel","remoteTarget",
   "remoteApplied","remotePrimed","manualEfficiencyEnabled","efficiencyOutputCommand","efficiencyFieldCommand",
+  "efficiencyPendingExport","efficiencyPendingSince","efficiencyPendingBaseFlow","efficiencyPendingBaseGeneration",
+  "efficiencyLastStep","efficiencyFieldResponseUntil","efficiencyThermalCandidateOutput","efficiencyThermalSoakUntil",
+  "efficiencyThermalStrikes","efficiencyCooldownUntil",
   "efficiencyProfile","efficiencyFieldEnabled","efficiencyFieldTarget",
   "efficiencyTrendEnabled","efficiencyTempEnabled","efficiencyTempLimit","efficiencySaturationEnabled",
   "efficiencySaturationFloor","efficiencyDeliveryEnabled","efficiencyInterval","efficiencyIncreasePercent",
@@ -742,6 +748,8 @@ local function resetManualEfficiencyRuntime(c,preserveTargets)
   c.efficiencyPendingExport=nil;c.efficiencyPendingSince=nil;c.efficiencyPendingBaseFlow=nil
   c.efficiencyPendingBaseGeneration=nil;c.efficiencyLastStep=nil;c.efficiencyLastRollback=nil
   c.efficiencyLastInjectorTune=nil;c.efficiencyPriorField=nil;c.efficiencyFieldResponseUntil=nil
+  c.efficiencyThermalCandidateOutput=nil;c.efficiencyThermalSoakUntil=nil
+  c.efficiencyThermalStrikes=0;c.efficiencyCooldownUntil=nil
   c.efficiencyPaused=false;c.efficiencyStatus="IDLE"
   c.efficiencyOutputCommand=output;c.efficiencyFieldCommand=field
 end
@@ -783,7 +791,7 @@ local function manualEfficiencyTargets(c,d)
   local outputSet=tonumber(d.outputSet) or 0
   local output=tonumber(c.efficiencyOutputCommand) or tonumber(c.manualExport) or outputSet
   local injector=positive(c.efficiencyFieldCommand) or positive(c.manualField) or positive(d.inputFlow) or positive(d.inputSet) or positive(c.injectorBaseline) or MINIMUM_FIELD_INPUT
-  local confirmedIncrease=false
+  local thermalAccepted=false
   local previousField=tonumber(c.efficiencyPriorField);c.efficiencyPriorField=field
   local fieldFalling=previousField and field<previousField-.2
   local outputIncreased=false
@@ -800,18 +808,47 @@ local function manualEfficiencyTargets(c,d)
     local tolerance=math.max(50000,math.abs(output)*.15)
     if math.abs(flow-output)>tolerance then reasons[#reasons+1]="export delivery not tracking Guardian command" end
   end
+  local cooldownUntil=tonumber(c.efficiencyCooldownUntil)
+  if cooldownUntil and now<cooldownUntil then
+    output=positive(c.overdriveExport) or output
+    c.efficiencyOutputCommand=output;c.efficiencyFieldCommand=injector
+    c.efficiencyStatus="THERMAL COOLDOWN: holding verified point; retry in "..math.ceil(cooldownUntil-now).."s"
+    return injector,output,c.efficiencyStatus,reasons
+  elseif cooldownUntil then
+    c.efficiencyCooldownUntil=nil;c.efficiencyThermalStrikes=0;c.efficiencyStableSince=now
+    guardianRecord("log.guardian_command","info",{mode="manual_efficiency",output=output},
+      {"Thermal cooldown complete; cautious probing resumed"})
+  end
+  local activeThermalProbe=positive(c.efficiencyThermalCandidateOutput) or positive(c.efficiencyPendingExport)
+  if activeThermalProbe and c.efficiencyTempEnabled and temp>c.efficiencyTempLimit then
+    c.efficiencyThermalStrikes=math.min(EFFICIENCY_THERMAL_STRIKES,(tonumber(c.efficiencyThermalStrikes) or 0)+1)
+    output=positive(c.overdriveExport) or math.max(0,output-(tonumber(c.efficiencyLastStep) or 0))
+    c.efficiencyOutputCommand=output;c.manualExport=output
+    c.efficiencyPendingExport=nil;c.efficiencyPendingSince=nil;c.efficiencyThermalCandidateOutput=nil
+    c.efficiencyThermalSoakUntil=nil;c.efficiencyFieldResponseUntil=nil;c.efficiencyLastStep=0
+    c.efficiencyStableSince=nil;c.efficiencyLastRollback=now
+    if c.efficiencyThermalStrikes>=EFFICIENCY_THERMAL_STRIKES then
+      c.efficiencyCooldownUntil=now+EFFICIENCY_THERMAL_COOLDOWN
+      c.efficiencyStatus="THERMAL COOLDOWN: 3 rejected probes; holding verified point for 15m"
+      guardianRecord("log.guardian_command","warning",{mode="manual_efficiency",temperature=temp,
+        limit=c.efficiencyTempLimit,strikes=c.efficiencyThermalStrikes,cooldown=EFFICIENCY_THERMAL_COOLDOWN,output=output},
+        {c.efficiencyStatus})
+    else
+      c.efficiencyStatus="THERMAL REJECT "..c.efficiencyThermalStrikes.."/3: restored verified Overdrive point"
+      guardianRecord("log.guardian_command","warning",{mode="manual_efficiency",temperature=temp,
+        limit=c.efficiencyTempLimit,strikes=c.efficiencyThermalStrikes,output=output},{c.efficiencyStatus})
+    end
+    return injector,output,c.efficiencyStatus,reasons
+  end
   if c.efficiencyPendingExport then
     local delta=math.max(1000,(tonumber(c.efficiencyLastStep) or 0)*.10)
     local gateConfirmed=math.abs(flow-c.efficiencyPendingExport)<=math.max(50000,c.efficiencyPendingExport*.05)
     local responseConfirmed=flow>=(tonumber(c.efficiencyPendingBaseFlow) or 0)+delta or generation>=(tonumber(c.efficiencyPendingBaseGeneration) or 0)+delta
     if gateConfirmed and responseConfirmed then
-      confirmedIncrease=true
-      -- Once accepted, this step belongs to the verified Overdrive recovery
-      -- point. A later field trend (often caused by an injector trim) must not
-      -- reuse the old step amount and undo an already-proven export increase.
-      c.efficiencyLastStep=0
       c.efficiencyPendingExport=nil;c.efficiencyPendingSince=nil;c.efficiencyStableSince=now
-      c.efficiencyStatus="CONFIRMED: previous increase produced a measurable response"
+      c.efficiencyThermalCandidateOutput=output
+      c.efficiencyThermalSoakUntil=now+math.max(60,c.efficiencyInterval*3)
+      c.efficiencyStatus="ELECTRICAL RESPONSE CONFIRMED: beginning thermal soak"
     elseif now-(tonumber(c.efficiencyPendingSince) or now)>=math.max(10,c.efficiencyInterval*2) then
       c.efficiencyPaused=true;c.efficiencyStatus="PAUSED: previous adjustment was not confirmed"
     else
@@ -831,6 +868,20 @@ local function manualEfficiencyTargets(c,d)
   end
   if c.efficiencyPaused then c.efficiencyFieldCommand=injector;return injector,output,c.efficiencyStatus,reasons end
   if c.efficiencyPendingExport then c.efficiencyFieldCommand=injector;return injector,output,c.efficiencyStatus,reasons end
+  if c.efficiencyThermalCandidateOutput then
+    local soakUntil=tonumber(c.efficiencyThermalSoakUntil) or now
+    if now>=soakUntil and #reasons==0 then
+      thermalAccepted=true;c.efficiencyThermalCandidateOutput=nil;c.efficiencyThermalSoakUntil=nil
+      c.efficiencyLastStep=0;c.efficiencyThermalStrikes=0;c.efficiencyStableSince=now
+      c.efficiencyStatus="THERMALLY VERIFIED: output saved as Overdrive recovery point"
+    else
+      c.efficiencyOutputCommand=output;c.efficiencyFieldCommand=injector
+      if fieldSupportStatus then c.efficiencyStatus=fieldSupportStatus
+      elseif now<soakUntil then c.efficiencyStatus="THERMAL SOAK: holding candidate for "..math.ceil(soakUntil-now).."s"
+      else c.efficiencyStatus="THERMAL SOAK: waiting for all rules to stabilize" end
+      return injector,output,c.efficiencyStatus,reasons
+    end
+  end
   local allClear=#reasons==0 and not c.efficiencyPendingExport
   if allClear then
     c.efficiencyStableSince=tonumber(c.efficiencyStableSince) or now
@@ -872,7 +923,7 @@ local function manualEfficiencyTargets(c,d)
   end
   c.efficiencyOutputCommand=output;c.efficiencyFieldCommand=injector
   if fieldSupportStatus then c.efficiencyStatus=fieldSupportStatus end
-  if confirmedIncrease then
+  if thermalAccepted then
     c.manualField=injector;c.manualExport=output
     c.overdriveField=injector;c.overdriveExport=output
     guardianRecord("log.guardian_command","info",{mode="manual_efficiency",field=injector,output=output},
