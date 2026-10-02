@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.50b
+-- HELIOS Draconic Guardian v1.2.0-alpha.50c
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -47,8 +47,9 @@ local SAFETY_LOW_FIELD, SAFETY_HIGH_TEMP = 35, 7750
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.50b"
+local GUARDIAN_VERSION = "1.2.0-alpha.50c"
 local EFFICIENCY_THERMAL_STRIKES, EFFICIENCY_THERMAL_COOLDOWN = 3, 15*60
+local EFFICIENCY_THERMAL_TOLERANCE = .02
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
 local SETTINGS = fs.exists("/helios") and "/helios/data/draconic_guardian.lua" or
   ".helios-draconic-guardian.lua"
@@ -796,17 +797,25 @@ local function manualEfficiencyTargets(c,d)
   local fieldFalling=previousField and field<previousField-.2
   local outputIncreased=false
   local fieldSupportStatus
+  local thermalLimit=tonumber(c.efficiencyTempLimit) or 7500
+  local thermalToleranceCeiling=thermalLimit*(1+EFFICIENCY_THERMAL_TOLERANCE)
+  local fieldBelowTarget=c.efficiencyFieldEnabled and field<c.efficiencyFieldTarget
+  local trendBlocked=c.efficiencyTrendEnabled and fieldFalling
+  local temperatureBlocksProbe=c.efficiencyTempEnabled and temp>thermalLimit
+  local saturationBlocked=c.efficiencySaturationEnabled and saturation<c.efficiencySaturationFloor
+  local deliveryBlocked=false
   local reasons={}
-  if c.efficiencyFieldEnabled and field<c.efficiencyFieldTarget then reasons[#reasons+1]=string.format("field %.1f%% < %.1f%%",field,c.efficiencyFieldTarget) end
-  if c.efficiencyTrendEnabled and fieldFalling then reasons[#reasons+1]="field trend falling" end
-  if c.efficiencyTempEnabled and temp>c.efficiencyTempLimit then reasons[#reasons+1]=string.format("temperature %.0f > %.0f C",temp,c.efficiencyTempLimit) end
-  if c.efficiencySaturationEnabled and saturation<c.efficiencySaturationFloor then reasons[#reasons+1]=string.format("saturation %.1f%% < %.1f%%",saturation,c.efficiencySaturationFloor) end
+  if fieldBelowTarget then reasons[#reasons+1]=string.format("field %.1f%% < %.1f%%",field,c.efficiencyFieldTarget) end
+  if trendBlocked then reasons[#reasons+1]="field trend falling" end
+  if temperatureBlocksProbe then reasons[#reasons+1]=string.format("temperature %.0f > %.0f C probe threshold",temp,thermalLimit) end
+  if saturationBlocked then reasons[#reasons+1]=string.format("saturation %.1f%% < %.1f%%",saturation,c.efficiencySaturationFloor) end
   if c.efficiencyDeliveryEnabled then
     -- getFlowOverride is absent or stale in some Flux Gate builds and read()
     -- then sees the redstone-low fallback instead. Compare measured delivery
     -- with Guardian's own active command, which is also what the UI displays.
     local tolerance=math.max(50000,math.abs(output)*.15)
-    if math.abs(flow-output)>tolerance then reasons[#reasons+1]="export delivery not tracking Guardian command" end
+    deliveryBlocked=math.abs(flow-output)>tolerance
+    if deliveryBlocked then reasons[#reasons+1]="export delivery not tracking Guardian command" end
   end
   local cooldownUntil=tonumber(c.efficiencyCooldownUntil)
   if cooldownUntil and now<cooldownUntil then
@@ -820,7 +829,7 @@ local function manualEfficiencyTargets(c,d)
       {"Thermal cooldown complete; cautious probing resumed"})
   end
   local activeThermalProbe=positive(c.efficiencyThermalCandidateOutput) or positive(c.efficiencyPendingExport)
-  if activeThermalProbe and c.efficiencyTempEnabled and temp>c.efficiencyTempLimit then
+  if activeThermalProbe and c.efficiencyTempEnabled and temp>thermalToleranceCeiling then
     c.efficiencyThermalStrikes=math.min(EFFICIENCY_THERMAL_STRIKES,(tonumber(c.efficiencyThermalStrikes) or 0)+1)
     output=positive(c.overdriveExport) or math.max(0,output-(tonumber(c.efficiencyLastStep) or 0))
     c.efficiencyOutputCommand=output;c.manualExport=output
@@ -831,12 +840,12 @@ local function manualEfficiencyTargets(c,d)
       c.efficiencyCooldownUntil=now+EFFICIENCY_THERMAL_COOLDOWN
       c.efficiencyStatus="THERMAL COOLDOWN: 3 rejected probes; holding verified point for 15m"
       guardianRecord("log.guardian_command","warning",{mode="manual_efficiency",temperature=temp,
-        limit=c.efficiencyTempLimit,strikes=c.efficiencyThermalStrikes,cooldown=EFFICIENCY_THERMAL_COOLDOWN,output=output},
+        limit=thermalLimit,tolerance_ceiling=thermalToleranceCeiling,strikes=c.efficiencyThermalStrikes,cooldown=EFFICIENCY_THERMAL_COOLDOWN,output=output},
         {c.efficiencyStatus})
     else
       c.efficiencyStatus="THERMAL REJECT "..c.efficiencyThermalStrikes.."/3: restored verified Overdrive point"
       guardianRecord("log.guardian_command","warning",{mode="manual_efficiency",temperature=temp,
-        limit=c.efficiencyTempLimit,strikes=c.efficiencyThermalStrikes,output=output},{c.efficiencyStatus})
+        limit=thermalLimit,tolerance_ceiling=thermalToleranceCeiling,strikes=c.efficiencyThermalStrikes,output=output},{c.efficiencyStatus})
     end
     return injector,output,c.efficiencyStatus,reasons
   end
@@ -870,7 +879,9 @@ local function manualEfficiencyTargets(c,d)
   if c.efficiencyPendingExport then c.efficiencyFieldCommand=injector;return injector,output,c.efficiencyStatus,reasons end
   if c.efficiencyThermalCandidateOutput then
     local soakUntil=tonumber(c.efficiencyThermalSoakUntil) or now
-    if now>=soakUntil and #reasons==0 then
+    local candidateSafe=not fieldBelowTarget and not trendBlocked and not saturationBlocked and
+      not deliveryBlocked and (not c.efficiencyTempEnabled or temp<=thermalToleranceCeiling)
+    if now>=soakUntil and candidateSafe then
       thermalAccepted=true;c.efficiencyThermalCandidateOutput=nil;c.efficiencyThermalSoakUntil=nil
       c.efficiencyLastStep=0;c.efficiencyThermalStrikes=0;c.efficiencyStableSince=now
       c.efficiencyStatus="THERMALLY VERIFIED: output saved as Overdrive recovery point"
@@ -923,6 +934,9 @@ local function manualEfficiencyTargets(c,d)
   end
   c.efficiencyOutputCommand=output;c.efficiencyFieldCommand=injector
   if fieldSupportStatus then c.efficiencyStatus=fieldSupportStatus end
+  if thermalAccepted and temperatureBlocksProbe then
+    c.efficiencyStatus="THERMALLY VERIFIED: holding; temperature remains above probe threshold"
+  end
   if thermalAccepted then
     c.manualField=injector;c.manualExport=output
     c.overdriveField=injector;c.overdriveExport=output
