@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.50e
+-- HELIOS Draconic Guardian v1.2.0-alpha.50f
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -47,7 +47,7 @@ local SAFETY_LOW_FIELD, SAFETY_HIGH_TEMP = 35, 7750
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.50e"
+local GUARDIAN_VERSION = "1.2.0-alpha.50f"
 local EFFICIENCY_THERMAL_STRIKES, EFFICIENCY_THERMAL_COOLDOWN = 3, 15*60
 local EFFICIENCY_THERMAL_TOLERANCES = {.25,.5,1,2}
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
@@ -1357,25 +1357,29 @@ local function draw(t,b,d,page,c,bs)
     bs[#bs+1]=button(t,22,7,"PROFILE: "..c.efficiencyProfile,colors.cyan,1,"CYCLE EFFICIENCY PROFILE")
     local function toggleRow(y,label,enabled,value,minus,plus)
       bs[#bs+1]=button(t,1,y,label..": "..(enabled and "ON" or "OFF"),enabled and colors.lime or colors.lightGray,1,"TOGGLE "..label)
-      text(t,25,y,tostring(value),colors.white)
-      if minus then bs[#bs+1]=button(t,38,y,"-",colors.cyan,1,minus);bs[#bs+1]=button(t,45,y,"+",colors.cyan,1,plus) end
+      text(t,27,y,tostring(value),colors.white)
+      if minus then bs[#bs+1]=button(t,49,y,"-",colors.cyan,1,minus);bs[#bs+1]=button(t,56,y,"+",colors.cyan,1,plus) end
     end
-    toggleRow(10,"FIELD",c.efficiencyFieldEnabled,string.format("target %.0f%%",c.efficiencyFieldTarget),"FIELD TARGET -","FIELD TARGET +")
-    toggleRow(12,"FIELD TREND",c.efficiencyTrendEnabled,"stable or rising")
-    toggleRow(14,"TEMPERATURE",c.efficiencyTempEnabled,string.format("max %.0f C",c.efficiencyTempLimit),"TEMP LIMIT -","TEMP LIMIT +")
+    text(t,1,9,"-- PROBE CONDITIONS --------------------------------",colors.gray)
+    toggleRow(11,"FIELD",c.efficiencyFieldEnabled,string.format("target %.0f%%",c.efficiencyFieldTarget),"FIELD TARGET -","FIELD TARGET +")
+    toggleRow(13,"FIELD TREND",c.efficiencyTrendEnabled,"stable or rising")
+    toggleRow(15,"TEMPERATURE",c.efficiencyTempEnabled,string.format("max %.0f C",c.efficiencyTempLimit),"TEMP LIMIT -","TEMP LIMIT +")
     local leewayLabels={[.25]="0.25",[.5]="0.5",[1]="1.0",[2]="2.0"}
-    bs[#bs+1]=button(t,1,16,"THERMAL LEEWAY: "..leewayLabels[c.efficiencyThermalTolerancePercent].."%",colors.cyan,1,"CYCLE THERMAL LEEWAY")
-    toggleRow(18,"SATURATION",c.efficiencySaturationEnabled,string.format("floor %.0f%%",c.efficiencySaturationFloor),"SAT FLOOR -","SAT FLOOR +")
-    toggleRow(20,"GATE DELIVERY",c.efficiencyDeliveryEnabled,"actual tracks command")
-    toggleRow(22,"AUTO INJECTOR",c.efficiencyInjectorEnabled,"step "..fmt(c.efficiencyInjectorStep),"INJECTOR STEP -","INJECTOR STEP +")
-    bs[#bs+1]=button(t,1,24,"INTERVAL: "..tostring(c.efficiencyInterval).."s",colors.cyan,1,"CYCLE EFFICIENCY INTERVAL")
-    bs[#bs+1]=button(t,22,24,"INCREASE: "..tostring(c.efficiencyIncreasePercent).."%",colors.cyan,1,"CYCLE EFFICIENCY INCREASE")
-    bs[#bs+1]=button(t,1,26,"FAILED CHECK: "..c.efficiencyFailureResponse,colors.orange,1,"CYCLE FAILURE RESPONSE")
-    bs[#bs+1]=button(t,34,26,"ROLLBACK: "..tostring(c.efficiencyRollbackPercent).."%",colors.cyan,1,"CYCLE ROLLBACK PERCENT")
-    bs[#bs+1]=button(t,1,28,"CLEAR PAUSE",colors.cyan,1,"CLEAR EFFICIENCY PAUSE")
-    text(t,1,30,tostring(c.efficiencyStatus or "IDLE"),c.efficiencyPaused and colors.red or colors.lightGray)
-    text(t,1,32,"No output ceiling: every confirmed interval may advance again.",colors.orange)
-    bs[#bs+1]=button(t,1,34,"BACK",colors.lightGray,1)
+    text(t,1,17,"THERMAL VARIANCE",colors.lightGray)
+    bs[#bs+1]=button(t,27,17,"LEEWAY: "..leewayLabels[c.efficiencyThermalTolerancePercent].."%",colors.cyan,1,"CYCLE THERMAL LEEWAY")
+    toggleRow(19,"SATURATION",c.efficiencySaturationEnabled,string.format("floor %.0f%%",c.efficiencySaturationFloor),"SAT FLOOR -","SAT FLOOR +")
+    toggleRow(21,"GATE DELIVERY",c.efficiencyDeliveryEnabled,"actual tracks command")
+    text(t,1,23,"-- RESPONSE TUNING ---------------------------------",colors.gray)
+    toggleRow(25,"AUTO INJECTOR",c.efficiencyInjectorEnabled,"step "..fmt(c.efficiencyInjectorStep),"INJECTOR STEP -","INJECTOR STEP +")
+    bs[#bs+1]=button(t,1,27,"INTERVAL: "..tostring(c.efficiencyInterval).."s",colors.cyan,1,"CYCLE EFFICIENCY INTERVAL")
+    bs[#bs+1]=button(t,27,27,"INCREASE: "..tostring(c.efficiencyIncreasePercent).."%",colors.cyan,1,"CYCLE EFFICIENCY INCREASE")
+    bs[#bs+1]=button(t,1,29,"FAILED CHECK: "..c.efficiencyFailureResponse,colors.orange,1,"CYCLE FAILURE RESPONSE")
+    bs[#bs+1]=button(t,36,29,"ROLLBACK: "..tostring(c.efficiencyRollbackPercent).."%",colors.cyan,1,"CYCLE ROLLBACK PERCENT")
+    text(t,1,31,"-- RUNTIME -----------------------------------------",colors.gray)
+    bs[#bs+1]=button(t,1,33,"CLEAR PAUSE",colors.cyan,1,"CLEAR EFFICIENCY PAUSE")
+    text(t,1,35,tostring(c.efficiencyStatus or "IDLE"),c.efficiencyPaused and colors.red or colors.lightGray)
+    text(t,1,37,"No output ceiling; each confirmed interval may advance.",colors.orange)
+    bs[#bs+1]=button(t,1,39,"BACK",colors.lightGray,1)
     return
   end
   if page=="gates" then
