@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.51
+-- HELIOS Draconic Guardian v1.2.0-alpha.51a
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -47,7 +47,8 @@ local SAFETY_LOW_FIELD, SAFETY_HIGH_TEMP = 35, 7750
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.51"
+local GUARDIAN_VERSION = "1.2.0-alpha.51a"
+local POST_COMMISSION_SAFETY_GRACE = 10
 local EFFICIENCY_THERMAL_STRIKES, EFFICIENCY_THERMAL_COOLDOWN = 3, 15*60
 local EFFICIENCY_THERMAL_TOLERANCES = {.25,.5,1,2}
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
@@ -259,7 +260,11 @@ local function ensureStarted(b,c,status,reason,fieldTarget,telemetry)
   -- next tick and can remain there forever without sending activation.
   c.initialRequested=true
   gate(b.output,0)
-  gate(b.input,fieldSupply)
+  -- Some Flux Gate builds cannot report getFlowOverride(). Their redstone-low
+  -- fallback can still read 1.9M after a shutdown left the real override at
+  -- zero. Never trust that cached fallback while starting: reassert the actual
+  -- containment override every startup pass.
+  gate(b.input,fieldSupply,true)
   if status=="stopping" or status=="cooling" then
     c.startActivated=false
     c.message=reason..": waiting for controlled stop before charging"
@@ -329,6 +334,9 @@ local function requiresContainment(status)
     normalized=="explosionimminent"
 end
 local automaticSafetyTrend={}
+local function safetyGraceActive(c,now)
+  return tonumber(now)<(tonumber(c and c.safetyGraceUntil) or 0)
+end
 local function updateAutomaticSafetyVotes(d,trend,commissioning)
   trend=trend or automaticSafetyTrend
   local r=type(d)=="table" and d.reactor or {}
@@ -990,6 +998,7 @@ end
 -- the operator's command stand, while warnings remain live.
 local function supervise(b,d,c)
   local r=d.reactor;local status=string.lower(tostring(r.status or "unknown"));local field=pct(r.fieldStrength,r.maxFieldStrength) or 0
+  local now=lifecycleNow(r)
   updateMeltdownTrend(r)
   local live=status=="online" or status=="running"
   local containmentRequired=requiresContainment(status)
@@ -1053,7 +1062,11 @@ local function supervise(b,d,c)
     local imminent,warning=imminentMeltdown(r)
     if imminent then return stop(warning,false,true) end
     if c.mode=="AUTO" and live and not c.commissioning then
-      local votes,voteCount=updateAutomaticSafetyVotes(d)
+      local inSafetyGrace=safetyGraceActive(c,now)
+      local votes,voteCount
+      if inSafetyGrace then
+        automaticSafetyTrend={};votes={};voteCount=0
+      else votes,voteCount=updateAutomaticSafetyVotes(d) end
       c.safetyVotes=votes;c.safetyVoteCount=voteCount
       if voteCount>=SAFETY_VOTES_REQUIRED then
         local reason="automatic safety vote "..voteCount.."/"..SAFETY_VOTES_REQUIRED..": "..table.concat(votes,", ")
@@ -1165,7 +1178,7 @@ local function supervise(b,d,c)
     -- End the trial above the 15% emergency field boundary. Keep the reactor
     -- live in IDLE while export closes and containment rebuilds.
     if field<COMMISSION_FIELD_FLOOR or temp>COMMISSION_TEMP_LIMIT or fuel<=MINIMUM_FUEL then
-      gate(b.output,0);gate(b.input,injectorCap);c.commissioning=false;c.initialRequested=false;c.commissionSamples=0;c.commissionShortfallSamples=0;c.commissionSettleSamples=0;c.request="IDLE";c.recovery=true
+      gate(b.output,0);gate(b.input,injectorCap);c.commissioning=false;c.initialRequested=false;c.commissionSamples=0;c.commissionShortfallSamples=0;c.commissionSettleSamples=0;c.request="IDLE";c.recovery=true;c.safetyGraceUntil=now+POST_COMMISSION_SAFETY_GRACE
       c.commissioned=tonumber(c.commissionLastSafe) and c.commissionLastSafe>0 or false;c.rated=c.commissionLastSafe
       c.message=tr("guardian.commission_edge",{ceiling=fmt(c.rated or 0)},"Calibration reached the 17% field edge; output closed. Last verified ceiling {ceiling} RF/t")
       return
@@ -1182,7 +1195,7 @@ local function supervise(b,d,c)
       local fieldLimit=math.max(injectorCap,trial,drain*2)
       if c.commissionFieldTuneSamples>=COMMISSION_FIELD_TUNE_SAMPLES then
         if fieldInput>=fieldLimit then
-          gate(b.output,0);c.commissioning=false;c.initialRequested=false;c.request="IDLE";c.recovery=true
+          gate(b.output,0);c.commissioning=false;c.initialRequested=false;c.request="IDLE";c.recovery=true;c.safetyGraceUntil=now+POST_COMMISSION_SAFETY_GRACE
           c.commissioned=(tonumber(c.commissionLastSafe) or 0)>0;c.rated=c.commissionLastSafe
           c.message="Calibration complete: containment stabilized below 45% at the trial field-input limit; verified ceiling "..fmt(c.rated or 0).." RF/t"
           return
@@ -1211,7 +1224,7 @@ local function supervise(b,d,c)
       end
       c.commissionSamples=0;c.commissionShortfallSamples=(tonumber(c.commissionShortfallSamples) or 0)+1
       if c.commissionShortfallSamples>=COMMISSION_SHORTFALL_SAMPLES then
-        gate(b.output,0);c.commissioning=false;c.initialRequested=false;c.request="IDLE";c.commissioned=(tonumber(c.commissionLastSafe) or 0)>0;c.rated=c.commissionLastSafe
+        gate(b.output,0);c.commissioning=false;c.initialRequested=false;c.request="IDLE";c.commissioned=(tonumber(c.commissionLastSafe) or 0)>0;c.rated=c.commissionLastSafe;c.safetyGraceUntil=now+POST_COMMISSION_SAFETY_GRACE
         c.message=tr("guardian.commission_complete",{ceiling=fmt(c.rated or 0)},"Calibration complete: output path stopped accepting higher export; verified ceiling {ceiling} RF/t")
       else c.message=tr("guardian.commission_testing",{trial=fmt(trial),generation=fmt(generation),sample=c.commissionShortfallSamples,total=COMMISSION_SHORTFALL_SAMPLES},"Testing {trial} RF/t: reactor generation {generation} RF/t ({sample}/{total})") end
       return
@@ -1570,7 +1583,8 @@ if rawget(_G,"HELIOS_GUARDIAN_TEST") then
     enterAssisted=enterAssisted,setManualEfficiency=setManualEfficiency,manualEfficiencyTargets=manualEfficiencyTargets,
     chargeableStatus=chargeableStatus,requiresContainment=requiresContainment,mailboxHasRemoteDemand=mailboxHasRemoteDemand,
     updateMeltdownTrend=updateMeltdownTrend,imminentMeltdown=imminentMeltdown,
-    updateAutomaticSafetyVotes=updateAutomaticSafetyVotes,
+    updateAutomaticSafetyVotes=updateAutomaticSafetyVotes,safetyGraceActive=safetyGraceActive,
+    ensureStarted=ensureStarted,
     gate=gate,read=read,adoptInjectorBaseline=adoptInjectorBaseline,persistentState=persistentState}
 end
 local binding,page,controls,buttons=inspect(),"overview",load(),{}

@@ -22,6 +22,19 @@ assert(governor.requiresContainment("beyond_hope") and governor.requiresContainm
     "terminal reactor states must retain maximum injector support")
 assert(not governor.requiresContainment("cold"),
     "a fully cold reactor no longer requires containment input")
+local startupWrites = {}
+peripheral = { call = function(name,method,value)
+    if method=="setOverrideEnabled" then return true end
+    if method=="setFlowOverride" then startupWrites[#startupWrites+1]={name,value};return true end
+    return nil
+end }
+governor.ensureStarted({input="injector",output="export",reactor="reactor"},
+    {injectorBaseline=1900000},"warming_up","Initial start",1900000,{})
+assert(startupWrites[#startupWrites][1]=="injector" and startupWrites[#startupWrites][2]==1900000,
+    "every startup pass must force-reassert the real injector override")
+assert(governor.safetyGraceActive({safetyGraceUntil=20},10) and
+    not governor.safetyGraceActive({safetyGraceUntil=20},20),
+    "post-calibration safety grace must cover only the configured settling window")
 local assisted = { injectorBaseline=1900000 }
 governor.enterAssisted(assisted, {
     reactor={status="running"}, inputSet=1900000, outputSet=3900000,
