@@ -32,9 +32,9 @@ governor.ensureStarted({input="injector",output="export",reactor="reactor"},
     {injectorBaseline=1900000},"warming_up","Initial start",1900000,{})
 assert(startupWrites[#startupWrites][1]=="injector" and startupWrites[#startupWrites][2]==1900000,
     "every startup pass must force-reassert the real injector override")
-assert(governor.safetyGraceActive({safetyGraceUntil=20},10) and
-    not governor.safetyGraceActive({safetyGraceUntil=20},20),
-    "post-calibration safety grace must cover only the configured settling window")
+assert(not governor.calibrationRecoveryComplete(60,4000,200000) and
+    governor.calibrationRecoveryComplete(60,4000,50000),
+    "post-calibration recovery must wait for measured export to actually close")
 local assisted = { injectorBaseline=1900000 }
 governor.enterAssisted(assisted, {
     reactor={status="running"}, inputSet=1900000, outputSet=3900000,
