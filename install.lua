@@ -1,19 +1,109 @@
 -- HELIOS modular bootstrap installer
 -- Downloads only the Core, role, and optional packages selected for this computer.
 
-local VERSION = "1.6.0-alpha.60"
+local VERSION = "1.6.0-alpha.61"
 local REPOSITORY = "ssj8vegetrunks/HELIOS"
 local BRANCH_API = "https://api.github.com/repos/" .. REPOSITORY .. "/commits/testing%2Fpublic-alpha"
 local BASE_URL
 local INSTALL_DIR, LOCAL_STAGE = "/helios", "/.helios-install"
 local DOWNLOAD_NONCE = tostring(os.epoch and os.epoch("utc") or os.getComputerID())
 
+-- The installer must carry its own small catalogue because the selected
+-- language package is not available until after installation completes.
+local installerLanguage = "en_us"
+local installerStrings = {
+    es_es = {
+        installer="Instalador", suite="Suite de gestion de energia industrial",
+        accessibility="Accesibilidad", select_accessibility="Selecciona el perfil de color de accesibilidad:",
+        high_contrast="Alto contraste (predeterminado de HELIOS)", classic="Clasico",
+        category="Instalador modular", select_category="Selecciona una categoria de instalacion:",
+        mainframe="Instalar mainframe", terminal="Instalar terminal remoto", modules="Modulos",
+        select_module="Selecciona un modulo:", probe="Sonda de hardware (una ejecucion, solo lectura)",
+        guardian="Guardian del reactor draconico", optional="Funciones opcionales",
+        event_viewer="Instalar visor de eventos?", terminal_config="Configuracion del terminal remoto",
+        select_view="Selecciona la vista del terminal:", all_systems="Todos los sistemas",
+        reactors="Reactores", turbines="Turbinas", power_storage="Almacenamiento de energia",
+        network="Proteccion de red", enable_network="Activar la proteccion de red HELIOS en este ordenador?",
+        reading="Leyendo el manifiesto de paquetes", role="Funcion", packages="Paquetes", files="Archivos",
+        download="Descarga", install_prompt="Instalar estos paquetes de HELIOS?",
+        downloading="Descargando paquetes seleccionados", complete="Instalacion completa",
+        installed="instalado correctamente.", installed_only="Instalado solamente",
+        reboot="HELIOS se iniciara despues de reiniciar.", run_now="Ejecutar ahora con: helios",
+        cancelled="Instalacion cancelada.", failed="La instalacion de HELIOS ha fallado:",
+        invalid_choice="Introduce un numero de la lista.", existing_startup="Se encontro un programa de inicio existente.",
+        preserve_startup="Conservarlo y crear un directorio de inicio?"
+    },
+    fr_ca = {
+        installer="Programme d'installation", suite="Suite de gestion energetique industrielle",
+        accessibility="Accessibilite", select_accessibility="Selectionnez le profil de couleurs d'accessibilite :",
+        high_contrast="Contraste eleve (valeur HELIOS)", classic="Classique",
+        category="Installation modulaire", select_category="Selectionnez une categorie d'installation :",
+        mainframe="Installer l'ordinateur central", terminal="Installer un terminal distant", modules="Modules",
+        select_module="Selectionnez un module :", probe="Sonde materielle (une execution, lecture seule)",
+        guardian="Gardien du reacteur draconique", optional="Fonctions facultatives",
+        event_viewer="Installer le journal des evenements?", terminal_config="Configuration du terminal distant",
+        select_view="Selectionnez l'affichage du terminal :", all_systems="Tous les systemes",
+        reactors="Reacteurs", turbines="Turbines", power_storage="Stockage d'energie",
+        network="Protection du reseau", enable_network="Activer la protection reseau HELIOS sur cet ordinateur?",
+        reading="Lecture du manifeste des paquets", role="Role", packages="Paquets", files="Fichiers",
+        download="Telechargement", install_prompt="Installer ces paquets HELIOS?",
+        downloading="Telechargement des paquets selectionnes", complete="Installation terminee",
+        installed="installe avec succes.", installed_only="Installe seulement",
+        reboot="HELIOS demarrera apres le redemarrage.", run_now="Executer maintenant avec : helios",
+        cancelled="Installation annulee.", failed="Echec de l'installation de HELIOS :",
+        invalid_choice="Entrez un numero de la liste.", existing_startup="Un programme de demarrage existe deja.",
+        preserve_startup="Le conserver et creer un repertoire de demarrage?"
+    },
+    de_de = {
+        installer="Installationsprogramm", suite="Industrielle Energieverwaltung",
+        accessibility="Barrierefreiheit", select_accessibility="Barrierefreies Farbprofil waehlen:",
+        high_contrast="Hoher Kontrast (HELIOS-Standard)", classic="Klassisch",
+        category="Modulare Installation", select_category="Installationskategorie waehlen:",
+        mainframe="Mainframe installieren", terminal="Remote-Terminal installieren", modules="Module",
+        select_module="Modul waehlen:", probe="Hardware-Sonde (einmalig, nur lesend)",
+        guardian="Draconic-Reaktorwaechter", optional="Optionale Funktionen",
+        event_viewer="Ereignisanzeige installieren?", terminal_config="Remote-Terminal-Konfiguration",
+        select_view="Terminalansicht waehlen:", all_systems="Alle Systeme", reactors="Reaktoren",
+        turbines="Turbinen", power_storage="Energiespeicher", network="Netzwerkschutz",
+        enable_network="HELIOS-Netzwerkschutz auf diesem Computer aktivieren?",
+        reading="Paketmanifest wird gelesen", role="Rolle", packages="Pakete", files="Dateien",
+        download="Download", install_prompt="Diese HELIOS-Pakete installieren?",
+        downloading="Ausgewaehlte Pakete werden geladen", complete="Installation abgeschlossen",
+        installed="erfolgreich installiert.", installed_only="Nur installiert",
+        reboot="HELIOS startet nach dem Neustart.", run_now="Jetzt ausfuehren mit: helios",
+        cancelled="Installation abgebrochen.", failed="HELIOS-Installation fehlgeschlagen:",
+        invalid_choice="Bitte eine Nummer aus der Liste eingeben.", existing_startup="Ein vorhandenes Startprogramm wurde gefunden.",
+        preserve_startup="Beibehalten und ein Startverzeichnis erstellen?"
+    }
+}
+local englishStrings = {
+    installer="Installer", suite="Industrial Power Management Suite", accessibility="Accessibility",
+    select_accessibility="Select accessibility colour profile:", high_contrast="High contrast (HELIOS default)",
+    classic="Classic", category="Modular Installer", select_category="Select an installation category:",
+    mainframe="Install Mainframe", terminal="Install Remote Terminal", modules="Modules",
+    select_module="Select a module:", probe="Hardware Probe (run once, read-only)",
+    guardian="Draconic Reactor Guardian", optional="Optional Features", event_viewer="Install Event Viewer?",
+    terminal_config="Remote Terminal Configuration", select_view="Select the terminal view:",
+    all_systems="All systems", reactors="Reactors", turbines="Turbines", power_storage="Power storage",
+    network="Network Protection", enable_network="Enable HELIOS network protection on this computer?",
+    reading="Reading Package Manifest", role="Role", packages="Packages", files="Files", download="Download",
+    install_prompt="Install these HELIOS packages?", downloading="Downloading Selected Packages",
+    complete="Installation Complete", installed="installed successfully.", installed_only="Installed only",
+    reboot="HELIOS will start after reboot.", run_now="Run now with: helios", cancelled="Installation cancelled.",
+    failed="HELIOS installation failed:", invalid_choice="Please enter a number from the list.",
+    existing_startup="An existing startup program was found.", preserve_startup="Preserve it and create a startup directory?"
+}
+local function it(key)
+    local selected = installerStrings[installerLanguage]
+    return selected and selected[key] or englishStrings[key] or key
+end
+
 local function colour(value) if term.isColor() then term.setTextColor(value) end end
 local function title(value)
     term.setBackgroundColor(colors.black);term.clear();term.setCursorPos(1, 1)
     colour(colors.yellow);print("HELIOS");colour(colors.white)
-    print("Industrial Power Management Suite")
-    colour(colors.lightGray);print(tostring(value or "Installer") .. "  " .. VERSION);print("")
+    print(it("suite"))
+    colour(colors.lightGray);print(tostring(value or it("installer")) .. "  " .. VERSION);print("")
     colour(colors.white)
 end
 local function confirm(prompt, defaultYes)
@@ -34,7 +124,7 @@ local function choose(prompt, options, defaultIndex, hiddenOptions)
         if hidden then return hidden end
         local index = tonumber(answer)
         if index and options[index] then return options[index].value end
-        colour(colors.red);print("Please enter a number from the list.");colour(colors.white)
+        colour(colors.red);print(it("invalid_choice"));colour(colors.white)
     end
 end
 local function selectLanguage(existing)
@@ -48,15 +138,15 @@ local function selectLanguage(existing)
     return choose("Select installer language:", options, selected, { p = "en_pi" })
 end
 local function selectAccessibility(existing)
-    title("Accessibility")
+    title(it("accessibility"))
     local options = {
-        {label="High contrast (HELIOS default)",value="high_contrast"},
-        {label="Classic",value="standard"},{label="Deuteranopia",value="deuteranopia"},
+        {label=it("high_contrast"),value="high_contrast"},
+        {label=it("classic"),value="standard"},{label="Deuteranopia",value="deuteranopia"},
         {label="Protanopia",value="protanopia"},{label="Tritanopia",value="tritanopia"},
     }
     local selected = 1
     for index, option in ipairs(options) do if option.value == existing then selected = index end end
-    return choose("Select accessibility colour profile:", options, selected)
+    return choose(it("select_accessibility"), options, selected)
 end
 local function fetch(url)
     if not http or type(http.get) ~= "function" then
@@ -181,8 +271,8 @@ local function installStage(stage)
 end
 local function installStartup()
     if fs.exists("/startup") and not fs.isDir("/startup") then
-        print("An existing startup program was found.")
-        if not confirm("Preserve it and create a startup directory?", true) then return false end
+        print(it("existing_startup"))
+        if not confirm(it("preserve_startup"), true) then return false end
         local temporary = "/.helios-existing-startup.lua"
         if fs.exists(temporary) then fs.delete(temporary) end
         fs.move("/startup", temporary);fs.makeDir("/startup");fs.move(temporary, "/startup/00-user.lua")
@@ -209,21 +299,22 @@ local function run()
     local previous = existingConfig()
     local previousUi = previous and previous.ui or {}
     local language = selectLanguage(previousUi.language)
+    installerLanguage = language
     local accessibility = selectAccessibility(previousUi.accessibilityProfile)
-    title("Modular Installer")
+    title(it("category"))
     local defaultCategory = previous and previous.role == "terminal" and 2 or
         (previous and (previous.role == "guardian" or previous.role == "profiler") and 3 or 1)
-    local category = choose("Select an installation category:", {
-        {label="Install Mainframe",value="mainframe"},
-        {label="Install Remote Terminal",value="terminal"},
-        {label="Modules",value="modules"},
+    local category = choose(it("select_category"), {
+        {label=it("mainframe"),value="mainframe"},
+        {label=it("terminal"),value="terminal"},
+        {label=it("modules"),value="modules"},
     }, defaultCategory)
     local role = category
     if category == "modules" then
-        title("Modules")
-        local module = choose("Select a module:", {
-            {label="Hardware Probe (run once, read-only)",value="probe"},
-            {label="Draconic Reactor Guardian",value="guardian"},
+        title(it("modules"))
+        local module = choose(it("select_module"), {
+            {label=it("probe"),value="probe"},
+            {label=it("guardian"),value="guardian"},
         }, previous and previous.role == "guardian" and 2 or 1, { d = "profiler" })
         if module == "probe" then
             title("Hardware Probe")
@@ -240,8 +331,8 @@ local function run()
     local requested, logging = { role }, false
     if language ~= "en_us" then requested[#requested + 1] = "language_" .. language end
     if role == "mainframe" then
-        title("Optional Features")
-        logging = confirm("Install Event Viewer?", previous == nil or not previous.logging or previous.logging.enabled ~= false)
+        title(it("optional"))
+        logging = confirm(it("event_viewer"), previous == nil or not previous.logging or previous.logging.enabled ~= false)
         if logging then requested[#requested + 1] = "captains_log" end
     end
     local renderer = previousUi.renderer or "default"
@@ -252,10 +343,10 @@ local function run()
     end
     local display, guardianId
     if role == "terminal" then
-        title("Remote Terminal Configuration")
-        display = choose("Select the terminal view:", {
-            {label="All systems",value="all"},{label="Reactors",value="reactor"},
-            {label="Turbines",value="turbine"},{label="Power storage",value="battery"},
+        title(it("terminal_config"))
+        display = choose(it("select_view"), {
+            {label=it("all_systems"),value="all"},{label=it("reactors"),value="reactor"},
+            {label=it("turbines"),value="turbine"},{label=it("power_storage"),value="battery"},
         }, 1)
     elseif role == "profiler" then
         title("Profiler Pairing")
@@ -278,8 +369,8 @@ local function run()
         end
         if modemDetected then break end
     end
-    if modemDetected then title("Network Protection") end
-    if modemDetected and confirm("Enable HELIOS network protection on this computer?", networkEnabled) then
+    if modemDetected then title(it("network")) end
+    if modemDetected and confirm(it("enable_network"), networkEnabled) then
         print(networkEnabled and "Enter a new HELIOS network key, or leave blank to keep the current network key:" or
             "Enter the shared HELIOS network key (8-128 characters):")
         write("> ");local entered = read("*")
@@ -293,12 +384,12 @@ local function run()
         networkEnabled = true
     elseif modemDetected then networkEnabled = false;networkKey = "" end
 
-    title("Reading Package Manifest")
+    title(it("reading"))
     local manifest = loadManifest();local packageIds = resolvePackages(manifest, requested)
     local files, payloadBytes = packageFiles(manifest, packageIds)
-    print("Role: " .. role);print("Packages: " .. #packageIds);print("Files: " .. #files)
-    print("Download: approximately " .. math.ceil(payloadBytes / 1024) .. " KiB")
-    if not confirm("Install these HELIOS packages?", true) then print("Installation cancelled.");return end
+    print(it("role") .. ": " .. role);print(it("packages") .. ": " .. #packageIds);print(it("files") .. ": " .. #files)
+    print(it("download") .. ": approximately " .. math.ceil(payloadBytes / 1024) .. " KiB")
+    if not confirm(it("install_prompt"), true) then print(it("cancelled"));return end
 
     local config = configure(previous, role, language, accessibility, logging, renderer, display, guardianId, networkEnabled, networkKey)
     local required, localFree = payloadBytes + (32 * 1024), fs.getFreeSpace("/")
@@ -318,7 +409,7 @@ local function run()
         end
     elseif mount then print("Using " .. mount .. " as the temporary installation workspace.") end
 
-    if fs.exists(stage) then fs.delete(stage) end;fs.makeDir(stage);title("Downloading Selected Packages")
+    if fs.exists(stage) then fs.delete(stage) end;fs.makeDir(stage);title(it("downloading"))
     for index, file in ipairs(files) do
         term.setCursorPos(1, 6);term.clearLine();write(index .. "/" .. #files .. "  " .. file.path)
         local contents = fetch(BASE_URL .. "/" .. file.source)
@@ -334,11 +425,11 @@ local function run()
         end
     end
     installStage(stage);writeFile("/helios.lua", 'shell.run("/helios/helios.lua", ...)\n')
-    local startup = installStartup();title("Installation Complete")
-    colour(colors.lime);print("HELIOS " .. VERSION .. " installed successfully.");colour(colors.white)
-    print("Installed only: " .. table.concat(packageIds, ", "))
-    print(startup and "HELIOS will start after reboot." or "Run now with: helios")
+    local startup = installStartup();title(it("complete"))
+    colour(colors.lime);print("HELIOS " .. VERSION .. " " .. it("installed"));colour(colors.white)
+    print(it("installed_only") .. ": " .. table.concat(packageIds, ", "))
+    print(startup and it("reboot") or it("run_now"))
 end
 
 local ok, reason = pcall(run)
-if not ok then colour(colors.red);print("");print("HELIOS installation failed:");print(tostring(reason));colour(colors.white) end
+if not ok then colour(colors.red);print("");print(it("failed"));print(tostring(reason));colour(colors.white) end

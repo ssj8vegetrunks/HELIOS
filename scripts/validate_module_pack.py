@@ -19,6 +19,11 @@ def main() -> None:
     assert manifest["pack"].get("version"), "Missing Module Pack version"
     assert manifest.get("compatible_core_versions"), "Missing compatible Core versions"
     installer = (ROOT / "install.lua").read_text(encoding="utf-8")
+    assert 'installerLanguage = language' in installer, (
+        "Installer language selection must activate the installer translation catalogue"
+    )
+    for language_id in ("es_es", "fr_ca", "de_de"):
+        assert language_id in installer, f"Installer is missing its built-in {language_id} catalogue"
     version_match = re.search(r'^local VERSION = "([^"]+)"', installer, re.MULTILINE)
     assert version_match, "Could not read HELIOS Core version from install.lua"
     core_version = version_match.group(1)
