@@ -2,6 +2,12 @@ HELIOS_GUARDIAN_TEST = true
 fs = { exists = function() return false end }
 
 local governor = assert(dofile("draconic_guardian.lua"))
+assert(governor.lifecycleNow({sampleTime=123})==123,
+    "tests must be able to inject deterministic lifecycle time")
+HELIOS_GUARDIAN_TEST = false
+assert(governor.lifecycleNow({sampleTime=123})~=123,
+    "live lifecycle scheduling must ignore Draconic sampleTime metadata")
+HELIOS_GUARDIAN_TEST = true
 local missingGateOk, missingGateReason = governor.gate(nil, 1900000)
 assert(missingGateOk == false and missingGateReason == "flow gate unavailable",
     "detaching a flow gate must pause control instead of crashing Guardian")

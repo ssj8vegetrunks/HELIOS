@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.51b
+-- HELIOS Draconic Guardian v1.2.0-alpha.51c
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -47,7 +47,7 @@ local SAFETY_LOW_FIELD, SAFETY_HIGH_TEMP = 35, 7750
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.51b"
+local GUARDIAN_VERSION = "1.2.0-alpha.51c"
 local EFFICIENCY_THERMAL_STRIKES, EFFICIENCY_THERMAL_COOLDOWN = 3, 15*60
 local EFFICIENCY_THERMAL_TOLERANCES = {.25,.5,1,2}
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
@@ -627,8 +627,14 @@ local function thermalHoldRequired(c,temp)
   return c.thermalHold==true
 end
 local function lifecycleNow(r)
-  return tonumber(r and r.sampleTime) or
-    (os.epoch and os.epoch("utc")/1000 or os.clock())
+  -- Draconic's sampleTime is telemetry metadata, not a monotonic wall clock;
+  -- treating it as one makes fifteen-minute waits expire or rewind instantly.
+  -- Tests may inject deterministic sample times, but live scheduling always
+  -- uses the computer clock shared by adaptive and manual-efficiency timers.
+  if rawget(_G,"HELIOS_GUARDIAN_TEST") and tonumber(r and r.sampleTime) then
+    return tonumber(r.sampleTime)
+  end
+  return os.epoch and os.epoch("utc")/1000 or os.clock()
 end
 local function lifecycleTarget(c,r)
   local now=lifecycleNow(r)
@@ -1572,7 +1578,7 @@ local function drawComputer(t,d,c)
   line(19,"HELIOS link: "..(facilityConnected and "ONLINE" or (facilityNetwork and "WAITING" or "LOCAL ONLY")),facilityConnected and colors.lime or colors.gray)
 end
 if rawget(_G,"HELIOS_GUARDIAN_TEST") then
-  return {lifecycleTarget=lifecycleTarget,lifecycleFieldTarget=lifecycleFieldTarget,lifecycleCeiling=lifecycleCeiling,
+  return {lifecycleTarget=lifecycleTarget,lifecycleFieldTarget=lifecycleFieldTarget,lifecycleCeiling=lifecycleCeiling,lifecycleNow=lifecycleNow,
     lifecycleUnsafe=lifecycleUnsafe,thermalHoldRequired=thermalHoldRequired,emergencyFieldTarget=emergencyFieldTarget,
     beginRefuelMaintenance=beginRefuelMaintenance,resetAfterRefuel=resetAfterRefuel,
     enterAssisted=enterAssisted,setManualEfficiency=setManualEfficiency,manualEfficiencyTargets=manualEfficiencyTargets,
