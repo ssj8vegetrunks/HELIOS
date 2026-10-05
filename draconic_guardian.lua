@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.51e
+-- HELIOS Draconic Guardian v1.2.0-alpha.51f
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -47,7 +47,7 @@ local SAFETY_LOW_FIELD, SAFETY_HIGH_TEMP = 35, 7750
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.51e"
+local GUARDIAN_VERSION = "1.2.0-alpha.51f"
 local EFFICIENCY_THERMAL_STRIKES, EFFICIENCY_THERMAL_COOLDOWN = 3, 15*60
 local EFFICIENCY_THERMAL_TOLERANCES = {.25,.5,1,2}
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
@@ -636,6 +636,21 @@ local function lifecycleNow(r)
   end
   return os.epoch and os.epoch("utc")/1000 or os.clock()
 end
+local function revokeLifecycleBandProof(c,r)
+  c.lifecycleCeilings=type(c.lifecycleCeilings)=="table" and c.lifecycleCeilings or {}
+  c.currentCycleCeilings=type(c.currentCycleCeilings)=="table" and c.currentCycleCeilings or {}
+  local band,key=lifecycleBand(r)
+  c.currentCycleCeilings[key]=nil;c.lifecycleCeilings[key]=nil
+  local fallback=tonumber(c.rated) or 0
+  for prior=0,band-LIFECYCLE_BAND,LIFECYCLE_BAND do
+    fallback=math.max(fallback,tonumber(c.currentCycleCeilings[tostring(prior)]) or 0)
+    local profile=c.lifecycleCeilings[tostring(prior)]
+    fallback=math.max(fallback,tonumber(type(profile)=="table" and profile.export or profile) or 0)
+  end
+  c.lifecycleApplied=fallback;c.lifecycleSamples=0;c.lifecycleLastSampleAt=nil;c.lifecycleStartField=nil
+  c.lifecycleNextProbeAt=lifecycleNow(r)+LIFECYCLE_PROBE_INTERVAL
+  return fallback,key
+end
 local function lifecycleTarget(c,r)
   local now=lifecycleNow(r)
   local historical,key,band=lifecycleCeiling(c,r)
@@ -672,13 +687,7 @@ local function lifecycleTarget(c,r)
     -- crosses the rollback ceiling, that point was never safe: revoke the
     -- current fuel-band proof so MAX cannot repeatedly restore it.
     if temp>LIFECYCLE_ROLLBACK_TEMP then
-      c.currentCycleCeilings[key]=nil;c.lifecycleCeilings[key]=nil
-      proven=tonumber(c.rated) or 0
-      for prior=0,band-LIFECYCLE_BAND,LIFECYCLE_BAND do
-        proven=math.max(proven,tonumber(c.currentCycleCeilings[tostring(prior)]) or 0)
-        local profile=c.lifecycleCeilings[tostring(prior)]
-        proven=math.max(proven,tonumber(type(profile)=="table" and profile.export or profile) or 0)
-      end
+      proven=revokeLifecycleBandProof(c,r)
     end
     c.lifecycleApplied=proven;c.lifecycleSamples=0;c.lifecycleLastSampleAt=nil;c.lifecycleStartField=nil
     c.lifecycleNextProbeAt=now+LIFECYCLE_PROBE_INTERVAL
@@ -1119,12 +1128,16 @@ local function supervise(b,d,c)
     -- export, restore the proven containment input, and resume the accepted
     -- demand after the core falls back into the normal lifecycle envelope.
     if thermalHoldRequired(c,temp) then
+      -- Thermal hold intercepts the loop before lifecycleTarget runs. Revoke
+      -- the current band here too, or a delayed peak leaves the rejected MAX
+      -- proof on disk and restores it after every cooldown.
+      local fallback=revokeLifecycleBandProof(c,r)
       local recoveryInput=lifecycleFieldTarget(c,r,injectorCap)
       closeOutput();gate(b.input,recoveryInput)
       c.lifecycleApplied=tonumber(c.rated) or c.lifecycleApplied
       c.lifecycleSamples=0;c.lifecycleLastSampleAt=nil;c.lifecycleStartField=nil
       c.remoteApplied=0;c.remotePrimed=false
-      c.message="THERMAL GATE HOLD: reactor remains online; export closed, containment "..fmt(recoveryInput).." RF/t"
+      c.message="THERMAL GATE HOLD: bad band revoked; fallback "..fmt(fallback).." RF/t, containment "..fmt(recoveryInput).." RF/t"
       return
     end
     if live and (c.fieldRecovery or field<=FIELD_EMERGENCY) then
@@ -1601,6 +1614,7 @@ local function drawComputer(t,d,c)
 end
 if rawget(_G,"HELIOS_GUARDIAN_TEST") then
   return {lifecycleTarget=lifecycleTarget,lifecycleFieldTarget=lifecycleFieldTarget,lifecycleCeiling=lifecycleCeiling,lifecycleNow=lifecycleNow,
+    revokeLifecycleBandProof=revokeLifecycleBandProof,
     lifecycleUnsafe=lifecycleUnsafe,thermalHoldRequired=thermalHoldRequired,emergencyFieldTarget=emergencyFieldTarget,
     beginRefuelMaintenance=beginRefuelMaintenance,resetAfterRefuel=resetAfterRefuel,
     enterAssisted=enterAssisted,setManualEfficiency=setManualEfficiency,manualEfficiencyTargets=manualEfficiencyTargets,

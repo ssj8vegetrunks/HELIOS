@@ -313,6 +313,13 @@ controls = { rated = 1000000,
 target = governor.lifecycleTarget(controls, reactor(6, 60, 1400000, 8101, 100))
 assert(target == 1050000 and controls.currentCycleCeilings["5"] == nil and controls.lifecycleCeilings["5"] == nil,
     "a delayed thermal breach must revoke the bad saved band and restore the preceding proof")
+controls = { rated = 1000000,
+    lifecycleCeilings = { ["0"]={export=1050000}, ["5"]={export=1400000} },
+    currentCycleCeilings = { ["0"]=1050000, ["5"]=1400000 }, lifecycleApplied=1400000 }
+local fallback = governor.revokeLifecycleBandProof(controls, reactor(6, 60, 1400000, 8050, 200))
+assert(fallback == 1050000 and controls.currentCycleCeilings["5"] == nil and
+    controls.lifecycleCeilings["5"] == nil and controls.lifecycleNextProbeAt == 1100,
+    "thermal hold must revoke a saved bad band even when adaptive targeting is intercepted")
 
 -- Excess containment alone must never justify reducing injector power. A trim
 -- is permitted only once generation covers containment with margin while the
