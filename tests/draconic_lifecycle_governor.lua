@@ -293,17 +293,19 @@ assert(target == 1050000, "a new adaptive trial must not begin immediately")
 target = governor.lifecycleTarget(controls, reactor(10, 70, 1100000, nil, 1020))
 assert(target > 1050000, "the next adaptive trial may begin after fifteen minutes")
 
--- The lifecycle governor may use the 7,500-7,750 C efficiency band only when
--- containment is at least 40%; 7,750 C remains an unconditional ceiling.
+-- Above 7,800 C, adaptive testing pauses without treating normal thermal lag as
+-- a failed point. Crossing 8,100 C rolls back to the proven ceiling.
 controls = { rated = 1000000, lifecycleCeilings = { ["10"]={export=1050000} }, currentCycleCeilings = {}, lifecycleApplied = 1050000 }
 target = governor.lifecycleTarget(controls, reactor(10, 39, 1050000, 7600))
 assert(target == 1000000, "hot probing below 40% containment must roll back")
 controls = { rated = 1000000, lifecycleCeilings = { ["10"]={export=1050000} }, currentCycleCeilings = {}, lifecycleApplied = 1050000 }
-target = governor.lifecycleTarget(controls, reactor(10, 40, 1050000, 7600))
-assert(target == 1050000, "40% containment may use the conditional temperature leeway")
+target = governor.lifecycleTarget(controls, reactor(10, 60, 1050000, 7900, 100))
+assert(target == 1050000 and controls.lifecycleSamples == 0 and controls.lifecycleNextProbeAt == 1000,
+    "the thermal buffer must pause proof and schedule a full cooldown without rolling back")
 controls = { rated = 1000000, lifecycleCeilings = { ["10"]={export=1050000} }, currentCycleCeilings = {}, lifecycleApplied = 1050000 }
-target = governor.lifecycleTarget(controls, reactor(10, 60, 1050000, 7751))
-assert(target == 1000000, "adaptive probing must always roll back above 7,750 C")
+target = governor.lifecycleTarget(controls, reactor(10, 60, 1050000, 8101, 100))
+assert(target == 1000000 and controls.lifecycleNextProbeAt == 1000,
+    "adaptive probing must roll back and cool down above 8,100 C")
 
 -- Excess containment alone must never justify reducing injector power. A trim
 -- is permitted only once generation covers containment with margin while the
@@ -315,6 +317,10 @@ assert(controls.lifecycleFieldApplied == 1600000,
 for _ = 1, 150 do governor.lifecycleFieldTarget(controls, reactor(10, 95, 2000000), 1600000) end
 assert(controls.lifecycleFieldApplied == 1568000,
     "stable full containment with generation surplus should trim field input by two percent")
+controls.lifecycleFieldApplied = 1600000; controls.fieldTuneSamples=0; controls.fieldTuneStart=nil
+for _ = 1, 10 do governor.lifecycleFieldTarget(controls, reactor(10, 90, 1000000, 7900), 1600000) end
+assert(controls.lifecycleFieldApplied == 1568000,
+    "a hot automatic reactor above the 35% field target must promptly trim injector waste")
 
 -- Falling below the emergency band must request enough positive field flow to
 -- recover online; it must not remain pinned to an insufficient calibration

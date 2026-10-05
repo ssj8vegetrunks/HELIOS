@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.51c
+-- HELIOS Draconic Guardian v1.2.0-alpha.51d
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -28,7 +28,7 @@ local PRESET_RAMP_STEP = 50000
 local LIFECYCLE_BAND, LIFECYCLE_PROOF_SAMPLES = 5, 120
 local LIFECYCLE_SAMPLE_INTERVAL, LIFECYCLE_PROBE_INTERVAL = 1, 15*60
 local LIFECYCLE_FIELD_FLOOR, LIFECYCLE_PROBE_FIELD = 30, 35
-local LIFECYCLE_TEMP_LIMIT, LIFECYCLE_TEMP_LEEWAY = 7500, 7750
+local LIFECYCLE_TEMP_LIMIT, LIFECYCLE_PROBE_TEMP, LIFECYCLE_ROLLBACK_TEMP = 7500, 7800, 8100
 local LIFECYCLE_LEEWAY_FIELD, LIFECYCLE_FIELD_DRIFT = 40, .5
 local LIFECYCLE_STEP_RATIO, LIFECYCLE_MIN_STEP = 1.02, 50000
 local FIELD_TUNE_SAMPLES, FIELD_TUNE_RATIO = 150, .02
@@ -47,7 +47,7 @@ local SAFETY_LOW_FIELD, SAFETY_HIGH_TEMP = 35, 7750
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.51c"
+local GUARDIAN_VERSION = "1.2.0-alpha.51d"
 local EFFICIENCY_THERMAL_STRIKES, EFFICIENCY_THERMAL_COOLDOWN = 3, 15*60
 local EFFICIENCY_THERMAL_TOLERANCES = {.25,.5,1,2}
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
@@ -617,13 +617,13 @@ local function lifecycleCeiling(c,r)
 end
 local function lifecycleUnsafe(field,temp)
   field,temp=tonumber(field) or 0,tonumber(temp) or math.huge
-  return temp>LIFECYCLE_TEMP_LEEWAY or
+  return temp>LIFECYCLE_ROLLBACK_TEMP or
     (temp>LIFECYCLE_TEMP_LIMIT and field<LIFECYCLE_LEEWAY_FIELD)
 end
 local function thermalHoldRequired(c,temp)
   temp=tonumber(temp) or math.huge
-  if temp>MAX_TEMPERATURE then c.thermalHold=true end
-  if c.thermalHold and temp<=LIFECYCLE_TEMP_LIMIT then c.thermalHold=false end
+  if temp>LIFECYCLE_ROLLBACK_TEMP then c.thermalHold=true end
+  if c.thermalHold and temp<=LIFECYCLE_PROBE_TEMP then c.thermalHold=false end
   return c.thermalHold==true
 end
 local function lifecycleNow(r)
@@ -663,14 +663,19 @@ local function lifecycleTarget(c,r)
   local field=pct(r.fieldStrength,r.maxFieldStrength) or 0
   local temp=tonumber(r.temperature) or math.huge
   local generation=tonumber(r.generationRate) or 0
-  -- Above 7,500 C, probing is allowed only while containment remains strong.
-  -- 7,750 C is always the adaptive ceiling; the 8,000 C interlock remains the
-  -- final independent emergency boundary in supervise().
+  -- Never begin or advance an adaptive proof above 7,800 C. A candidate may
+  -- coast inside the 300 C measurement/thermal-lag buffer, but crossing 8,100 C
+  -- rolls it back and starts a fresh fifteen-minute cooldown.
   local temperatureUnsafe=lifecycleUnsafe(field,temp)
   if field<LIFECYCLE_FIELD_FLOOR or temperatureUnsafe then
     c.lifecycleApplied=proven;c.lifecycleSamples=0;c.lifecycleLastSampleAt=nil;c.lifecycleStartField=nil
     c.lifecycleNextProbeAt=now+LIFECYCLE_PROBE_INTERVAL
     return proven,"adaptive rollback to proven band ceiling"
+  end
+  if temp>LIFECYCLE_PROBE_TEMP then
+    c.lifecycleSamples=0;c.lifecycleLastSampleAt=nil;c.lifecycleStartField=nil
+    c.lifecycleNextProbeAt=math.max(tonumber(c.lifecycleNextProbeAt) or 0,now+LIFECYCLE_PROBE_INTERVAL)
+    return applied,"adaptive testing paused above 7800 C; retry in 15 min after cooling"
   end
   if applied<=proven then
     c.lifecycleNextProbeAt=tonumber(c.lifecycleNextProbeAt) or now+LIFECYCLE_PROBE_INTERVAL
@@ -716,12 +721,13 @@ local function lifecycleFieldTarget(c,r,baseline)
   if field<35 then
     applied=math.max(applied+LIFECYCLE_MIN_STEP,math.floor(applied*(1+FIELD_RECOVERY_RATIO)))
     c.fieldTuneSamples=0;c.fieldTuneStart=field
-  elseif c.fieldTuneSamples>=FIELD_TUNE_SAMPLES then
+  elseif c.fieldTuneSamples>=((tonumber(r.temperature) or 0)>LIFECYCLE_PROBE_TEMP and 10 or FIELD_TUNE_SAMPLES) then
     local drift=field-c.fieldTuneStart
     -- Reduce containment cost only after the reactor proves a genuine power
     -- surplus while containment is full and stable/rising. Never optimize the
     -- field merely because it has not fallen yet.
-    if field>=FIELD_TARGET and drift>=0 and generation>=applied*1.05 then
+    if field>LIFECYCLE_PROBE_FIELD and drift>=-.5 and
+        (generation>=applied*1.05 or (tonumber(r.temperature) or 0)>LIFECYCLE_PROBE_TEMP) then
       applied=math.max(MINIMUM_FIELD_INPUT,math.floor(applied*(1-FIELD_TUNE_RATIO)))
     elseif drift<-.5 then
       applied=math.max(applied+LIFECYCLE_MIN_STEP,math.floor(applied*(1+FIELD_RECOVERY_RATIO)))
@@ -1097,7 +1103,7 @@ local function supervise(b,d,c)
     -- export, restore the proven containment input, and resume the accepted
     -- demand after the core falls back into the normal lifecycle envelope.
     if thermalHoldRequired(c,temp) then
-      local recoveryInput=math.max(injectorCap,positive(c.lifecycleFieldApplied) or 0)
+      local recoveryInput=lifecycleFieldTarget(c,r,injectorCap)
       closeOutput();gate(b.input,recoveryInput)
       c.lifecycleApplied=tonumber(c.rated) or c.lifecycleApplied
       c.lifecycleSamples=0;c.lifecycleLastSampleAt=nil;c.lifecycleStartField=nil
