@@ -1,4 +1,4 @@
--- HELIOS Draconic Guardian v1.2.0-alpha.51d
+-- HELIOS Draconic Guardian v1.2.0-alpha.51e
 -- Dedicated local Draconic controller. Never install this on the normal
 -- HELIOS modem bus: it owns exactly one reactor component and its two gates.
 
@@ -47,7 +47,7 @@ local SAFETY_LOW_FIELD, SAFETY_HIGH_TEMP = 35, 7750
 local SHUTDOWN_FIELD_EMERGENCY, SHUTDOWN_FIELD_TARGET = 50, 90
 local MANUAL_GATE_FINE_STEP, MANUAL_GATE_SMALL_STEP = 1000, 10000
 local MANUAL_GATE_STEP, MANUAL_GATE_LARGE_STEP = 100000, 1000000
-local GUARDIAN_VERSION = "1.2.0-alpha.51d"
+local GUARDIAN_VERSION = "1.2.0-alpha.51e"
 local EFFICIENCY_THERMAL_STRIKES, EFFICIENCY_THERMAL_COOLDOWN = 3, 15*60
 local EFFICIENCY_THERMAL_TOLERANCES = {.25,.5,1,2}
 local PROFILER_REQUEST_CHANNEL, PROFILER_TELEMETRY_CHANNEL = 43120, 43121
@@ -668,6 +668,18 @@ local function lifecycleTarget(c,r)
   -- rolls it back and starts a fresh fifteen-minute cooldown.
   local temperatureUnsafe=lifecycleUnsafe(field,temp)
   if field<LIFECYCLE_FIELD_FLOOR or temperatureUnsafe then
+    -- A delayed thermal peak can arrive after a trial's proof window. Once it
+    -- crosses the rollback ceiling, that point was never safe: revoke the
+    -- current fuel-band proof so MAX cannot repeatedly restore it.
+    if temp>LIFECYCLE_ROLLBACK_TEMP then
+      c.currentCycleCeilings[key]=nil;c.lifecycleCeilings[key]=nil
+      proven=tonumber(c.rated) or 0
+      for prior=0,band-LIFECYCLE_BAND,LIFECYCLE_BAND do
+        proven=math.max(proven,tonumber(c.currentCycleCeilings[tostring(prior)]) or 0)
+        local profile=c.lifecycleCeilings[tostring(prior)]
+        proven=math.max(proven,tonumber(type(profile)=="table" and profile.export or profile) or 0)
+      end
+    end
     c.lifecycleApplied=proven;c.lifecycleSamples=0;c.lifecycleLastSampleAt=nil;c.lifecycleStartField=nil
     c.lifecycleNextProbeAt=now+LIFECYCLE_PROBE_INTERVAL
     return proven,"adaptive rollback to proven band ceiling"
@@ -721,15 +733,19 @@ local function lifecycleFieldTarget(c,r,baseline)
   if field<35 then
     applied=math.max(applied+LIFECYCLE_MIN_STEP,math.floor(applied*(1+FIELD_RECOVERY_RATIO)))
     c.fieldTuneSamples=0;c.fieldTuneStart=field
-  elseif c.fieldTuneSamples>=((tonumber(r.temperature) or 0)>LIFECYCLE_PROBE_TEMP and 10 or FIELD_TUNE_SAMPLES) then
+  elseif c.fieldTuneSamples>=((tonumber(r.temperature) or 0)>LIFECYCLE_PROBE_TEMP and 5 or FIELD_TUNE_SAMPLES) then
     local drift=field-c.fieldTuneStart
+    local hot=(tonumber(r.temperature) or 0)>LIFECYCLE_PROBE_TEMP
     -- Reduce containment cost only after the reactor proves a genuine power
     -- surplus while containment is full and stable/rising. Never optimize the
     -- field merely because it has not fallen yet.
-    if field>LIFECYCLE_PROBE_FIELD and drift>=-.5 and
-        (generation>=applied*1.05 or (tonumber(r.temperature) or 0)>LIFECYCLE_PROBE_TEMP) then
-      applied=math.max(MINIMUM_FIELD_INPUT,math.floor(applied*(1-FIELD_TUNE_RATIO)))
-    elseif drift<-.5 then
+    -- During a thermal hold, however, a falling field that is still above the
+    -- 35% target is the intended response; do not undo the trim until the
+    -- containment floor is actually reached.
+    if field>LIFECYCLE_PROBE_FIELD and (hot or (drift>=-.5 and generation>=applied*1.05)) then
+      local trim=hot and .05 or FIELD_TUNE_RATIO
+      applied=math.max(MINIMUM_FIELD_INPUT,math.floor(applied*(1-trim)))
+    elseif drift<-.5 and not hot then
       applied=math.max(applied+LIFECYCLE_MIN_STEP,math.floor(applied*(1+FIELD_RECOVERY_RATIO)))
     end
     c.fieldTuneSamples=0;c.fieldTuneStart=field

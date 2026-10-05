@@ -306,6 +306,13 @@ controls = { rated = 1000000, lifecycleCeilings = { ["10"]={export=1050000} }, c
 target = governor.lifecycleTarget(controls, reactor(10, 60, 1050000, 8101, 100))
 assert(target == 1000000 and controls.lifecycleNextProbeAt == 1000,
     "adaptive probing must roll back and cool down above 8,100 C")
+controls = { rated = 1000000,
+    lifecycleCeilings = { ["0"]={export=1050000}, ["5"]={export=1400000} },
+    currentCycleCeilings = { ["0"]=1050000, ["5"]=1400000 },
+    lifecycleBandKey="5", lifecycleApplied=1400000 }
+target = governor.lifecycleTarget(controls, reactor(6, 60, 1400000, 8101, 100))
+assert(target == 1050000 and controls.currentCycleCeilings["5"] == nil and controls.lifecycleCeilings["5"] == nil,
+    "a delayed thermal breach must revoke the bad saved band and restore the preceding proof")
 
 -- Excess containment alone must never justify reducing injector power. A trim
 -- is permitted only once generation covers containment with margin while the
@@ -318,9 +325,13 @@ for _ = 1, 150 do governor.lifecycleFieldTarget(controls, reactor(10, 95, 200000
 assert(controls.lifecycleFieldApplied == 1568000,
     "stable full containment with generation surplus should trim field input by two percent")
 controls.lifecycleFieldApplied = 1600000; controls.fieldTuneSamples=0; controls.fieldTuneStart=nil
-for _ = 1, 10 do governor.lifecycleFieldTarget(controls, reactor(10, 90, 1000000, 7900), 1600000) end
-assert(controls.lifecycleFieldApplied == 1568000,
+for _ = 1, 5 do governor.lifecycleFieldTarget(controls, reactor(10, 90, 1000000, 7900), 1600000) end
+assert(controls.lifecycleFieldApplied == 1520000,
     "a hot automatic reactor above the 35% field target must promptly trim injector waste")
+controls.lifecycleFieldApplied = 1600000; controls.fieldTuneSamples=0; controls.fieldTuneStart=nil
+for sample = 1, 5 do governor.lifecycleFieldTarget(controls, reactor(10, 95-sample, 1000000, 7900), 1600000) end
+assert(controls.lifecycleFieldApplied == 1520000,
+    "falling containment above 35% during a thermal hold must not restore injector waste")
 
 -- Falling below the emergency band must request enough positive field flow to
 -- recover online; it must not remain pinned to an insufficient calibration
